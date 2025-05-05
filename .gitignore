@@ -1,0 +1,7 @@
+.vscode/
+.vscode/*
+Makefile.in
+Makefile
+libcscore.la
+.libs/
+.deps/
