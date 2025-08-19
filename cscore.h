@@ -16,8 +16,11 @@
 #include <sst/core/link.h>
 #include <iostream>
 #include <fstream>
+#include <forward_list>
 
-#include <inc/trace_instruction.h>
+#include <trace_instruction.h>
+#include <channel.h>
+#include <cache.h>
 
 namespace SST {
     namespace csimCore {
@@ -95,6 +98,16 @@ namespace SST {
         //champsim::csim_sst csst;
 
         input_instr tmp_instr;
+        //champsim::channel tmp_chan;
+        std::vector<champsim::channel> channels={
+        			champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
+					champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
+					champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 0},
+					champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 0}
+                };
+        //CACHE* tmp_cache;
+        std::vector<CACHE> caches;
+        //std::forward_list<CACHE> caches;
     
         bool send_NW_packet();
         bool send_CXL_req();

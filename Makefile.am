@@ -3,6 +3,10 @@
 #
 
 AM_CPPFLAGS += \
+	-I$(srcdir)/inc \
+	-I$(srcdir)/inc/util \
+	-I$(srcdir)/inc/msl \
+	-I$(srcdir)/vcpkg/installed/x64-linux/include/ \
 	$(MPI_CPPFLAGS)
 
 compdir = $(pkglibdir)
@@ -11,7 +15,21 @@ libcscore_la_SOURCES = \
 	cscore.h \
 	cscore.cc \
 	inc/trace_instruction.h \
-	inc/instruction.h
+	inc/instruction.h \
+	inc/champsim.h \
+	inc/channel.h \
+	inc/cache_builder.h \
+	inc/cache.h \
+	src/address.cc \
+	src/bandwidth.cc \
+	src/cache_stats.cc \
+	src/cache.cc \
+	src/channel.cc \
+	src/chrono.cc \
+	src/extent.cc \
+	src/modules.cc \
+	src/operable.cc
+	
 
 EXTRA_DIST = \
     README

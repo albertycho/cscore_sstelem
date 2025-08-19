@@ -5,3 +5,4 @@ Makefile
 libcscore.la
 .libs/
 .deps/
+src/*.lo

@@ -27,10 +27,15 @@
 #include "util/ratio.h"
 
 extern const std::size_t NUM_CPUS;
-extern const unsigned BLOCK_SIZE;
-extern const unsigned PAGE_SIZE;
-extern const unsigned LOG2_BLOCK_SIZE;
-extern const unsigned LOG2_PAGE_SIZE;
+//extern const unsigned BLOCK_SIZE;
+//extern const unsigned PAGE_SIZE;
+//extern const unsigned LOG2_BLOCK_SIZE;
+//extern const unsigned LOG2_PAGE_SIZE;
+
+#define BLOCK_SIZE 64
+#define LOG2_BLOCK_SIZE 6
+#define PAGE_SIZE 4906
+#define LOG2_PAGE_SIZE 12
 
 namespace champsim
 {
