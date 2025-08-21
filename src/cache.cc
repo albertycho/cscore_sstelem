@@ -431,7 +431,7 @@ long CACHE::operate()
     ul->check_collision();
   }
 
-  std::cout<<"CACHE::operate - lower level check (line 433)"<<std::endl;
+  std::cout<<"CACHE::operate ("<<NAME << ") - lower level check (line 433)"<<std::endl;
   // Finish returns  
   std::for_each(std::cbegin(lower_level->returned), std::cend(lower_level->returned), [this](const auto& pkt) { this->finish_packet(pkt); });
   std::cout<<"CACHE::operate - no lower level? (line 439)"<<std::endl;

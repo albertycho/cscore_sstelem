@@ -6,3 +6,4 @@ libcscore.la
 .libs/
 .deps/
 src/*.lo
+*.lo

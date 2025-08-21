@@ -35,18 +35,10 @@ namespace SST {
 
 			tmp_instr.msgSize=0;
 
-
-			//std::vector<champsim::channel> channels;
-			// channels={champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-			// 		champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-			// 		champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-			// 		champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1}};
-
-
 			champsim::cache_builder builder;
 			builder.name("L1D")
-			.upper_levels({{&channels.at(2), &channels.at(3)}}) //TODO: match to correct channel
-			.lower_level(&channels.at(0)) //TODO: match to correct channel
+			.upper_levels({{&cpu0_PTW_to_cpu0_L1D_queues, &cpu0_to_cpu0_L1D_queues}}) //TODO: match to correct channel
+			.lower_level(&cpu0_L1D_to_cpu0_L2C_queues) //TODO: match to correct channel
 			.sets(64)
 			.ways(12)
 			.pq_size(8)
@@ -58,7 +50,7 @@ namespace SST {
 			.prefetch_activate(access_type::LOAD, access_type::PREFETCH)
 			.replacement<class lru>()
 			.prefetcher<class no>()
-			.lower_translate(&channels.at(1)) //TODO: match to correct channel
+			.lower_translate(&cpu0_L1D_to_cpu0_DTLB_queues) //TODO: match to correct channel
 
 			.clock_period(champsim::chrono::picoseconds{500})
 			.reset_prefetch_as_load()
@@ -72,7 +64,7 @@ namespace SST {
 			std::cout<<"builder.m_ll: "<<builder.m_ll<<std::endl;
 			std::cout<<"builder.m_uls[0]: "<<builder.m_uls[0]<<std::endl;
 			std::cout<<"builder.m_latency: "<<*(builder.m_latency)<<std::endl;
-			std::cout<<"builder.clock_period: "<<*(builder.m_clock_period.count())<<std::endl;
+			//std::cout<<"builder.clock_period: "<<*(builder.m_clock_period.count())<<std::endl;
 			
 
 			std::cout<<"hello before cache init"<<std::endl;
@@ -82,8 +74,8 @@ namespace SST {
 			std::cout<<"mshr_size="<<my_mshr_size<<std::endl;
 
 			uint64_t lower_level_ptr_addr = (uint64_t) (caches[0].lower_level);
-			uint64_t channel_0_ptr_addr = (uint64_t) (&(channels[0])); 
-			std::cout<<"in init: lower_level_addr: "<<lower_level_ptr_addr<<", channel[0]_addr: "<<channel_0_ptr_addr<<std::endl;
+			uint64_t channel_0_ptr_addr = (uint64_t) (&cpu0_L1D_to_cpu0_L2C_queues); 
+			std::cout<<"in init: lower_level_addr: "<<lower_level_ptr_addr<<", cpu0_L1D_to_cpu0_L2C_queues_addr: "<<channel_0_ptr_addr<<std::endl;
 
 			// // for forwardlist
 			// auto it = caches.before_begin();
@@ -100,18 +92,15 @@ namespace SST {
 		
 		bool csimCore::champsim_tick(Cycle_t){
 			tmp_instr.msgSize++;
-			std::cout<<"channels_size: "<<channels.size()<<", rq_size: "<<channels[0].rq_size()<<std::endl;
+			std::cout<<"rq_size: "<<cpu0_L1D_to_cpu0_L2C_queues.rq_size()<<std::endl;
 			int upper_level_rq_size = caches[0].upper_levels[0]->rq_size();
 			std::cout<<"upper_level_rq_size: "<<upper_level_rq_size<<std::endl;
 			uint64_t lower_level_ptr_addr = (uint64_t) (caches[0].lower_level); 
 			uint64_t lower_translate_ptr_addr = (uint64_t) (caches[0].lower_translate); 
 			uint64_t upper_level_ptr_addr = (uint64_t) (caches[0].upper_levels[0]); 
-			uint64_t channel_0_ptr_addr = (uint64_t) (&(channels[0])); 
-			uint64_t channel_2_ptr_addr = (uint64_t) (&(channels[2])); 
-			uint64_t channel_1_ptr_addr = (uint64_t) (&(channels[1])); 
-			std::cout<<"lower_level_addr: "<<lower_level_ptr_addr<<", channel[0]_addr: "<<channel_0_ptr_addr<<std::endl;
-			std::cout<<"upper_level_addr: "<<upper_level_ptr_addr<<", channel[2]_addr: "<<channel_2_ptr_addr<<std::endl;
-			std::cout<<"lower_translate_addr: "<<lower_translate_ptr_addr<<", channel[1]_addr: "<<channel_1_ptr_addr<<std::endl;
+			std::cout<<"lower_level_addr: "<<lower_level_ptr_addr<<", cpu0_L1D_to_cpu0_L2C_queues_addr: "<<(uint64_t) (&cpu0_L1D_to_cpu0_L2C_queues)<<std::endl;
+			std::cout<<"upper_level_addr: "<<upper_level_ptr_addr<<", cpu0_PTW_to_cpu0_L1D_queues_addr: "<<(uint64_t) (&cpu0_PTW_to_cpu0_L1D_queues)<<std::endl;
+			std::cout<<"lower_translate_addr: "<<lower_translate_ptr_addr<<", cpu0_L1D_to_cpu0_DTLB_queues_addr: "<<(uint64_t) (&cpu0_L1D_to_cpu0_DTLB_queues)<<std::endl;
 			int lower_level_rq_size = caches[0].lower_level->rq_size();
 			std::cout<<"lower_level_rq_size: "<<lower_level_rq_size<<std::endl;
 			//int chan_size=100;
@@ -124,7 +113,7 @@ namespace SST {
 				auto my_mshr_size = caches[0].get_mshr_size();
 				auto my_mshr_occ = caches[0].get_mshr_occupancy();
 				//std::cout<<"mshr_size="<<my_mshr_size<<std::endl;
-				std::cout<<"champsim_tick, msgSize: "<<tmp_instr.msgSize<<", mshr: "<<my_mshr_occ<<"/"<<my_mshr_size <<", channel_size: "<<channels.size()<<std::endl;
+				std::cout<<"champsim_tick, msgSize: "<<tmp_instr.msgSize<<", mshr: "<<my_mshr_occ<<"/"<<my_mshr_size<<std::endl;
 			}
 			return false;
 		}

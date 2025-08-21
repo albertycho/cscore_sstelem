@@ -21,6 +21,10 @@
 #include <trace_instruction.h>
 #include <channel.h>
 #include <cache.h>
+#include <ooo_cpu.h>
+//#include <environment.h>
+//#include "defaults.hpp"
+//#include "vmem.h"
 
 namespace SST {
     namespace csimCore {
@@ -99,12 +103,24 @@ namespace SST {
 
         input_instr tmp_instr;
         //champsim::channel tmp_chan;
-        std::vector<champsim::channel> channels={
-        			champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-					champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-					champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 0},
-					champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 0}
-                };
+        // std::vector<champsim::channel> channels={
+        // 			champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
+		// 			champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
+		// 			champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 0},
+		// 			champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 0}
+        //         };
+
+        champsim::channel cpu0_STLB_to_cpu0_PTW_queues{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0};
+        champsim::channel cpu0_DTLB_to_cpu0_STLB_queues{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0};
+        champsim::channel cpu0_ITLB_to_cpu0_STLB_queues{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0};
+        champsim::channel cpu0_L2C_to_cpu0_STLB_queues{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0};
+        champsim::channel cpu0_L1D_to_cpu0_L2C_queues{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0};
+        champsim::channel cpu0_L1I_to_cpu0_L2C_queues{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0};
+        champsim::channel cpu0_to_cpu0_L1I_queues{64, 32, 64, champsim::data::bits{champsim::lg2(64)}, 1};
+        champsim::channel cpu0_PTW_to_cpu0_L1D_queues{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1};
+        champsim::channel cpu0_to_cpu0_L1D_queues{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1};
+        champsim::channel cpu0_L1I_to_cpu0_ITLB_queues{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1};
+        champsim::channel cpu0_L1D_to_cpu0_DTLB_queues{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1};
         //CACHE* tmp_cache;
         std::vector<CACHE> caches;
         //std::forward_list<CACHE> caches;

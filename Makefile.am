@@ -20,6 +20,7 @@ libcscore_la_SOURCES = \
 	inc/channel.h \
 	inc/cache_builder.h \
 	inc/cache.h \
+	inc/*
 	src/address.cc \
 	src/bandwidth.cc \
 	src/cache_stats.cc \
@@ -28,7 +29,8 @@ libcscore_la_SOURCES = \
 	src/chrono.cc \
 	src/extent.cc \
 	src/modules.cc \
-	src/operable.cc
+	src/operable.cc \
+	src/*
 	
 
 EXTRA_DIST = \
