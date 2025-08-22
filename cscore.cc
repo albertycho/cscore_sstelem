@@ -22,6 +22,8 @@ namespace SST {
 	
 		csimCore::csimCore(ComponentId_t id, Params& params) : Component(id)
 		{
+			/* This function sets up and builds core (and cache and bp and etc) */
+
 			clock_frequency_str = params.find<std::string>("clock", "2GHz");
 
 			trace_name = params.find<std::string>("trace_name", "example_tracename.xz");
@@ -84,6 +86,49 @@ namespace SST {
 
 			// auto my_mshr_size = caches.front().get_mshr_size();
 			// std::cout<<"mshr_size="<<my_mshr_size<<std::endl;
+
+
+			//std::forward_list<O3_CPU> cores {
+//build<O3_CPU>(
+  //champsim::core_builder{ champsim::defaults::default_core }
+
+
+  champsim::core_builder corebuilder;
+    corebuilder.ifetch_buffer_size(64)
+    .decode_buffer_size(32)
+    .dispatch_buffer_size(32)
+    .register_file_size(128)
+    .rob_size(352)
+    .lq_size(128)
+    .sq_size(72)
+    .fetch_width(champsim::bandwidth::maximum_type{6})
+    .decode_width(champsim::bandwidth::maximum_type{6})
+    .dispatch_width(champsim::bandwidth::maximum_type{6})
+    .schedule_width(champsim::bandwidth::maximum_type{128})
+    .execute_width(champsim::bandwidth::maximum_type{4})
+    .lq_width(champsim::bandwidth::maximum_type{2})
+    .sq_width(champsim::bandwidth::maximum_type{2})
+    .retire_width(champsim::bandwidth::maximum_type{5})
+    .mispredict_penalty(1)
+    .decode_latency(1)
+    .dispatch_latency(1)
+    .schedule_latency(0)
+    .execute_latency(0)
+    .l1i(&(*std::next(std::begin(caches), 4)))
+    .l1i_bandwidth((*std::next(std::begin(caches), 4)).MAX_TAG)
+    .fetch_queues(&channels.at(11))
+    .l1d_bandwidth((*std::next(std::begin(caches), 3)).MAX_TAG)
+    .data_queues(&channels.at(12))
+    .branch_predictor<class bimodal>()
+    .btb<class basic_btb>()
+    .index(0)
+    .clock_period(champsim::chrono::picoseconds{500})
+      .dib_set(32)
+      .dib_way(8)
+      .dib_window(16);
+
+	O3_CPU o3_core(corebuilder);
+	std::cout<<"o3_core rob_size: "<<o3_core.ROB_SIZE<<std::endl;
 
 			
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,

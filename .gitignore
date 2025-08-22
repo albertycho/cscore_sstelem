@@ -7,3 +7,4 @@ libcscore.la
 .deps/
 src/*.lo
 *.lo
+*/*lo
