@@ -6,7 +6,7 @@ AM_CPPFLAGS += \
 	-I$(srcdir)/inc \
 	-I$(srcdir)/inc/util \
 	-I$(srcdir)/inc/msl \
-	-I$(srcdir)/vcpkg/installed/x64-linux/include/ \
+	-I$(srcdir)/vcpkg_installed/x64-linux/include \
 	$(MPI_CPPFLAGS)
 
 compdir = $(pkglibdir)
@@ -121,7 +121,7 @@ libcscore_la_SOURCES = \
     src/dram_controller.cc \
     src/dram_stats.cc \
     src/extent.cc \
-    src/json_printer.cc \
+	src/json_printer.cc \
     src/modules.cc \
     src/ooo_cpu.cc \
     src/operable.cc \

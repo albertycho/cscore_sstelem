@@ -8,3 +8,4 @@ libcscore.la
 src/*.lo
 *.lo
 */*lo
+vcpkg_installed/
