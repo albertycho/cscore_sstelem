@@ -44,6 +44,20 @@
 #include "register_allocator.h"
 #include "util/lru_table.h"
 #include "util/to_underlying.h"
+#include "SST_CS_packets.h"
+#include <fstream>
+
+
+enum class XCHG_MPI_enum : unsigned {
+    NOT_XCHG = 0,
+    XCHG_MPI_Send,
+    XCHG_MPI_Recv,
+    XCHG_MPI_ISend,
+    XCHG_MPI_IRecv,
+    XCHG_MPI_Waitall,
+    NUM_TYPES
+};
+
 
 class CACHE;
 class CacheBus
@@ -97,6 +111,8 @@ public:
   long long num_retired = 0;
 
   bool show_heartbeat = true;
+  //std::ofstream heartbeat_file;
+  std::shared_ptr<std::ofstream> heartbeat_file;
 
   using stats_type = cpu_stats;
 
@@ -119,6 +135,13 @@ public:
 
   std::vector<std::optional<LSQ_ENTRY>> LQ;
   std::deque<LSQ_ENTRY> SQ;
+
+  std::vector<NW_packet_t> egress_buffer;
+  std::vector<NW_packet_t> ingress_buffer;
+  std::vector<NW_packet_t> iRecv_buffer;
+
+  bool egress_check;
+  bool wait_for_ingress;
 
   // Constants
   const std::size_t IFETCH_BUFFER_SIZE, DISPATCH_BUFFER_SIZE, DECODE_BUFFER_SIZE, REGISTER_FILE_SIZE, ROB_SIZE, SQ_SIZE, DIB_HIT_BUFFER_SIZE;

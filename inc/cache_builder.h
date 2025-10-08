@@ -329,7 +329,7 @@ auto champsim::cache_builder<P, R>::name(std::string name_) -> self_type&
 template <typename P, typename R>
 auto champsim::cache_builder<P, R>::clock_period(champsim::chrono::picoseconds clock_period_) -> self_type&
 {
-  std::cout<<"hello in cache_builder - in clock_period, m_ll_="<<m_ll<<std::endl;
+  //std::cout<<"hello in cache_builder - in clock_period, m_ll_="<<m_ll<<std::endl;
   m_clock_period = clock_period_;
   return *this;
 }
@@ -483,7 +483,7 @@ auto champsim::cache_builder<P, R>::set_virtual_prefetch() -> self_type&
 template <typename P, typename R>
 auto champsim::cache_builder<P, R>::reset_virtual_prefetch() -> self_type&
 {
-  std::cout<<"cache_builder - reset_virtual_prefetch, m_ll_="<<m_ll<<std::endl;
+  //std::cout<<"cache_builder - reset_virtual_prefetch, m_ll_="<<m_ll<<std::endl;
   m_va_pref = false;
   return *this;
 }
@@ -506,7 +506,7 @@ auto champsim::cache_builder<P, R>::upper_levels(std::vector<champsim::channel*>
 template <typename P, typename R>
 auto champsim::cache_builder<P, R>::lower_level(champsim::channel* ll_) -> self_type&
 {
-  std::cout<<"hello in cache_builder - lower_level, ll_="<<ll_<<std::endl;
+  //std::cout<<"hello in cache_builder - lower_level, ll_="<<ll_<<std::endl;
   m_ll = ll_;
   return *this;
 }

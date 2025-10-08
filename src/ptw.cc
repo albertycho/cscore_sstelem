@@ -119,8 +119,11 @@ auto PageTableWalker::step_translation(const mshr_type& source) -> std::optional
   return std::nullopt;
 }
 
+#include <iostream>
+
 long PageTableWalker::operate()
 {
+  //std::cout <<"PTW operates(), current_time: "<< current_time.time_since_epoch().count()<<std::endl;
   long progress{0};
 
   auto is_ready = [time = current_time](const auto& pkt) {

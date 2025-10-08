@@ -80,6 +80,8 @@ class PageTableWalker : public champsim::operable
 
   void finish_packet(const response_type& packet);
 
+
+
 public:
   const std::string NAME;
   const uint32_t MSHR_SIZE;
@@ -90,6 +92,10 @@ public:
   VirtualMemory* vmem;
 
   const champsim::address CR3_addr;
+
+  void set_current_clock(const champsim::chrono::clock& clock){
+    current_time=clock.now();
+  }
 
   explicit PageTableWalker(champsim::ptw_builder builder);
 

@@ -118,4 +118,4 @@ libcscore_la_SOURCES = \
     src/register_allocator.cc \
     src/SST_CS_packets.cc \
     src/tracereader.cc \
-    src/vmem.cc \
+    src/vmem.cc 

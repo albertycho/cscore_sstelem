@@ -33,6 +33,7 @@ public:
   plain_printer(std::ostream& str) : stream(str) {}
   void print(phase_stats& stats);
   void print(std::vector<phase_stats>& stats);
+  void print_just_cache_stats(CACHE::stats_type stat);
 
   static std::vector<std::string> format(O3_CPU::stats_type stats);
   static std::vector<std::string> format(CACHE::stats_type stats);
@@ -47,5 +48,6 @@ class json_printer
 public:
   json_printer(std::ostream& str) : stream(str) {}
   void print(std::vector<phase_stats>& stats);
+  void print_just_cache_stats(CACHE::stats_type stat);
 };
 } // namespace champsim

@@ -329,7 +329,7 @@ public:
         prefetch_as_load(b.m_pref_load), match_offset_bits(b.m_wq_full_addr), virtual_prefetch(b.m_va_pref), pref_activate_mask(b.m_pref_act_mask),
         pref_module_pimpl(std::make_unique<prefetcher_module_model<Ps...>>(this)), repl_module_pimpl(std::make_unique<replacement_module_model<Rs...>>(this))
   {
-    std::cout<<"in CACHE.h, b.m_ll="<<b.m_ll<<std::endl;
+    //std::cout<<"in CACHE.h, b.m_ll="<<b.m_ll<<std::endl;
   }
 
   CACHE(const CACHE&) = delete;

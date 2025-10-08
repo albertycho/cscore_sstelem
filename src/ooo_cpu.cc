@@ -32,7 +32,8 @@
 
 std::chrono::seconds elapsed_time();
 
-constexpr long long STAT_PRINTING_PERIOD = 10000000;
+//constexpr long long STAT_PRINTING_PERIOD = 10000000;
+constexpr long long STAT_PRINTING_PERIOD = 1000;
 
 long O3_CPU::operate()
 {
@@ -63,6 +64,23 @@ long O3_CPU::operate()
 
     fmt::print("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4g} cumulative IPC: {:.4g} (Simulation time: {:%H hr %M min %S sec})\n", cpu,
                num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle, elapsed_time());
+    if (heartbeat_file->is_open()) 
+    {
+      fmt::print(*heartbeat_file, "Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4g} cumulative IPC: {:.4g} (Simulation time: {:%H hr %M min %S sec})\n",
+           cpu, num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle, elapsed_time());
+    }          
+
+    // auto sim_time = elapsed_time();
+    // auto hours = std::chrono::duration_cast<std::chrono::hours>(sim_time).count();
+    // auto minutes = std::chrono::duration_cast<std::chrono::minutes>(sim_time).count() % 60;
+    // auto seconds = sim_time.count() % 60;
+    // // << "(Simulation time: " << hours << " hr " << minutes << " min " << seconds << " sec)" << std::endl;
+    // std::cout<<"Heartbeat CPU "<<cpu<<" instructions: "<<num_retired<<" cycles: "<<current_time.time_since_epoch() / clock_period \
+    //  <<" heartbeat IPC: "<<(heartbeat_instr / heartbeat_cycle)<<" cumulative IPC: "<<(phase_instr / phase_cycle)\
+    //   << "(Simulation time: " << hours << " hr " << minutes << " min " << seconds << " sec)"<<std::endl;
+    
+      //fmt::print("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4g} cumulative IPC: {:.4g} \n", cpu,
+    //           num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle);
 
     last_heartbeat_instr = num_retired;
     last_heartbeat_time = current_time;
@@ -498,6 +516,70 @@ void O3_CPU::do_execution(ooo_model_instr& instr)
   for (auto& sq_entry : SQ) {
     if (sq_entry.instr_id == instr.instr_id) {
       sq_entry.ready_time = current_time + (warmup ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+    }
+  }
+
+  // Handle isMsg instructions
+  if(instr.isMsg!=0){
+    switch (static_cast<XCHG_MPI_enum>(instr.isMsg)) 
+    {
+      case XCHG_MPI_enum::XCHG_MPI_Send:
+      {
+        // fmt::print("do_execution SEND CurrentCPU{}: {} ==> {}\n", cpu, cpu, rob_entry.msgNode);
+        //rob_entry.event_cycle = current_cycle + (warmup ? 0 : EXEC_LATENCY);
+
+        // Create the packet to be inserted        
+        NW_Packet n_packet
+        {
+          cpu,
+          instr.msgNode,
+          instr.instr_id,
+          instr.msgSize,
+          //0xC0ffee,
+          0,//current_cycle,
+          0//current_cycle
+        };
+
+        // Write the packet into the queue
+        // queue_access ret_writePacket = message_manager->writePacket(&packet);
+        // if (ret_writePacket == queue_access::OP_FAILURE)
+        // {
+        //   *outfs << "writePacket operation failure" << std::endl;
+        // }
+        egress_buffer.push_back(n_packet);
+        egress_check=true;
+
+        break;
+      }
+      case XCHG_MPI_enum::XCHG_MPI_Recv:
+      {
+        // fmt::print("do_execution RECV CurrentCPU{}: {} ==> {}\n", cpu, rob_entry.msgNode, cpu);
+        //rob_entry.event_cycle = current_cycle + (warmup ? 0 : NETWORK_DELAY + EXEC_LATENCY + RECEIVER_DELAY);
+        //rob_entry.event_cycle = current_cycle + (warmup ? 0 : EXEC_LATENCY);
+
+        break;
+      }
+      case XCHG_MPI_enum::XCHG_MPI_IRecv:
+      {
+        // fmt::print("do_execution RECV CurrentCPU{}: {} ==> {}\n", cpu, rob_entry.msgNode, cpu);
+        //rob_entry.event_cycle = current_cycle + (warmup ? 0 : NETWORK_DELAY + EXEC_LATENCY + RECEIVER_DELAY);
+        //rob_entry.event_cycle = current_cycle + (warmup ? 0 : EXEC_LATENCY);
+
+        break;
+      }
+      case XCHG_MPI_enum::XCHG_MPI_Waitall:
+      {
+        // fmt::print("do_execution RECV CurrentCPU{}: {} ==> {}\n", cpu, rob_entry.msgNode, cpu);
+        //rob_entry.event_cycle = current_cycle + (warmup ? 0 : NETWORK_DELAY + EXEC_LATENCY + RECEIVER_DELAY);
+        //rob_entry.event_cycle = current_cycle + (warmup ? 0 : EXEC_LATENCY);
+
+        break;
+      }
+
+      default:
+      {
+        break;
+      }
     }
   }
 

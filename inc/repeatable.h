@@ -33,18 +33,16 @@ struct repeatable {
   T intern_{std::apply([](auto... x) { return T{x...}; }, args_)};
   explicit repeatable(Args... args) : args_(args...) {}
 
-  auto operator()()
-  {
-    // Reopen trace if we've reached the end of the file
+  bool reached_eof = false;
+  auto operator()() {
     if (intern_.eof()) {
+      reached_eof = true;
       fmt::print("*** Reached end of trace: {}\n", args_);
       intern_ = T{std::apply([](auto... x) { return T{x...}; }, args_)};
     }
-
     return intern_();
   }
-
-  [[nodiscard]] bool eof() const { return false; }
+  [[nodiscard]] bool eof() const { return reached_eof; }
 };
 } // namespace champsim
 

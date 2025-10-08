@@ -15,6 +15,7 @@
  */
 
 #include "operable.h"
+#include <iostream>
 
 champsim::operable::operable() : operable(champsim::chrono::picoseconds{1}) {}
 
@@ -23,9 +24,17 @@ champsim::operable::operable(champsim::chrono::picoseconds clock_period_) : cloc
 long champsim::operable::operate_on(const champsim::chrono::clock& clock)
 {
   long progress{0};
+  //std::cout<<"in operate_on(), current_time: "<<current_time.time_since_epoch().count()<<std::endl;
   while (current_time < clock.now()) {
+    /*
+    auto clocknow = clock.now();
+    std::cout<<"in operate_on() While loop, clock.now: " << clocknow.time_since_epoch().count() \
+      <<", current_time: "<<current_time.time_since_epoch().count()<<", clock_period: "<<clock_period.count() <<std::endl;
+    // <<", current_time: "<<current_time.count()<<", clock_period: "<<clock_period.count()<<std::endl;
+    */
     progress += _operate();
   }
+  //std::cout<<"in operate_on() before exit, current_time: "<<current_time.time_since_epoch().count()<<std::endl;
 
   return progress;
 }

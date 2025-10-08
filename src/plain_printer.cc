@@ -67,6 +67,7 @@ std::vector<std::string> champsim::plain_printer::format(O3_CPU::stats_type stat
 
 std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats)
 {
+  //std::cout<<"calling format cache stats\n";
   using hits_value_type = typename decltype(stats.hits)::value_type;
   using misses_value_type = typename decltype(stats.misses)::value_type;
   using mshr_merge_value_type = typename decltype(stats.mshr_merge)::value_type;
@@ -91,6 +92,7 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
       stats.mshr_return.allocate(std::pair{type, cpu});
     }
   }
+  //std::cout<<"format(cachestat) - after allocation\n";
 
   std::vector<std::string> lines{};
   for (auto cpu : cpus) {
@@ -104,6 +106,7 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
       total_mshr_merge += stats.mshr_merge.value_or(std::pair{type, cpu}, mshr_merge_value_type{});
       total_mshr_return += stats.mshr_return.value_or(std::pair{type, cpu}, mshr_merge_value_type{});
     }
+    //std::cout<<"format(cachestat) - after cumulating misses to <<"<<total_misses <<"\n";
 
     fmt::format_string<std::string_view, std::string_view, int, int, int> hitmiss_fmtstr{
         "cpu{}->{} {:<12s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} MSHR_MERGE: {:10d}"};
@@ -143,6 +146,15 @@ std::vector<std::string> champsim::plain_printer::format(DRAM_CHANNEL::stats_typ
     lines.push_back(fmt::format("{} REFRESHES ISSUED: -", stats.name));
 
   return lines;
+}
+
+void champsim::plain_printer::print_just_cache_stats(CACHE::stats_type stat)
+{
+  std::vector<std::string> lines{};
+  lines.push_back(fmt::format("=== {} ===", stat.name));
+  
+  auto sublines = format(stat);
+  std::move(std::begin(sublines), std::end(sublines), std::back_inserter(lines));
 }
 
 void champsim::plain_printer::print(champsim::phase_stats& stats)

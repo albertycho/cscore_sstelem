@@ -6,14 +6,29 @@ AM_CPPFLAGS += \
 	-I$(srcdir)/inc \
 	-I$(srcdir)/inc/util \
 	-I$(srcdir)/inc/msl \
+    -I$(srcdir)/branch \
+    -I$(srcdir)/btb \
+    -I$(srcdir)/prefetcher \
+    -I$(srcdir)/replacement \
 	-I$(srcdir)/vcpkg_installed/x64-linux/include \
+    -llzma \
+    -lfmt \
 	$(MPI_CPPFLAGS)
+
+AM_LDFLAGS  += -L$(srcdir)/vcpkg_installed/x64-linux/lib
 
 compdir = $(pkglibdir)
 comp_LTLIBRARIES = libcscore.la
 libcscore_la_SOURCES = \
     cscore.h \
     cscore.cc \
+    csEvent.h \
+    convert_ev_packet.h \
+	convert_ev_packet.cc \
+	NW.h \
+	NW.cc \
+    vcpkg_installed/x64-linux/include/fmt/core.h \
+    vcpkg_installed/x64-linux/include/lzma.h \
     branch/bimodal/bimodal.cc \
     branch/bimodal/bimodal.h \
     branch/gshare/gshare.cc \
@@ -55,6 +70,7 @@ libcscore_la_SOURCES = \
     inc/inf_stream.h \
     inc/instruction.h \
     inc/modules.h \
+    inc/my_memory_controller.h \
     inc/msl/bits.h \
     inc/msl/fwcounter.h \
     inc/msl/lru_table.h \
@@ -123,6 +139,7 @@ libcscore_la_SOURCES = \
     src/extent.cc \
 	src/json_printer.cc \
     src/modules.cc \
+    src/my_memory_controller.cc \
     src/ooo_cpu.cc \
     src/operable.cc \
     src/plain_printer.cc \
@@ -132,7 +149,9 @@ libcscore_la_SOURCES = \
     src/SST_CS_packets.cc \
     src/tracereader.cc \
     src/vmem.cc 
-	
+
+libcscore_la_LIBADD = -llzma \
+    /nethome/acho44/SST_TEST/sst-elements/src/sst/elements/cscore/vcpkg_installed/x64-linux/lib/libfmt.a
 
 EXTRA_DIST = \
     README

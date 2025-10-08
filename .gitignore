@@ -9,3 +9,4 @@ src/*.lo
 *.lo
 */*lo
 vcpkg_installed/
+filesfrom_base_champsim/

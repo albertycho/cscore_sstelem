@@ -365,6 +365,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     // Allocate an MSHR
     if (mshr_pkt.second.response_requested) {
       MSHR.emplace_back(std::move(mshr_pkt.first));
+      //std::cout<<NAME<<" allocated an MSHR entry"<<std::endl;
     }
   }
 
@@ -416,6 +417,7 @@ auto CACHE::initiate_tag_check(champsim::channel* ul)
 
 long CACHE::operate()
 {
+  //std::cout<<"is it warmup? "<<warmup<<"\n";
   //std::cout<<"hello from CACHE::operate"<<std::endl;
   long progress{0};
 
@@ -431,10 +433,12 @@ long CACHE::operate()
     ul->check_collision();
   }
 
-  std::cout<<"CACHE::operate ("<<NAME << ") - lower level check (line 433)"<<std::endl;
+  //std::cout<<"CACHE::operate ("<<NAME << ") (line 433) at cycle " << current_time.time_since_epoch() / clock_period <<std::endl;
+  //std::cout<<"number of upper levels: "<<upper_levels.size()<<std::endl;
   // Finish returns  
   std::for_each(std::cbegin(lower_level->returned), std::cend(lower_level->returned), [this](const auto& pkt) { this->finish_packet(pkt); });
-  std::cout<<"CACHE::operate - no lower level? (line 439)"<<std::endl;
+  //std::cout<<"CACHE::operate - no lower level? (line 439)"<<std::endl;
+  //std::cout<<"Outstanding MSHR Entries: "<< MSHR.size() <<std::endl;
 
   progress += std::distance(std::cbegin(lower_level->returned), std::cend(lower_level->returned));
   lower_level->returned.clear();
@@ -453,7 +457,17 @@ long CACHE::operate()
                                                        [time = current_time](const auto& x) { return x.data_promise.is_ready_at(time); });
     auto complete_end = std::find_if_not(fill_begin, fill_end, [this](const auto& x) { return this->handle_fill(x); });
     fill_bw.consume(std::distance(fill_begin, complete_end));
+    
+    // auto inflight_writes_before = std::size(inflight_writes);
+    // auto mshr_entries_before = std::size(MSHR);
+
     q.get().erase(fill_begin, complete_end);
+    
+    // auto inflight_writes_after = std::size(inflight_writes);
+    // auto mshr_entries_after = std::size(MSHR);
+    // if (mshr_entries_after < mshr_entries_before){
+    //   std::cout <<NAME<<" MSHR entry filled from"<<mshr_entries_before<<" to "<<mshr_entries_after<< " at cycle" << current_time.time_since_epoch() / clock_period <<std::endl;
+    // }
   }
 
   // Initiate tag checks
