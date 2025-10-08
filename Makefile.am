@@ -151,7 +151,7 @@ libcscore_la_SOURCES = \
     src/vmem.cc 
 
 libcscore_la_LIBADD = -llzma \
-    /nethome/acho44/SST_TEST/sst-elements/src/sst/elements/cscore/vcpkg_installed/x64-linux/lib/libfmt.a
+    $(srcdir)/vcpkg_installed/x64-linux/lib/libfmt.a
 
 EXTRA_DIST = \
     README
