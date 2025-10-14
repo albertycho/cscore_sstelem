@@ -61,37 +61,12 @@ namespace SST {
 			std::cout<<"trace_name: "<<trace_name<<std::endl;
 			std::vector<std::string> trace_names;
 			trace_names.push_back(trace_name);
-			// std::transform(
-			// 	std::begin(trace_names), std::end(trace_names), std::back_inserter(traces),
-			// 	[i = uint8_t(0)](auto name) mutable { return get_tracereader(name, i++, true, true); });
 			traces.push_back(get_tracereader(trace_name, 0, false, true));
 
 			
 			std::cout<<"traces.size(): "<<traces.size()<<std::endl;
-			// std::transform(
-			// std::begin(trace_names), std::end(trace_names), std::back_inserter(traces),
-			// [false, repeat = true, i = uint8_t(0)](auto name) mutable { return get_tracereader(name, i++, false, repeat); });
-
-
+			
 			/* Component initialization */ 
-
-			/* channels instantiated in .h, as we need them for DRAM and vmem init from calling this constructor */
-
-			// channels = {
-			// 	champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-			// 	champsim::channel{std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), champsim::data::bits{champsim::lg2(BLOCK_SIZE)}, 0},
-			// 	champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-			// 	champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-			// 	champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-			// 	champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-			// 	champsim::channel{32, 32, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-			// 	champsim::channel{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0},
-			// 	champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1},
-			// 	champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1},
-			// 	champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-			// 	champsim::channel{64, 32, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-			// 	champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1}
-        	// };
 
 			//DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192);
 
@@ -305,9 +280,8 @@ namespace SST {
 			//DRAM.initialize();
 			//DRAM.warmup=false;
 
-			// for (auto ptw : ptws){
-			// 	ptw.initialize();
-			// }
+			// operating on each element of ptws in a for loop breaks for reasons I coudln't figure out
+			// we only have 1 ptw for now so just do front()
 			ptws.front().initialize();
 			ptws.front().warmup=false;
 			for (CACHE& cache_c : caches){
@@ -316,7 +290,7 @@ namespace SST {
 				cache_c.warmup=false;
 			}
 
-			//std::shared_ptr<std::ofstream> 
+			// Dump stat periodically
 			heartbeat_file = std::make_shared<std::ofstream>("heartbeat_Node" + std::to_string(node_id) + ".log");
 			for (O3_CPU& core : cores){
 				core.initialize();
@@ -346,61 +320,24 @@ namespace SST {
 		
 		bool csimCore::champsim_tick(Cycle_t){
 
-			//std::cout<<"CSCORE_tick @ "<<node_id<<": Entered champsim_tick function"<<std::endl;
-			//*heartbeat_file<<"CSCORE_tick @ "<<node_id<<": Entered champsim_tick function"<<std::endl;
-			
-			//std::cout<<"ptw current_cycle at the beginning of  champsim_tick: "<<ptws.front().current_cycle()<<std::endl;
-			//std::cout<<"O3Core current_cycle at the beginning of  champsim_tick: "<<cores.front().current_cycle()<<std::endl;
-
-			//ptws.front().set_current_clock(global_clock);
-
 			global_clock.tick(time_quantum);
 			heartbeat_count++;
 			
 
 			/* OPERABLES:  DRAM, ptws, caches, cores*/
 
-			// for (champsim::channel& chan : channels){
-			// }
-
-			//DRAM.operate();
-			//DRAM.operate_on(global_clock);
 			MYDRAM.operate_on(global_clock);
 
-			// for (auto ptw : ptws){
-			// 	//ptw.operate();
-			// 	std::cout<<"ptw current_cycle before operate_on: "<<ptw.current_cycle()<<std::endl;
-			// 	//ptw.set_current_clock(global_clock);
-			// 	//std::cout<<"ptw current_cycle after set_current_clock operate_on: "<<ptw.current_cycle()<<std::endl;
-			// 	ptw.operate_on(global_clock);
-			// 	std::cout<<"ptw current_cycle after operate_on: "<<ptws.front().current_cycle()<<std::endl;
-			// 	std::cout<<"ptw mshr size: "<<ptw.MSHR_SIZE<<std::endl;
-			// }
-			
-			//std::cout<<"ptw current_cycle before operate_on: "<<ptws.front().current_cycle()<<std::endl;
-			//ptw.set_current_clock(global_clock);
-			//std::cout<<"ptw current_cycle after set_current_clock operate_on: "<<ptw.current_cycle()<<std::endl;
+			// operating on ptws in a for loop breaks for reasons I coudln't figure out
+			// (unrootcausible issue where ptw's clock gets reset every loop)
 			ptws.front().operate_on(global_clock);
-			//std::cout<<"ptw current_cycle after operate_on: "<<ptws.front().current_cycle()<<std::endl;
-			//std::cout<<"ptw mshr size: "<<ptws.front().MSHR_SIZE<<std::endl;
-			//std::cout<<"ptw current_cycle after ptw operated: "<<ptws.front().current_cycle()<<std::endl;
-
+			
 			for (CACHE& cache_c : caches){
 				//cache_c.operate();
 				cache_c.operate_on(global_clock);
-				//std::cout<<"cache stat name: "<<cache_c.sim_stats.name <<", cache total miss latency: "<<cache_c.sim_stats.total_miss_latency_cycles <<std::endl;
-				//<< "cache_total misses:"<< cache_c.sim_stats.misses <<std::endl;
-				//std::cout<<"cache_total misses:"<< cache_c.sim_stats.misses<<std::endl;
+			
 				
 				if(heartbeat_count % 1000 ==0){
-					// auto cache_formats = champsim::plain_printer{std::cout}.format(cache_c.sim_stats);
-					// for (const auto& line : cache_formats) {
-					// 	std::cout << line << '\n';
-					// }
-					// auto cache_formats = champsim::plain_printer{std::cout}.format(cache_c.sim_stats);
-					// for (const auto& line : cache_formats) {
-					// 	std::cout << line << '\n';
-					// }
 					auto cache_formats = champsim::plain_printer{*heartbeat_file}.format(cache_c.sim_stats);
 					for (const auto& line : cache_formats) {
 						*heartbeat_file << line << '\n';
@@ -430,10 +367,7 @@ namespace SST {
 				}
 				if(trace.eof()){
 					std::cout<<"CSCORE_tick: trace.eof() returned true! Reached end of trace in core tick function: "<< trace_name <<std::endl;
-					//trace = get_tracereader(trace_name, 0, false, true);
 				}
-				//std::cout<<"input queue size this cycle: "<<cpu.input_queue.size()<<std::endl;
-				//std::cout<<"fetched_insts: "<<fetched_insts<<std::endl;
 
 				curr_core_id++;
 			}
@@ -447,15 +381,7 @@ namespace SST {
 		}
 
 		bool csimCore::send_NW_packet(NW_packet_t outpacket){
-			//NW_packet_t outpacket = csst.get_egress_packet();
-			//NW_packet_t outpacket;
-			// int dest_id=0;
-			// if(node_id==0){
-			// 	dest_id=1;
-			// }
-			// else{
-			// 	dest_id=0;
-			// }
+
 			int dest_id= outpacket.receiver_core_id;
 			// TODO for dummy testing, setting dest_id to 0 for all packets for now
 			//if(dest_id>3)dest_id=0; // TODO remove this line later
@@ -466,9 +392,6 @@ namespace SST {
 			nev->payload.push_back(node_id);
 			nev->payload.push_back(dest_id);
 			nev->payload.push_back(cycle_count);
-			// std::cout<<"Node"<<node_id <<" at send_NW_packet: packet's event_cycle: "<<cycle_count<<", SST's curcycle: "<<cycle_count<<std::endl;
-			// linkHandler_NW->send(nev);
-			// std::cout<<"Node"<<node_id<<" linkhandler_nw->send() succeeded"<<std::endl;
 
 			std::cout << "Node" << node_id << " sending event at " << cycle_count << std::endl;
 			// << nev << " with payload size " << nev->payload.size() << std::endl;

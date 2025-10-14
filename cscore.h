@@ -121,22 +121,7 @@ namespace SST {
 
 
         private:
-        //std::vector<champsim::channel> channels;
-        // std::vector<champsim::channel> channels{
-        //     champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-        //     champsim::channel{std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), champsim::data::bits{champsim::lg2(BLOCK_SIZE)}, 0},
-        //     champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-        //     champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-        //     champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-        //     champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-        //     champsim::channel{32, 32, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-        //     champsim::channel{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0},
-        //     champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1},
-        //     champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1},
-        //     champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-        //     champsim::channel{64, 32, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-        //     champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1}
-        // };
+
        std::vector<champsim::channel> channels {
 				champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1}, // 0
 				champsim::channel{std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), champsim::data::bits{champsim::lg2(BLOCK_SIZE)}, 0},
