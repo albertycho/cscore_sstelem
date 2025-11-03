@@ -34,6 +34,7 @@ namespace SST {
 			MYDRAM(champsim::chrono::picoseconds{500}, {&channels.at(1)}),
 			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{500*200}, MYDRAM, 1)
 		{
+			std::cout<<"TEST TEST TEST TEST"<<std::endl;
 			/* This function sets up and builds core (and cache and bp and etc) */
 			std::cout<<"Starting cscore constructor"<<std::endl;
 			//std::cout<<"MYDRAM size:"<<MYDRAM.size()<<std::endl;
@@ -384,7 +385,7 @@ namespace SST {
 
 			int dest_id= outpacket.receiver_core_id;
 			// TODO for dummy testing, setting dest_id to 0 for all packets for now
-			//if(dest_id>3)dest_id=0; // TODO remove this line later
+			if(dest_id>=2) dest_id=0; // TODO remove this line later
 			cycle_count++;
 			std::cout<<"Node "<<node_id<<" has outgoing packet to "<< dest_id<<std::endl;
 			*heartbeat_file<<"Node "<<node_id<<" has outgoing packet to "<< dest_id<<std::endl;

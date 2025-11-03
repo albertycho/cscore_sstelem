@@ -77,6 +77,7 @@ libcscore_la_SOURCES = \
     inc/ooo_cpu.h \
     inc/operable.h \
     inc/phase_info.h \
+    inc/physical_channel.h \
     inc/ptw_builder.h \
     inc/ptw.h \
     inc/register_allocator.h \
