@@ -26,6 +26,7 @@
 #include <cstddef> // for size_t
 #include <cstdint> // for uint64_t, uint32_t, uint8_t
 #include <deque>
+#include <functional>
 #include <iterator> // for size
 #include <limits>   // for numeric_limits
 #include <memory>
@@ -36,6 +37,8 @@
 #include <iostream>
 
 
+#include "SST_CS_packets.h"
+#include "cxl_request_buffer.h"
 #include "address.h"
 #include "bandwidth.h"
 #include "block.h"
@@ -152,6 +155,9 @@ private:
   std::deque<tag_lookup_type> translation_stash{};
 
 public:
+  SST::csimCore::CXLRequestBuffer* cxl_buffer = nullptr;
+  uint32_t cxl_target_id = 0;
+  
   std::vector<channel_type*> upper_levels;
   channel_type* lower_level;
   channel_type* lower_translate;
@@ -175,12 +181,15 @@ public:
   stats_type sim_stats, roi_stats;
 
   std::deque<mshr_type> MSHR;
+  std::deque<mshr_type> CXL_MSHR;
   std::deque<mshr_type> inflight_writes;
 
   long operate() final;
   void initialize() final;
   void begin_phase() final;
   void end_phase(unsigned cpu) final;
+
+  bool handle_cxl_response(const sst_response& resp);
 
   [[deprecated]] std::size_t get_occupancy(uint8_t queue_type, champsim::address address) const;
   [[deprecated]] std::size_t get_size(uint8_t queue_type, champsim::address address) const;

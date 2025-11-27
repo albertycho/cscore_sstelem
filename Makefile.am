@@ -25,6 +25,8 @@ libcscore_la_SOURCES = \
     csEvent.h \
     convert_ev_packet.h \
 	convert_ev_packet.cc \
+    cxl_mempool.h \
+    cxl_mempool.cc \
 	NW.h \
 	NW.cc \
     vcpkg_installed/x64-linux/include/fmt/core.h \
@@ -59,6 +61,7 @@ libcscore_la_SOURCES = \
     inc/chrono.h \
     inc/core_builder.h \
     inc/core_stats.h \
+    inc/cxl_request_buffer.h \
     inc/deadlock.h \
     inc/defaults.hpp \
     inc/dram_controller.h \
@@ -135,6 +138,7 @@ libcscore_la_SOURCES = \
     src/channel.cc \
     src/chrono.cc \
     src/core_stats.cc \
+    src/cxl_request_buffer.cc \
     src/dram_controller.cc \
     src/dram_stats.cc \
     src/extent.cc \

@@ -5,6 +5,7 @@
 #include <functional>
 #include <bitset>
 #include <algorithm>
+#include <vector>
 
 template<typename T>
 class physical_channel {
@@ -37,7 +38,7 @@ public:
         std::vector<T> completed_on_tick;
 
         // Pop completed packets
-        while(!active_queue.empty() && active_queue.top().completion_time == internal_clock) {
+        while(!active_queue.empty() && active_queue.top().completion_time <= internal_clock) {
             completed_on_tick.emplace_back(std::move(active_queue.top().payload));
             active_queue.pop();
         }
@@ -67,7 +68,7 @@ private:
             active_queue.push(entry{
                 std::move(blocked_queue.front()), 
                 internal_clock, 
-                internal_clock + latency_function(get_utilization())
+                internal_clock + std::max<int64_t>(latency_function(get_utilization()), 1)
             });
             last_insert_time = internal_clock;
 
@@ -76,8 +77,7 @@ private:
     }
 
     // computes the current utilization
-    double get_utilization() {
-        // std::cout << "utilization: " << buffer.count() << " / 256" <<  << std::endl;
+    double get_utilization() const {
         return std::clamp(buffer.count() / 256.0 * bandwidth, 0.0, 1.0);
     }
 

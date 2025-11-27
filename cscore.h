@@ -16,7 +16,9 @@
 #include <sst/core/link.h>
 #include <iostream>
 #include <fstream>
+#include <deque>
 #include <forward_list>
+#include <memory>
 
 #include <trace_instruction.h>
 #include <channel.h>
@@ -40,6 +42,7 @@
 #include "vmem.h"
 
 #include "convert_ev_packet.h"
+#include "cxl_request_buffer.h"
 
 namespace SST {
     namespace csimCore {
@@ -67,12 +70,14 @@ namespace SST {
             { "trace_name", "Path to input trace file", ""},
             { "send_trace_name", "Path to send trace file", ""},
             { "recv_trace_name", "Path to recv trace file", ""},
-            { "output_file", "Path to output file", ""}
+            { "output_file", "Path to output file", ""},
+            { "cxl_config", "Path to CXL configuration CSV", "" },
+            { "cxl_outstanding_limit", "Maximum outstanding CXL requests cached per LLC", "32" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
             {"port_handler_NW",    "Link to another component. This port uses an event handler to capture incoming events.", { "cscore.csimCore", ""} },
-            //{"port_handler_CXL",    "Link to another component. This port uses an event handler to capture incoming events.", { "cscore.csimCore", ""} },
+            {"port_handler_CXL",    "Link to the CXL memory pool component.", { "cscore.csimCore", ""} },
             {"port_handler_LLC",    "Link to another component. This port uses an event handler to capture incoming events.", { "cscore.csimCore", ""} }
         )
         
@@ -106,9 +111,9 @@ namespace SST {
         std::streambuf* coutBuf;
         int node_id;
         int cpuid;
-        SST::Link* linkHandler_NW;
-        // SST::Link* linkHandler_CXL;
-        SST::Link* linkHandler_LLC;
+        SST::Link* linkHandler_NW = nullptr;
+        SST::Link* linkHandler_CXL = nullptr;
+        SST::Link* linkHandler_LLC = nullptr;
         int cycle_count;
         int NW_BW_counter_in;
         int NW_BW_counter_out;
@@ -168,6 +173,9 @@ namespace SST {
         uint64_t heartbeat_count=0;
         std::vector<NW_packet_t> egress_buffer;
         std::vector<NW_packet_t> ingress_buffer;
+        std::deque<sst_request> cxl_outbox;
+        std::vector<std::unique_ptr<SST::csimCore::CXLRequestBuffer>> cxl_buffers;
+        std::size_t cxl_max_outstanding = 0;
 
         // champsim::channel cpu0_STLB_to_cpu0_PTW_queues{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0};
         // champsim::channel cpu0_DTLB_to_cpu0_STLB_queues{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0};
@@ -193,8 +201,11 @@ namespace SST {
         NW_packet_t get_egress_packet(uint32_t core_id);
     
         void handleEvent_NW(SST::Event *ev);
-        void dummyhandleEvent_CXL(SST::Event *ev);
+        void handleEvent_CXL(SST::Event *ev);
         void HandleEvent_LLC(SST::Event *ev);
+
+        void advance_cxl_requests();
+        void configure_cxl_address_filter(const std::string& config_path);
     };
     
     } // namespace cscore

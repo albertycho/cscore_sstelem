@@ -18,8 +18,13 @@
 #include <vcpkg_installed/x64-linux/include/fmt/ranges.h>
 
 #include <stats_printer.h>
+#include <stdexcept>
+#include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <memory>
+#include <optional>
+#include <sstream>
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -28,13 +33,37 @@ std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chr
 
 namespace SST {
 	namespace csimCore {
-	
+
+		static CXLAddressMap parse_cxl_csv(const std::string& path) {
+			CXLAddressMap v;
+			std::ifstream f(path);
+			std::string line;
+			bool first = true;
+
+			while (std::getline(f, line)) {
+				if (first) { first = false; continue; }   // skip header
+				if (line.empty()) continue;
+
+				std::stringstream ss(line);
+				std::string pid_s, start_s, size_s;
+				std::getline(ss, pid_s, ',');
+				std::getline(ss, start_s, ',');
+				std::getline(ss, size_s, ',');
+
+				CXLRange r;
+				r.pid   = std::stoi(pid_s);
+				r.start = std::stoull(start_s, nullptr, 16);  // hex
+				r.size  = std::stoull(size_s);                // decimal
+				v.push_back(r);
+			}
+			return v;
+		}
+		
 		csimCore::csimCore(ComponentId_t id, Params& params) : Component(id),
-			//DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192),
-			MYDRAM(champsim::chrono::picoseconds{500}, {&channels.at(1)}),
+		//DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192),
+		MYDRAM(champsim::chrono::picoseconds{500}, {&channels.at(1)}),
 			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{500*200}, MYDRAM, 1)
 		{
-			std::cout<<"TEST TEST TEST TEST"<<std::endl;
 			/* This function sets up and builds core (and cache and bp and etc) */
 			std::cout<<"Starting cscore constructor"<<std::endl;
 			//std::cout<<"MYDRAM size:"<<MYDRAM.size()<<std::endl;
@@ -44,9 +73,11 @@ namespace SST {
 			clock_frequency_str = params.find<std::string>("clock", "2GHz");
 
 			trace_name = params.find<std::string>("trace_name", "example_tracename.xz");
-			send_trace_name = params.find<std::string>("send_trace_name", "/scratch/acho44/DIST_CXL/TRACES/SendRecv/250228/sendI_2891634_0_110.trace.xz");
-			recv_trace_name = params.find<std::string>("recv_trace_name", "/scratch/acho44/DIST_CXL/TRACES/SendRecv/250228/recv_2891635_0_120.trace.xz");
-			outfile_name = params.find<std::string>("output_file", "~/SST_TEST/sst-elements/src/sst/elements/cscore/tests/asdfasdf2.out");
+            send_trace_name = params.find<std::string>("send_trace_name", "/scratch/acho44/DIST_CXL/TRACES/SendRecv/250228/sendI_2891634_0_110.trace.xz");
+            recv_trace_name = params.find<std::string>("recv_trace_name", "/scratch/acho44/DIST_CXL/TRACES/SendRecv/250228/recv_2891635_0_120.trace.xz");
+            outfile_name = params.find<std::string>("output_file", "~/SST_TEST/sst-elements/src/sst/elements/cscore/tests/asdfasdf2.out");
+            std::string cxl_config_path = params.find<std::string>("cxl_config", "/scratch/acho44/DIST_CXL/TRACES/SPMV/BASELINE/250411_cage/cxl_pool_config.csv");
+            cxl_max_outstanding = static_cast<std::size_t>(params.find<int64_t>("cxl_outstanding_limit", 32));
 			node_id = params.find<int64_t>("node_id", 0);
 			cpuid = params.find<int64_t>("cpu_id", 0);
 			uint64_t warmup_insts=params.find<int64_t>("warmup_insts", 5000);
@@ -307,10 +338,16 @@ namespace SST {
 				//std::cout << "time quantum: " << fmt::format("{}", time_quantum) << std::endl;
 				//std::cout << "time quantum: " << time_quantum.count() <<" picoseconds"<< std::endl;
 
+			configure_cxl_address_filter(cxl_config_path);
+
 			
 			linkHandler_NW = configureLink("port_handler_NW", new Event::Handler<csimCore>(this, &csimCore::handleEvent_NW));
 			if (!linkHandler_NW) {
 				std::cerr << "ERROR: linkHandler_NW is NULL for node " << node_id << std::endl;
+			}
+			linkHandler_CXL = configureLink("port_handler_CXL", new Event::Handler<csimCore>(this, &csimCore::handleEvent_CXL));
+			if (!linkHandler_CXL) {
+				std::cerr << "WARNING: linkHandler_CXL is NULL for node " << node_id << std::endl;
 			}
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
 				&csimCore::champsim_tick));	
@@ -338,15 +375,17 @@ namespace SST {
 				cache_c.operate_on(global_clock);
 			
 				
-				if(heartbeat_count % 1000 ==0){
+				if(heartbeat_count % 1000 == 0){
 					auto cache_formats = champsim::plain_printer{*heartbeat_file}.format(cache_c.sim_stats);
 					for (const auto& line : cache_formats) {
 						*heartbeat_file << line << '\n';
 					}
 					heartbeat_file->flush(); // Optional: ensure output is written immediately
 				}
-				
+					
 			}
+
+			advance_cxl_requests();
 
 			uint8_t curr_core_id=0;
 			for (O3_CPU& cpu : cores){
@@ -385,7 +424,7 @@ namespace SST {
 
 			int dest_id= outpacket.receiver_core_id;
 			// TODO for dummy testing, setting dest_id to 0 for all packets for now
-			if(dest_id>=2) dest_id=0; // TODO remove this line later
+			//if(dest_id>3)dest_id=0; // TODO remove this line later
 			cycle_count++;
 			std::cout<<"Node "<<node_id<<" has outgoing packet to "<< dest_id<<std::endl;
 			*heartbeat_file<<"Node "<<node_id<<" has outgoing packet to "<< dest_id<<std::endl;
@@ -441,6 +480,85 @@ namespace SST {
 				cores[core_id].egress_check=false;
 			}
 			return outpacket;
+		}
+
+		void csimCore::handleEvent_CXL(SST::Event *ev)
+		{
+			// receive a CXL response
+			auto* cevent = dynamic_cast<csEvent*>(ev);
+			if (!cevent) {
+				delete ev;
+				return;
+			}
+
+			auto response = convert_event_to_response(*cevent);
+			// send to the LLC
+			for (auto& cache : caches) {
+				if (cache.cxl_buffer && cache.handle_cxl_response(response)) {
+					delete cevent;
+					return;
+				}
+			}
+			// std::cout << "Node" << node_id << " received CXL response for address 0x" << std::hex << response.address << std::dec << std::endl;
+			// *heartbeat_file << "Node" << node_id << " received CXL response for address 0x" << std::hex << response.address << std::dec << std::endl;
+
+			throw std::runtime_error("No cache accepted CXL response");
+		}
+
+		void csimCore::advance_cxl_requests()
+		{
+			// collect cxl requests from the buffers
+			for (auto& cache : caches) {
+				if (!cache.cxl_buffer) {
+					continue;
+				}
+
+				while (cache.cxl_buffer->has_pending() && (cxl_max_outstanding == 0 || cxl_outbox.size() < cxl_max_outstanding)) {
+					auto request = cache.cxl_buffer->pop_front();
+					cxl_outbox.push_back(std::move(request));
+				}
+			}
+
+
+			// send cxl requests to the pool
+			while (!cxl_outbox.empty()) {
+				auto request = cxl_outbox.front();
+				auto* event = convert_request_to_event(request);
+				if (!event) {
+					break;
+				}
+				linkHandler_CXL->send(event);
+				cxl_outbox.pop_front();
+			}
+		}
+
+		void csimCore::configure_cxl_address_filter(const std::string& config_path)
+		{
+			auto ranges = parse_cxl_csv(config_path);
+
+			cxl_buffers.clear();
+			cxl_buffers.resize(caches.size());
+
+			// pick the CXL range for this node (pid == node_id)
+			std::optional<CXLRange> selected_range;
+			for (const auto& rng : ranges) {
+				if (rng.pid == node_id) {
+					selected_range = rng;
+					break;
+				}
+			}
+
+			for (std::size_t i = 0; i < caches.size(); ++i) {
+				auto& cache = caches[i];
+				cache.cxl_buffer = nullptr;
+				if (selected_range.has_value() && cache.NAME == "LLC") {
+					cxl_buffers[i] = std::make_unique<CXLRequestBuffer>();
+					cxl_buffers[i]->set_range(*selected_range);
+					cxl_buffers[i]->set_limit(cxl_max_outstanding);
+					cache.cxl_buffer = cxl_buffers[i].get();
+					cache.cxl_target_id = static_cast<uint32_t>(node_id);
+				}
+			}
 		}
 			
 

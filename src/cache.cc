@@ -23,8 +23,6 @@
 #include <numeric>
 #include <fmt/core.h>
 
-#include <iostream>
-
 #include "bandwidth.h"
 #include "champsim.h"
 #include "chrono.h"
@@ -333,11 +331,16 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
   auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
 
-  // check mshr
+  // check mshr (search both queues)
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
-  bool mshr_full = (MSHR.size() == MSHR_SIZE);
+  bool in_cxl_queue = false;
+  if (mshr_entry == MSHR.end()) {
+    mshr_entry = std::find_if(std::begin(CXL_MSHR), std::end(CXL_MSHR), matches_address(handle_pkt.address));
+    in_cxl_queue = true;
+  }
+  bool mshr_full = ((MSHR.size() + CXL_MSHR.size()) >= MSHR_SIZE);
 
-  if (mshr_entry != MSHR.end()) // miss already inflight
+  if (mshr_entry != (in_cxl_queue ? CXL_MSHR.end() : MSHR.end())) // miss already inflight
   {
     if (mshr_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
       // Mark the prefetch as useful
@@ -353,6 +356,35 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
   } else {
     if (mshr_full) { // not enough MSHR resource
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
+    }
+    
+    if (cxl_buffer) {
+      if(cxl_buffer->is_cxl_address(mshr_pkt.second.address.to<uint64_t>())) {
+        sst_request sreq;
+        sreq.forward_checked = mshr_pkt.second.forward_checked;
+        sreq.is_translated = mshr_pkt.second.is_translated;
+        sreq.response_requested = mshr_pkt.second.response_requested;
+        sreq.type = mshr_pkt.second.type;
+        sreq.pf_metadata = mshr_pkt.second.pf_metadata;
+        sreq.cpu = mshr_pkt.second.cpu;
+        sreq.sst_cpu = cxl_target_id;
+        sreq.address = mshr_pkt.second.address.to<uint64_t>();
+        sreq.v_address = mshr_pkt.second.v_address.to<uint64_t>();
+        sreq.data = mshr_pkt.second.data.to<uint64_t>();
+        sreq.instr_id = mshr_pkt.second.instr_id;
+        sreq.ip = mshr_pkt.second.ip.to<uint64_t>();
+        sreq.asid[0] = mshr_pkt.second.asid[0];
+        sreq.asid[1] = mshr_pkt.second.asid[1];
+        auto accepted = cxl_buffer->try_enqueue(sreq, current_time.time_since_epoch().count());
+        if (accepted) {
+          if (mshr_pkt.second.response_requested) {
+            CXL_MSHR.emplace_back(std::move(mshr_pkt.first));
+          }
+          sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
+          return true;
+        }
+        return false; // stall if we can't push to CXL buffer since we must service via mempool
+      }
     }
 
     const bool send_to_rq = (prefetch_as_load || handle_pkt.type != access_type::PREFETCH);
@@ -452,7 +484,7 @@ long CACHE::operate()
 
   // Perform fills
   champsim::bandwidth fill_bw{MAX_FILL};
-  for (auto q : {std::ref(MSHR), std::ref(inflight_writes)}) {
+  for (auto q : {std::ref(MSHR), std::ref(CXL_MSHR), std::ref(inflight_writes)}) {
     auto [fill_begin, fill_end] = champsim::get_span_p(std::cbegin(q.get()), std::cend(q.get()), fill_bw,
                                                        [time = current_time](const auto& x) { return x.data_promise.is_ready_at(time); });
     auto complete_end = std::find_if_not(fill_begin, fill_end, [this](const auto& x) { return this->handle_fill(x); });
@@ -711,7 +743,7 @@ void CACHE::issue_translation(tag_lookup_type& q_entry) const
   }
 }
 
-std::size_t CACHE::get_mshr_occupancy() const { return std::size(MSHR); }
+std::size_t CACHE::get_mshr_occupancy() const { return std::size(MSHR) + std::size(CXL_MSHR); }
 
 std::vector<std::size_t> CACHE::get_rq_occupancy() const
 {
@@ -917,6 +949,26 @@ void CACHE::end_phase(unsigned finished_cpu)
     ul->roi_stats.WQ_TO_CACHE = ul->sim_stats.WQ_TO_CACHE;
     ul->roi_stats.WQ_FORWARD = ul->sim_stats.WQ_FORWARD;
   }
+}
+
+bool CACHE::handle_cxl_response(const sst_response& resp)
+{
+  auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(champsim::address{resp.address}));
+  assert(mshr_entry != MSHR.end() && "MSHR entry not found for returned CXL address");
+  // Logic here can be simplified a lot if we are gaurenteed that the responses are serviced in order.
+  // I'm thinking not because more advanced routing could lead to this not being true?
+
+  
+  // Mark the data ready and let the normal fill pipeline retire it. We don't erase it
+  // and let the normal cache mechanics handle things like eviction, etc. 
+  mshr_type::returned_value finished_value{champsim::address{resp.data}, resp.pf_metadata};
+  mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
+
+  // Move the ready entry to the front of its queue so it is considered on the
+  // next fill pass. Again, if we are gaurenteed this is the first entry we don't 
+  // need to do this.
+  std::rotate(CXL_MSHR.begin(), mshr_entry, std::next(mshr_entry));
+  return true;
 }
 
 template <typename T>

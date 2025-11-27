@@ -1,9 +1,4 @@
-/*
- * Minimal MY_MEMORY_CONTROLLER header
- * Mirrors the basic API of MEMORY_CONTROLLER from dram_controller.h
- */
-#ifndef MY_MEMORY_CONTROLLER_H
-#define MY_MEMORY_CONTROLLER_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +26,6 @@
 // --> can define a lower BW to see if latency spikes
 
 inline int64_t estimate_latency_percentile(double util) {
-    std::cout << "utilization: " << util << std::endl;
     if (util >= 0.70) return 400;  // 200 ns @ 2 GHz
     if (util >= 0.60) return 300;  // 150 ns
     if (util >= 0.50) return 200;  // 100 ns
@@ -71,5 +65,3 @@ public:
 
 };
 // namespace champsim
-
-#endif // MY_MEMORY_CONTROLLER_H

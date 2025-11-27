@@ -4,10 +4,8 @@
 #include <unistd.h>
 #include <random>
 
-MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER()
-{
-    std::cout<<" hello"<<std::endl;
-}
+MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER() {}
+
 MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
                                            std::vector<channel_type*>&& ul, int64_t bandwidth,
                                            latency_function_type&& latency_function)
