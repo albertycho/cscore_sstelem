@@ -56,6 +56,7 @@ namespace SST {
             node_id = params.find<int64_t>("node_id", 0);
             uint64_t warmup_insts=params.find<int64_t>("warmup_insts", 5000);
             uint64_t sim_insts=params.find<int64_t>("sim_insts", 50000);
+            cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -359,7 +360,7 @@ namespace SST {
 				cache_c.operate_on(global_clock);
 			
 				
-				if(heartbeat_count % 1000 == 0){
+				if(cache_heartbeat_period > 0 && (heartbeat_count % cache_heartbeat_period == 0)){
 					auto cache_formats = champsim::plain_printer::format(cache_c.sim_stats);
 					for (const auto& line : cache_formats) {
 						std::cout << line << '\n';

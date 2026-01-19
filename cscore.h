@@ -71,7 +71,8 @@ namespace SST {
             { "cxl_config", "Deprecated (unused): pool routing is controlled by address_map_config", "" },
             { "cxl_outstanding_limit", "Deprecated (unused): pool backpressure is modeled by link queues", "32" },
             { "address_map_config", "Path to CSV mapping address ranges to socket/pool (node_id,start,size,type,target; node_id matches component node_id)", "" },
-            { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" }
+            { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" },
+            { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
@@ -144,6 +145,7 @@ namespace SST {
         //DBG
         uint64_t fetched_insts=0;
         uint64_t heartbeat_count=0;
+        uint64_t cache_heartbeat_period=1000;
         AddressMap address_map;
         std::string address_map_path;
         std::deque<sst_request> remote_outbox;

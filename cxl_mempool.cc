@@ -63,6 +63,7 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
         std::cout << "  total_enqueued:     " << total_enqueued_ << '\n';
         std::cout << "  total_completed:    " << total_completed_ << '\n';
         std::cout << "  pending_responses:  " << pending_.size() << '\n';
+        std::cout << std::flush;
     }
     return false;
 }
