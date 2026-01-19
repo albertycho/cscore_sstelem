@@ -11,9 +11,9 @@ MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_peri
                                            latency_function_type&& latency_function)
     : operable(mc_period)
     , queues(std::move(ul))
-    , phys_queues(
+    , lat_bw_queues(
         queues.size(), 
-        phys_channel_type(
+        lat_bw_queue_type(
             /*badwidth=*/bandwidth, 
             /*latency_function=*/std::forward<latency_function_type>(latency_function)))
 {
@@ -34,10 +34,10 @@ long MY_MEMORY_CONTROLLER::operate()
     for(size_t i = 0; i < queues.size(); ++i) {
         if(queues[i] == nullptr) continue;
         auto& champsim_channel = *queues[i];
-        auto& phys_channel = phys_queues[i];
+        auto& lat_bw_queue = lat_bw_queues[i];
 
         // Get fulfilled requests
-        auto completed_requests = phys_channel.on_tick();
+        auto completed_requests = lat_bw_queue.on_tick();
         while(!completed_requests.empty()) {
             auto& req = completed_requests.back();
             if(req.response_requested) {
@@ -47,21 +47,21 @@ long MY_MEMORY_CONTROLLER::operate()
             progress++;
         }
 
-        // Drain requests from the champsim channel, to the physical channel
-        auto drain_into_phys = [&](auto& q) {
+        // Drain requests from the champsim channel into the latency/bandwidth queue
+        auto drain_into_queue = [&](auto& q) {
             while(!q.empty()) {
-                phys_channel.add_packet(std::move(q.front()));
+                lat_bw_queue.add_packet(std::move(q.front()));
                 q.pop_front();
                 progress++;
             }
         };
-        drain_into_phys(champsim_channel.RQ);
-        drain_into_phys(champsim_channel.PQ);
-        drain_into_phys(champsim_channel.WQ);
+        drain_into_queue(champsim_channel.RQ);
+        drain_into_queue(champsim_channel.PQ);
+        drain_into_queue(champsim_channel.WQ);
 
         // // Warn if more than one response was queued for this channel
-        // if (phys_channel.returned.size() > 1) {
-        //     std::cerr << "Warning: channel returned queue has " << phys_channel.returned.size() << " responses (expected <=1) at "
+        // if (lat_bw_queue.returned.size() > 1) {
+        //     std::cerr << "Warning: channel returned queue has " << lat_bw_queue.returned.size() << " responses (expected <=1) at "
         //               << static_cast<const void*>(ul) << std::endl;
         // }
     }

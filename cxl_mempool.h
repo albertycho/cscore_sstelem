@@ -1,16 +1,16 @@
 #pragma once
 
 #include <cstdint>
-#include <cstdint>
-#include <deque>
-#include <fstream>
+#include <limits>
 #include <string>
+#include <unordered_map>
 
 #include <sst/core/component.h>
 #include <sst/core/link.h>
 
+#include "channel.h"
+#include "my_memory_controller.h"
 #include "SST_CS_packets.h"
-#include "physical_channel.h"
 
 
 namespace SST {
@@ -31,10 +31,11 @@ public:
 
     SST_ELI_DOCUMENT_PARAMS(
         { "clock", "Clock frequency for the memory pool", "1GHz" },
-        { "device_bandwidth", "Device side bandwidth in bytes per cycle", "0" },
-        { "memory_bandwidth", "Memory side bandwidth in bytes per cycle", "0" },
+        { "device_bandwidth", "Device side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
+        { "memory_bandwidth", "Memory side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "latency_cycles", "Fixed latency (in cycles) for the CXL path", "0" },
-        { "heartbeat_file", "Optional path to append CXL stats", "" }
+        { "pool_node_id", "Logical node id used in fabric headers", "100" },
+        { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" }
     )
 
     SST_ELI_DOCUMENT_PORTS(
@@ -105,27 +106,34 @@ public:
     )
 
 private:
-    using ResponseQueue = std::deque<sst_response>;
+    struct OutstandingRequest {
+        uint32_t cpu = 0;
+        uint32_t sst_cpu = 0;
+        uint32_t src_node = std::numeric_limits<uint32_t>::max();
+        uint32_t dst_node = std::numeric_limits<uint32_t>::max();
+    };
 
     bool clock_tick(SST::Cycle_t current);
     void handle_request(SST::Event* ev);
-    void produce_placeholder_response(const sst_request& request);
+    void produce_placeholder_response(const champsim::channel::response_type& response);
 
     uint64_t device_bandwidth_;
     uint64_t memory_bandwidth_;
     int64_t latency_cycles_;
+    uint32_t pool_node_id_ = 100;
 
     std::string clock_frequency_;
     static constexpr int MAX_CXL_PORTS = 64;
     SST::Link* core_links_[MAX_CXL_PORTS] = {};
 
-    ResponseQueue responses_;
-    physical_channel<sst_request> requests_;
-
+    champsim::channel mem_channel_{};
+    MY_MEMORY_CONTROLLER mem_ctrl_;
+    uint64_t next_tag_ = 1;
+    std::unordered_map<uint64_t, OutstandingRequest> pending_;
     uint64_t tick_count_ = 0;
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
-    std::ofstream stats_file_;
+    uint64_t heartbeat_period_ = 1000;
 };
 
 } // namespace csimCore

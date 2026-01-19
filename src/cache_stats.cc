@@ -13,5 +13,11 @@ cache_stats operator-(cache_stats lhs, cache_stats rhs)
   result.misses = lhs.misses - rhs.misses;
 
   result.total_miss_latency_cycles = lhs.total_miss_latency_cycles - rhs.total_miss_latency_cycles;
+  result.pool_accesses = lhs.pool_accesses - rhs.pool_accesses;
+  result.pool_completed = lhs.pool_completed - rhs.pool_completed;
+  result.pool_latency_sum = lhs.pool_latency_sum - rhs.pool_latency_sum;
+  for (std::size_t idx = 0; idx < result.pool_latency_hist.size(); ++idx) {
+    result.pool_latency_hist[idx] = lhs.pool_latency_hist[idx] - rhs.pool_latency_hist[idx];
+  }
   return result;
 }

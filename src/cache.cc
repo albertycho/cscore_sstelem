@@ -32,6 +32,23 @@
 #include "util/bits.h"
 #include "util/span.h"
 
+namespace
+{
+std::size_t pool_latency_bin(uint64_t cycles)
+{
+  if (cycles == 0) {
+    return 0;
+  }
+  auto idx = static_cast<std::size_t>(63 - __builtin_clzll(cycles));
+  return std::min(idx, cache_stats::POOL_LAT_HIST_BINS - 1);
+}
+
+void record_pool_latency(cache_stats& stats, uint64_t cycles)
+{
+  stats.pool_latency_hist.at(pool_latency_bin(cycles))++;
+}
+} // namespace
+
 CACHE::CACHE(CACHE&& other)
     : operable(other),
 
@@ -106,6 +123,7 @@ CACHE::mshr_type::mshr_type(const tag_lookup_type& req, champsim::chrono::clock:
 
 CACHE::mshr_type CACHE::mshr_type::merge(mshr_type predecessor, mshr_type successor)
 {
+  constexpr auto max_time = champsim::chrono::clock::time_point::max();
   std::vector<uint64_t> merged_instr{};
   std::vector<std::deque<response_type>*> merged_return{};
 
@@ -122,6 +140,11 @@ CACHE::mshr_type CACHE::mshr_type::merge(mshr_type predecessor, mshr_type succes
   retval.instr_depend_on_me = merged_instr;
   retval.to_return = merged_return;
   retval.data_promise = predecessor.data_promise;
+  retval.remote_issue_time = predecessor.remote_issue_time;
+  if (retval.remote_issue_time == max_time) {
+    retval.remote_issue_time = successor.remote_issue_time;
+  }
+  retval.remote_is_pool = predecessor.remote_is_pool || successor.remote_is_pool;
 
   if constexpr (champsim::debug_print) {
     if (successor.type == access_type::PREFETCH) {
@@ -333,14 +356,9 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
   // check mshr (search both queues)
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
-  bool in_cxl_queue = false;
-  if (mshr_entry == MSHR.end()) {
-    mshr_entry = std::find_if(std::begin(CXL_MSHR), std::end(CXL_MSHR), matches_address(handle_pkt.address));
-    in_cxl_queue = true;
-  }
-  bool mshr_full = ((MSHR.size() + CXL_MSHR.size()) >= MSHR_SIZE);
+  bool mshr_full = (MSHR.size() >= MSHR_SIZE); // TODO: enforce per-dest limits to avoid starvation
 
-  if (mshr_entry != (in_cxl_queue ? CXL_MSHR.end() : MSHR.end())) // miss already inflight
+  if (mshr_entry != MSHR.end()) // miss already inflight
   {
     if (mshr_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
       // Mark the prefetch as useful
@@ -358,32 +376,44 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
     }
     
-    if (cxl_buffer) {
-      if(cxl_buffer->is_cxl_address(mshr_pkt.second.address.to<uint64_t>())) {
+    // Remote/pool path: consult home map to see if address is owned by another node.
+    if (address_map && send_remote) {
+      auto entry = address_map->lookup(static_cast<uint32_t>(node_id), mshr_pkt.second.v_address.to<uint64_t>());
+      if (entry && entry->type != SST::csimCore::AddressType::Local) {
         sst_request sreq;
+        sreq.src_node = static_cast<uint32_t>(node_id);
+        sreq.dst_node = static_cast<uint32_t>(entry->target);
         sreq.forward_checked = mshr_pkt.second.forward_checked;
         sreq.is_translated = mshr_pkt.second.is_translated;
         sreq.response_requested = mshr_pkt.second.response_requested;
         sreq.type = mshr_pkt.second.type;
         sreq.pf_metadata = mshr_pkt.second.pf_metadata;
         sreq.cpu = mshr_pkt.second.cpu;
-        sreq.sst_cpu = cxl_target_id;
-        sreq.address = mshr_pkt.second.address.to<uint64_t>();
+        sreq.sst_cpu = node_id; // return path target
+        sreq.address = (entry->type == SST::csimCore::AddressType::Pool)
+                           ? mshr_pkt.second.v_address.to<uint64_t>()
+                           : mshr_pkt.second.address.to<uint64_t>();
         sreq.v_address = mshr_pkt.second.v_address.to<uint64_t>();
         sreq.data = mshr_pkt.second.data.to<uint64_t>();
         sreq.instr_id = mshr_pkt.second.instr_id;
         sreq.ip = mshr_pkt.second.ip.to<uint64_t>();
         sreq.asid[0] = mshr_pkt.second.asid[0];
         sreq.asid[1] = mshr_pkt.second.asid[1];
-        auto accepted = cxl_buffer->try_enqueue(sreq, current_time.time_since_epoch().count());
+
+        bool accepted = send_remote(sreq); // pool is treated as remote memory
         if (accepted) {
           if (mshr_pkt.second.response_requested) {
-            CXL_MSHR.emplace_back(std::move(mshr_pkt.first));
+            mshr_pkt.first.remote_issue_time = current_time;
+            mshr_pkt.first.remote_is_pool = (entry->type == SST::csimCore::AddressType::Pool);
+            MSHR.emplace_back(std::move(mshr_pkt.first));
+          }
+          if (entry->type == SST::csimCore::AddressType::Pool) {
+            sim_stats.pool_accesses++;
           }
           sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
           return true;
         }
-        return false; // stall if we can't push to CXL buffer since we must service via mempool
+        return false;
       }
     }
 
@@ -484,7 +514,7 @@ long CACHE::operate()
 
   // Perform fills
   champsim::bandwidth fill_bw{MAX_FILL};
-  for (auto q : {std::ref(MSHR), std::ref(CXL_MSHR), std::ref(inflight_writes)}) {
+  for (auto q : {std::ref(MSHR), std::ref(inflight_writes)}) {
     auto [fill_begin, fill_end] = champsim::get_span_p(std::cbegin(q.get()), std::cend(q.get()), fill_bw,
                                                        [time = current_time](const auto& x) { return x.data_promise.is_ready_at(time); });
     auto complete_end = std::find_if_not(fill_begin, fill_end, [this](const auto& x) { return this->handle_fill(x); });
@@ -717,6 +747,14 @@ void CACHE::finish_translation(const response_type& packet)
 
 void CACHE::issue_translation(tag_lookup_type& q_entry) const
 {
+  if (address_map) {
+    auto entry = address_map->lookup(static_cast<uint32_t>(node_id), q_entry.v_address.to<uint64_t>());
+    if (entry && entry->type == SST::csimCore::AddressType::Pool) {
+      q_entry.address = q_entry.v_address;
+      q_entry.is_translated = true;
+      return;
+    }
+  }
   if (!q_entry.translate_issued && !q_entry.is_translated) {
     request_type fwd_pkt;
     fwd_pkt.asid[0] = q_entry.asid[0];
@@ -743,7 +781,7 @@ void CACHE::issue_translation(tag_lookup_type& q_entry) const
   }
 }
 
-std::size_t CACHE::get_mshr_occupancy() const { return std::size(MSHR) + std::size(CXL_MSHR); }
+std::size_t CACHE::get_mshr_occupancy() const { return std::size(MSHR); }
 
 std::vector<std::size_t> CACHE::get_rq_occupancy() const
 {
@@ -931,6 +969,10 @@ void CACHE::end_phase(unsigned finished_cpu)
   roi_stats.pf_useful = sim_stats.pf_useful;
   roi_stats.pf_useless = sim_stats.pf_useless;
   roi_stats.pf_fill = sim_stats.pf_fill;
+  roi_stats.pool_accesses = sim_stats.pool_accesses;
+  roi_stats.pool_completed = sim_stats.pool_completed;
+  roi_stats.pool_latency_sum = sim_stats.pool_latency_sum;
+  roi_stats.pool_latency_hist = sim_stats.pool_latency_hist;
 
   for (auto* ul : upper_levels) {
     ul->roi_stats.RQ_ACCESS = ul->sim_stats.RQ_ACCESS;
@@ -951,23 +993,21 @@ void CACHE::end_phase(unsigned finished_cpu)
   }
 }
 
-bool CACHE::handle_cxl_response(const sst_response& resp)
+bool CACHE::handle_remote_response(const sst_response& resp)
 {
+  constexpr auto max_time = champsim::chrono::clock::time_point::max();
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(champsim::address{resp.address}));
-  assert(mshr_entry != MSHR.end() && "MSHR entry not found for returned CXL address");
-  // Logic here can be simplified a lot if we are gaurenteed that the responses are serviced in order.
-  // I'm thinking not because more advanced routing could lead to this not being true?
-
-  
-  // Mark the data ready and let the normal fill pipeline retire it. We don't erase it
-  // and let the normal cache mechanics handle things like eviction, etc. 
+  assert(mshr_entry != MSHR.end() && "MSHR entry not found for returned remote address");
+  if (mshr_entry->remote_is_pool && mshr_entry->remote_issue_time != max_time) {
+    auto latency_cycles = (current_time - mshr_entry->remote_issue_time) / clock_period;
+    sim_stats.pool_completed++;
+    sim_stats.pool_latency_sum += latency_cycles;
+    record_pool_latency(sim_stats, latency_cycles);
+  }
   mshr_type::returned_value finished_value{champsim::address{resp.data}, resp.pf_metadata};
   mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
-
-  // Move the ready entry to the front of its queue so it is considered on the
-  // next fill pass. Again, if we are gaurenteed this is the first entry we don't 
-  // need to do this.
-  std::rotate(CXL_MSHR.begin(), mshr_entry, std::next(mshr_entry));
+  // Move the ready entry to the front so it is considered on the next fill pass
+  std::rotate(MSHR.begin(), mshr_entry, std::next(mshr_entry));
   return true;
 }
 

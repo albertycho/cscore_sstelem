@@ -5,29 +5,6 @@
 #include <limits>
 #include <iostream>
 #include "access_type.h"
-typedef struct NW_Packet{
-    uint64_t sender_core_id; // cpu number of the sender
-    uint64_t receiver_core_id; // cpu number of the receiver
-    uint64_t instr_id; // Unique to each instruction
-    //XCHG_MPI_enum isMsg; // Indicates whether the XCHG instruction is MPI_Send or MPI_Recv
-    uint64_t payload; // modify the payload accordingly
-    // int payload;
-
-    uint64_t received_cycle; // absolute cycle number
-    uint64_t event_cycle; // the cycle at which the instrction's execution is marked as complete
-} NW_packet_t;
-
-// typedef struct CXL_Packet{
-//     uint64_t sender_core_id; // cpu number of the sender
-//     uint64_t req_tag; // Unique tag for each request
-//     uint64_t rw; // RW
-//     uint64_t address;
-//     uint64_t v_address;
-//     uint64_t instr_id;
-//     uint64_t ip;
-//     uint64_t event_cycle; // the cycle at which the instrction's execution is marked as complete
-// } CXL_packet_t;
-
 // enum class access_type : unsigned {
 //   LOAD = 0,
 //   RFO,
@@ -41,6 +18,9 @@ typedef struct NW_Packet{
     sst_request / response are same as request and response, removed intr_depend_on_me
  */
 struct sst_request {
+    uint32_t src_node = std::numeric_limits<uint32_t>::max();
+    uint32_t dst_node = std::numeric_limits<uint32_t>::max();
+
     bool forward_checked = false;
     bool is_translated = true;
     bool response_requested = true;
@@ -61,6 +41,9 @@ struct sst_request {
 };
 
 struct sst_response {
+    uint32_t src_node = std::numeric_limits<uint32_t>::max();
+    uint32_t dst_node = std::numeric_limits<uint32_t>::max();
+
     uint64_t address;
     uint64_t v_address;
     uint64_t data;

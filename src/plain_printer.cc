@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <limits>
 #include <ratio>
 #include <string_view> // for string_view
 #include <utility>
@@ -35,6 +37,24 @@ auto print_ratio(N num, D denom)
     return fmt::format("{:.4g}", std::ceil(num) / std::ceil(denom));
   }
   return std::string{"-"};
+}
+
+uint64_t hist_percentile(const std::array<uint64_t, cache_stats::POOL_LAT_HIST_BINS>& hist, double pct)
+{
+  uint64_t total = std::accumulate(hist.begin(), hist.end(), uint64_t{0});
+  if (total == 0) {
+    return 0;
+  }
+  uint64_t target = static_cast<uint64_t>(std::ceil(total * pct));
+  uint64_t accum = 0;
+  for (std::size_t idx = 0; idx < hist.size(); ++idx) {
+    accum += hist[idx];
+    if (accum >= target) {
+      auto shift = std::min<std::size_t>(idx + 1, 63);
+      return 1ULL << shift;
+    }
+  }
+  return std::numeric_limits<uint64_t>::max();
 }
 } // namespace
 
@@ -126,6 +146,12 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
     lines.push_back(
         fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
   }
+
+  auto pool_avg = ::print_ratio(stats.pool_latency_sum, stats.pool_completed);
+  auto pool_p95 = stats.pool_completed > 0 ? fmt::format("{}", hist_percentile(stats.pool_latency_hist, 0.95)) : "-";
+  auto pool_p99 = stats.pool_completed > 0 ? fmt::format("{}", hist_percentile(stats.pool_latency_hist, 0.99)) : "-";
+  lines.push_back(fmt::format("{} POOL ACCESS: {:10} COMPLETED: {:10} AVG_LAT: {} cycles P95: {} P99: {}", stats.name, stats.pool_accesses,
+                              stats.pool_completed, pool_avg, pool_p95, pool_p99));
 
   return lines;
 }

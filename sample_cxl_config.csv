@@ -1,0 +1,11 @@
+# node_id,start,size,type,target
+# This file is consumed by AddressMap (address_map_config) and is interpreted on *virtual* addresses.
+# The node_id field is matched against the per-process node_id used by the simulator.
+# For pool ranges, ensure the CXL buffer VA range is fixed per node_id.
+#
+# type: local | remote | pool
+# target: destination node id (for remote/pool); ignored for local
+#
+# Example: map 1 MiB at 0x8000_0000 to a pool node (id 100), and 1 MiB at 0x9000_0000 to socket 7.
+0,0x80000000,0x100000,pool,100
+1,0x90000000,0x100000,pool,100

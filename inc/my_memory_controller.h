@@ -8,7 +8,7 @@
 #include "chrono.h"
 #include "operable.h"
 #include "channel.h"
-#include "physical_channel.h"
+#include "lat_bw_queue.h"
 
 // 64B request
 // 2 GHz: cycle = 0.5 ns
@@ -38,8 +38,8 @@ const size_t DEFAULT_BW = 80; /* cycles per request */
 class MY_MEMORY_CONTROLLER : public champsim::operable {
 public:
     using channel_type = champsim::channel;
-    using phys_channel_type = physical_channel<channel_type::request_type>;
-    using latency_function_type = phys_channel_type::latency_function_type;
+    using lat_bw_queue_type = lat_bw_queue<channel_type::request_type>;
+    using latency_function_type = lat_bw_queue_type::latency_function_type;
 
     MY_MEMORY_CONTROLLER();
     MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
@@ -55,7 +55,7 @@ public:
 
 private:
     std::vector<channel_type*> queues;
-    std::vector<phys_channel_type> phys_queues;
+    std::vector<lat_bw_queue_type> lat_bw_queues;
     //champsim::data::bytes channel_width;
     champsim::data::bytes size_ = champsim::data::bytes{1}; //orig 128?
 

@@ -25,10 +25,12 @@ libcscore_la_SOURCES = \
     csEvent.h \
     convert_ev_packet.h \
 	convert_ev_packet.cc \
+    inc/address_map.h \
+    src/address_map.cc \
     cxl_mempool.h \
     cxl_mempool.cc \
-	NW.h \
-	NW.cc \
+    fabric.h \
+    fabric.cc \
     vcpkg_installed/x64-linux/include/fmt/core.h \
     vcpkg_installed/x64-linux/include/lzma.h \
     branch/bimodal/bimodal.cc \
@@ -80,7 +82,7 @@ libcscore_la_SOURCES = \
     inc/ooo_cpu.h \
     inc/operable.h \
     inc/phase_info.h \
-    inc/physical_channel.h \
+    inc/lat_bw_queue.h \
     inc/ptw_builder.h \
     inc/ptw.h \
     inc/register_allocator.h \
@@ -166,4 +168,3 @@ libcscore_la_LDFLAGS = -module -avoid-version
 install-exec-hook:
 	$(SST_REGISTER_TOOL) SST_ELEMENT_SOURCE     cscore=$(abs_srcdir)
 	$(SST_REGISTER_TOOL) SST_ELEMENT_TESTS      cscore=$(abs_srcdir)/tests
-

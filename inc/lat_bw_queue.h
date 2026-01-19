@@ -8,7 +8,7 @@
 #include <vector>
 
 template<typename T>
-class physical_channel {
+class lat_bw_queue {
     struct entry {
         T payload;
         int64_t injection_time;
@@ -24,7 +24,7 @@ class physical_channel {
     };
 public:
     using latency_function_type = std::function<int64_t(double)>;
-    physical_channel(int64_t bandwidth, latency_function_type&& latency_function)
+    lat_bw_queue(int64_t bandwidth, latency_function_type&& latency_function)
     : bandwidth{bandwidth} 
     , internal_clock{0}
     , last_insert_time{-bandwidth}
