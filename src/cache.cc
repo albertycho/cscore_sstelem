@@ -390,9 +390,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
         sreq.pf_metadata = mshr_pkt.second.pf_metadata;
         sreq.cpu = mshr_pkt.second.cpu;
         sreq.sst_cpu = node_id; // return path target
-        sreq.address = (entry->type == SST::csimCore::AddressType::Pool)
-                           ? mshr_pkt.second.v_address.to<uint64_t>()
-                           : mshr_pkt.second.address.to<uint64_t>();
+        sreq.address = mshr_pkt.second.address.to<uint64_t>();
         sreq.v_address = mshr_pkt.second.v_address.to<uint64_t>();
         sreq.data = mshr_pkt.second.data.to<uint64_t>();
         sreq.instr_id = mshr_pkt.second.instr_id;
@@ -750,7 +748,8 @@ void CACHE::issue_translation(tag_lookup_type& q_entry) const
   if (address_map) {
     auto entry = address_map->lookup(static_cast<uint32_t>(node_id), q_entry.v_address.to<uint64_t>());
     if (entry && entry->type == SST::csimCore::AddressType::Pool) {
-      q_entry.address = q_entry.v_address;
+      auto offset = q_entry.v_address.to<uint64_t>() - entry->start;
+      q_entry.address = champsim::address{pool_pa_base + offset};
       q_entry.is_translated = true;
       return;
     }

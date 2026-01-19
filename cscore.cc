@@ -56,6 +56,15 @@ namespace SST {
             node_id = params.find<int64_t>("node_id", 0);
             uint64_t warmup_insts=params.find<int64_t>("warmup_insts", 5000);
             uint64_t sim_insts=params.find<int64_t>("sim_insts", 50000);
+            auto dram_size_bytes = params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES);
+            pool_pa_base = params.find<uint64_t>("pool_pa_base", 0);
+            if (pool_pa_base == 0) {
+                pool_pa_base = dram_size_bytes;
+            }
+            if (pool_pa_base < dram_size_bytes) {
+                std::cerr << "WARNING: pool_pa_base overlaps DRAM range. Forcing pool_pa_base = dram_size_bytes." << std::endl;
+                pool_pa_base = dram_size_bytes;
+            }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
 
 			// Older version registered this as primary component
@@ -305,6 +314,7 @@ namespace SST {
 					cache_c.address_map = nullptr;
 					cache_c.send_remote = {};
 				}
+				cache_c.pool_pa_base = pool_pa_base;
 			}
 
 			// Dump stat periodically
