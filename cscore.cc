@@ -36,7 +36,11 @@ namespace SST {
 
 		csimCore::csimCore(ComponentId_t id, Params& params) : Component(id),
 		//DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192),
-		MYDRAM(champsim::chrono::picoseconds{500}, {&channels.at(1)}),
+		MYDRAM(champsim::chrono::picoseconds{500},
+               {&channels.at(1)},
+               DEFAULT_BW,
+               estimate_latency_percentile,
+               champsim::data::bytes{params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES)}),
 			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{500*200}, MYDRAM, 1)
 		{
 			/* This function sets up and builds core (and cache and bp and etc) */

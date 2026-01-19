@@ -34,6 +34,7 @@ inline int64_t estimate_latency_percentile(double util) {
 }
 
 const size_t DEFAULT_BW = 80; /* cycles per request */
+constexpr uint64_t DEFAULT_DRAM_SIZE_BYTES = 1ULL << 30;
 
 class MY_MEMORY_CONTROLLER : public champsim::operable {
 public:
@@ -45,7 +46,8 @@ public:
     MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
                          std::vector<channel_type*>&& queues, 
                          int64_t bandwidth = DEFAULT_BW,
-                         latency_function_type&& latency_function = estimate_latency_percentile);
+                         latency_function_type&& latency_function = estimate_latency_percentile,
+                         champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES});
 
     void initialize() final;
     long operate() final;
@@ -57,7 +59,7 @@ private:
     std::vector<channel_type*> queues;
     std::vector<lat_bw_queue_type> lat_bw_queues;
     //champsim::data::bytes channel_width;
-    champsim::data::bytes size_ = champsim::data::bytes{1}; //orig 128?
+    champsim::data::bytes size_ = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES};
 
 public:
     champsim::data::bytes size() const { return size_; }

@@ -70,7 +70,8 @@ namespace SST {
             { "trace_name", "Path to input trace file", ""},
             { "cxl_config", "Deprecated (unused): pool routing is controlled by address_map_config", "" },
             { "cxl_outstanding_limit", "Deprecated (unused): pool backpressure is modeled by link queues", "32" },
-            { "address_map_config", "Path to CSV mapping address ranges to socket/pool (node_id,start,size,type,target; node_id matches component node_id)", "" }
+            { "address_map_config", "Path to CSV mapping address ranges to socket/pool (node_id,start,size,type,target; node_id matches component node_id)", "" },
+            { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
@@ -118,9 +119,9 @@ namespace SST {
 				champsim::channel{64, 32, 64, champsim::data::bits{champsim::lg2(64)}, 1},
 				champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1} // 12
         	};
-        VirtualMemory vmem;
         //MEMORY_CONTROLLER DRAM;
         MY_MEMORY_CONTROLLER MYDRAM;
+        VirtualMemory vmem;
         //MEMORY_CONTROLLER DRAM = MEMORY_CONTROLLER(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192);
         //MEMORY_CONTROLLER DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192);
         

@@ -8,7 +8,8 @@ MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER() {}
 
 MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
                                            std::vector<channel_type*>&& ul, int64_t bandwidth,
-                                           latency_function_type&& latency_function)
+                                           latency_function_type&& latency_function,
+                                           champsim::data::bytes size)
     : operable(mc_period)
     , queues(std::move(ul))
     , lat_bw_queues(
@@ -16,6 +17,7 @@ MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_peri
         lat_bw_queue_type(
             /*badwidth=*/bandwidth, 
             /*latency_function=*/std::forward<latency_function_type>(latency_function)))
+    , size_(size)
 {
     auto sleepcnt = rand() % 10;
     sleep(sleepcnt);
