@@ -72,7 +72,7 @@ namespace SST {
 		    primaryComponentDoNotEndSim();
 			
 
-			tmp_instr.msgSize=0;
+			// tmp_instr.msgSize=0;
 
 			std::cout<<"trace_name: "<<trace_name<<std::endl;
 			std::vector<std::string> trace_names;
