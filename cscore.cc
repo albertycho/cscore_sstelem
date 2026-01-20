@@ -26,9 +26,71 @@
 #include <optional>
 #include <sstream>
 
+#include "trace_instruction.h"
+
 const auto start_time = std::chrono::steady_clock::now();
 
 std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time); }
+
+namespace {
+bool is_compressed_trace(const std::string& path)
+{
+	if (path.size() < 3) {
+		return false;
+	}
+	const auto tail2 = path.substr(path.size() - 2);
+	const auto tail3 = path.substr(path.size() - 3);
+	return (tail2 == "gz" || tail2 == "xz" || tail3 == "bz2");
+}
+
+void dump_trace_mem_samples(const std::string& path, std::size_t max_instrs)
+{
+	if (max_instrs == 0) {
+		return;
+	}
+	if (is_compressed_trace(path)) {
+		std::cerr << "TRACE_DEBUG: compressed traces are not supported: " << path << std::endl;
+		return;
+	}
+	std::ifstream f(path, std::ios::binary);
+	if (!f) {
+		std::cerr << "TRACE_DEBUG: failed to open trace: " << path << std::endl;
+		return;
+	}
+
+	std::size_t printed = 0;
+	for (std::size_t i = 0; i < max_instrs; ++i) {
+		input_instr instr{};
+		f.read(reinterpret_cast<char*>(&instr), sizeof(instr));
+		if (!f) {
+			break;
+		}
+
+		std::vector<uint64_t> addrs;
+		for (auto addr : instr.destination_memory) {
+			if (addr != 0) {
+				addrs.push_back(addr);
+			}
+		}
+		for (auto addr : instr.source_memory) {
+			if (addr != 0) {
+				addrs.push_back(addr);
+			}
+		}
+
+		if (!addrs.empty()) {
+			std::cout << "TRACE_DEBUG instr " << i << " addrs:";
+			for (auto addr : addrs) {
+				std::cout << " 0x" << std::hex << addr << std::dec;
+			}
+			std::cout << std::endl;
+			if (++printed >= max_instrs) {
+				break;
+			}
+		}
+	}
+}
+} // namespace
 
 
 namespace SST {
@@ -66,6 +128,7 @@ namespace SST {
                 pool_pa_base = dram_size_bytes;
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
+            auto trace_debug_samples = params.find<uint64_t>("trace_debug_samples", 0);
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -75,6 +138,9 @@ namespace SST {
 			// tmp_instr.msgSize=0;
 
 			std::cout<<"trace_name: "<<trace_name<<std::endl;
+            if (trace_debug_samples > 0) {
+                dump_trace_mem_samples(trace_name, trace_debug_samples);
+            }
 			std::vector<std::string> trace_names;
 			trace_names.push_back(trace_name);
 			traces.push_back(get_tracereader(trace_name, 0, false, true));
