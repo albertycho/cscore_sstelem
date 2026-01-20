@@ -305,13 +305,16 @@ namespace SST {
 				cache_c.begin_phase();
 				cache_c.warmup=false;
 				cache_c.node_id = static_cast<uint32_t>(node_id);
-				if (cache_c.NAME == "LLC" && !address_map_path.empty()) {
+				if (!address_map_path.empty()) {
 					cache_c.address_map = &address_map;
+				} else {
+					cache_c.address_map = nullptr;
+				}
+				if (cache_c.NAME == "LLC" && cache_c.address_map != nullptr) {
 					cache_c.send_remote = [this](const sst_request& req) {
 						return enqueue_remote_request(req);
 					};
 				} else {
-					cache_c.address_map = nullptr;
 					cache_c.send_remote = {};
 				}
 				cache_c.pool_pa_base = pool_pa_base;
