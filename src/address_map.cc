@@ -1,5 +1,6 @@
 #include "address_map.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -16,7 +17,7 @@ AddressType parse_type(const std::string& s) {
 
 bool AddressMap::load(const std::string& path)
 {
-    entries_.clear();
+    entries_by_node_.clear();
     std::ifstream f(path);
     if (!f.is_open()) {
         return false;
@@ -39,17 +40,35 @@ bool AddressMap::load(const std::string& path)
         e.size = std::stoull(size_s, nullptr, 0);
         e.type = parse_type(type_s);
         e.target = static_cast<uint32_t>(std::stoul(target_s, nullptr, 0));
-        entries_.push_back(e);
+        if (e.node_id >= entries_by_node_.size()) {
+            entries_by_node_.resize(e.node_id + 1);
+        }
+        entries_by_node_[e.node_id].push_back(e);
+    }
+
+    for (auto& vec : entries_by_node_) {
+        std::sort(vec.begin(), vec.end(), [](const AddressEntry& a, const AddressEntry& b) {
+            return a.start < b.start;
+        });
     }
     return true;
 }
 
 std::optional<AddressEntry> AddressMap::lookup(uint32_t node_id, uint64_t addr) const
 {
-    for (const auto& e : entries_) {
-        if (e.matches(node_id, addr)) {
-            return e;
-        }
+    if (node_id >= entries_by_node_.size() || entries_by_node_[node_id].empty()) {
+        return std::nullopt;
+    }
+
+    const auto& vec = entries_by_node_[node_id];
+    auto ub = std::upper_bound(vec.begin(), vec.end(), addr,
+                               [](uint64_t value, const AddressEntry& e) { return value < e.start; });
+    if (ub == vec.begin()) {
+        return std::nullopt;
+    }
+    const auto& candidate = *std::prev(ub);
+    if (candidate.contains(addr)) {
+        return candidate;
     }
     return std::nullopt;
 }

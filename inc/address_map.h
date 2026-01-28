@@ -30,7 +30,7 @@ public:
     std::optional<AddressEntry> lookup(uint32_t node_id, uint64_t addr) const;
 
 private:
-    std::vector<AddressEntry> entries_;
+    std::vector<std::vector<AddressEntry>> entries_by_node_;
 };
 
 } // namespace csimCore
