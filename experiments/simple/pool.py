@@ -22,7 +22,6 @@ for i in range(NUM_NODES):
         "dram_size_bytes": 1073741824,  # 1 GiB
         "pool_pa_base": 1073741824,     # pool PA starts at 1 GiB
         "cache_heartbeat_period":1000,
-        "trace_debug_samples": 50,
     })
 
     fabric = sst.Component(f"fabric{i}", "cscore.Fabric")
@@ -38,4 +37,3 @@ for i in range(NUM_NODES):
     l1 = sst.Link(f"fabric{i}_to_pool")
     l1.connect((fabric, "port_handler1", "1ns"),
                (pool, f"port_handler_cores{i}", "1ns"))
-

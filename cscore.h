@@ -73,8 +73,7 @@ namespace SST {
             { "address_map_config", "Path to CSV mapping address ranges to socket/pool (node_id,start,size,type,target; node_id matches component node_id)", "" },
             { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" },
             { "pool_pa_base", "Base physical address for pool mapping (0 means use dram_size_bytes)", "0" },
-            { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
-            { "trace_debug_samples", "Print first N traced instructions with nonzero memory addresses (0 disables)", "0" }
+            { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
