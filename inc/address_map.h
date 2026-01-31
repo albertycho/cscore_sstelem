@@ -16,6 +16,7 @@ struct AddressEntry {
     uint64_t size = 0;
     AddressType type = AddressType::Local;
     uint32_t target = 0; // socket id for Remote, ignored for Local, pool id for Pool if needed
+    uint64_t pool_offset = 0; // offset within the pool PA space for this range
 
     bool contains(uint64_t addr) const { return addr >= start && addr < start + size; }
     bool matches(uint32_t node_value, uint64_t addr) const { return node_value == node_id && contains(addr); }

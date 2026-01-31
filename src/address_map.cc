@@ -50,6 +50,13 @@ bool AddressMap::load(const std::string& path)
         std::sort(vec.begin(), vec.end(), [](const AddressEntry& a, const AddressEntry& b) {
             return a.start < b.start;
         });
+        uint64_t pool_running = 0;
+        for (auto& entry : vec) {
+            if (entry.type == AddressType::Pool) {
+                entry.pool_offset = pool_running;
+                pool_running += entry.size;
+            }
+        }
     }
     return true;
 }

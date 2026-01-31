@@ -376,10 +376,16 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
     }
     
-    // Remote/pool path: consult home map to see if address is owned by another node.
+    // Remote/pool path: consult address map to see if address is owned by another node.
     if (address_map && send_remote) {
       auto entry = address_map->lookup(static_cast<uint32_t>(node_id), mshr_pkt.second.v_address.to<uint64_t>());
       if (entry && entry->type != SST::csimCore::AddressType::Local) {
+        if (entry->type == SST::csimCore::AddressType::Pool) {
+          auto offset = mshr_pkt.second.v_address.to<uint64_t>() - entry->start;
+          auto pool_pa = pool_pa_base + entry->pool_offset + offset;
+          mshr_pkt.first.address = champsim::address{pool_pa};
+          mshr_pkt.second.address = champsim::address{pool_pa};
+        }
         sst_request sreq;
         sreq.src_node = static_cast<uint32_t>(node_id);
         sreq.dst_node = static_cast<uint32_t>(entry->target);
@@ -745,15 +751,6 @@ void CACHE::finish_translation(const response_type& packet)
 
 void CACHE::issue_translation(tag_lookup_type& q_entry) const
 {
-  if (address_map) {
-    auto entry = address_map->lookup(static_cast<uint32_t>(node_id), q_entry.v_address.to<uint64_t>());
-    if (entry && entry->type == SST::csimCore::AddressType::Pool) {
-      auto offset = q_entry.v_address.to<uint64_t>() - entry->start;
-      q_entry.address = champsim::address{pool_pa_base + offset};
-      q_entry.is_translated = true;
-      return;
-    }
-  }
   if (!q_entry.translate_issued && !q_entry.is_translated) {
     request_type fwd_pkt;
     fwd_pkt.asid[0] = q_entry.asid[0];
