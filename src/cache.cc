@@ -729,6 +729,14 @@ void CACHE::finish_translation(const response_type& packet)
     [[maybe_unused]] auto old_address = entry.address;
     entry.address = champsim::address{champsim::splice(p_page, champsim::page_offset{entry.v_address})}; // translated address
     entry.is_translated = true;                                                                          // This entry is now translated
+    if (address_map) {
+      auto map_entry = address_map->lookup(static_cast<uint32_t>(node_id), entry.v_address.to<uint64_t>());
+      if (map_entry && map_entry->type == SST::csimCore::AddressType::Pool) {
+        auto offset = entry.v_address.to<uint64_t>() - map_entry->start;
+        auto pool_pa = pool_pa_base + map_entry->pool_offset + offset;
+        entry.address = champsim::address{pool_pa};
+      }
+    }
 
     if constexpr (champsim::debug_print) {
       fmt::print("[{}_TRANSLATE] finish_translation old: {} paddr: {} vaddr: {} type: {} cycle: {}\n", this->NAME, old_address, entry.address, entry.v_address,
