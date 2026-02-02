@@ -59,8 +59,8 @@ namespace SST {
             trace_name = params.find<std::string>("trace_name", "example_tracename.xz");
 			address_map_path = params.find<std::string>("address_map_config", "");
             node_id = params.find<int64_t>("node_id", 0);
-            uint64_t warmup_insts=params.find<int64_t>("warmup_insts", 5000);
-            uint64_t sim_insts=params.find<int64_t>("sim_insts", 50000);
+            warmup_insts = params.find<int64_t>("warmup_insts", 5000);
+            sim_insts = params.find<int64_t>("sim_insts", 50000);
             auto dram_size_bytes = params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES);
             pool_pa_base = params.find<uint64_t>("pool_pa_base", 0);
             if (pool_pa_base == 0) {
@@ -82,7 +82,7 @@ namespace SST {
 			std::cout<<"trace_name: "<<trace_name<<std::endl;
 			std::vector<std::string> trace_names;
 			trace_names.push_back(trace_name);
-			traces.push_back(get_tracereader(trace_name, 0, false, true));
+			traces.push_back(get_tracereader(trace_name, 0, false, false));
 
 			
 			std::cout<<"traces.size(): "<<traces.size()<<std::endl;
@@ -407,6 +407,30 @@ namespace SST {
 
 				curr_core_id++;
 			}
+
+            if (!cores.empty()) {
+                auto retired = static_cast<uint64_t>(cores.front().num_retired);
+                if (!warmup_done && retired >= warmup_insts) {
+                    for (auto& cache : caches) {
+                        cache.begin_phase();
+                    }
+                    for (auto& cpu : cores) {
+                        cpu.begin_phase();
+                    }
+                    warmup_done = true;
+                }
+
+                if (warmup_done && retired >= (warmup_insts + sim_insts)) {
+                    for (auto& cache : caches) {
+                        cache.end_phase(0);
+                    }
+                    for (auto& cpu : cores) {
+                        cpu.end_phase(0);
+                    }
+                    primaryComponentOKToEndSim();
+                    return true;
+                }
+            }
 
 			//std::cout<<"ptw current_cycle after champsim_tick completed: "<<ptws.front().current_cycle()<<std::endl;
 

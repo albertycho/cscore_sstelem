@@ -73,7 +73,9 @@ namespace SST {
             { "address_map_config", "Path to CSV mapping address ranges to socket/pool (node_id,start,size,type,target; node_id matches component node_id)", "" },
             { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" },
             { "pool_pa_base", "Base physical address for pool mapping (0 means use dram_size_bytes)", "0" },
-            { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" }
+            { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
+            { "warmup_insts", "Warmup instructions before stats collection", "5000" },
+            { "sim_insts", "Simulation instructions to run after warmup", "50000" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
@@ -148,6 +150,9 @@ namespace SST {
         uint64_t heartbeat_count=0;
         uint64_t cache_heartbeat_period=1000;
         uint64_t pool_pa_base=0;
+        uint64_t warmup_insts=0;
+        uint64_t sim_insts=0;
+        bool warmup_done=false;
         AddressMap address_map;
         std::string address_map_path;
         std::deque<sst_request> remote_outbox;
