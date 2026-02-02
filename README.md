@@ -27,6 +27,7 @@ Format:
 ```csv
 # node_id,start,size,type,target
 ```
+Ranges must be **page‑granular**: `start` and `size` must be page‑aligned (the loader will error if not).
 
 Example (map one 4 KiB VA page to pool 100):
 ```csv

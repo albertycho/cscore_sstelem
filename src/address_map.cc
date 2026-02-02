@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "champsim.h"
 namespace SST {
 namespace csimCore {
 
@@ -24,7 +25,9 @@ bool AddressMap::load(const std::string& path)
     }
 
     std::string line;
+    std::size_t line_no = 0;
     while (std::getline(f, line)) {
+        ++line_no;
         if (line.empty() || line[0] == '#') continue;
         std::stringstream ss(line);
         std::string node_s, start_s, size_s, type_s, target_s;
@@ -36,8 +39,16 @@ bool AddressMap::load(const std::string& path)
 
         AddressEntry e;
         e.node_id = static_cast<uint32_t>(std::stoul(node_s, nullptr, 0));
-        e.start = std::stoull(start_s, nullptr, 0);
-        e.size = std::stoull(size_s, nullptr, 0);
+        const uint64_t raw_start = std::stoull(start_s, nullptr, 0);
+        const uint64_t raw_size = std::stoull(size_s, nullptr, 0);
+        if ((raw_start % PAGE_SIZE) != 0 || (raw_size % PAGE_SIZE) != 0) {
+            std::ostringstream msg;
+            msg << "address_map: start/size must be page-aligned at line " << line_no
+                << " (start=" << start_s << ", size=" << size_s << ") : " << line;
+            throw std::runtime_error(msg.str());
+        }
+        e.start = raw_start;
+        e.size = raw_size;
         e.type = parse_type(type_s);
         e.target = static_cast<uint32_t>(std::stoul(target_s, nullptr, 0));
         if (e.node_id >= entries_by_node_.size()) {
