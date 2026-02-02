@@ -124,6 +124,22 @@ std::size_t VirtualMemory::available_ppages() const { return (ppage_free_list.si
 
 std::pair<champsim::page_number, champsim::chrono::clock::duration> VirtualMemory::va_to_pa(uint32_t cpu_num, champsim::page_number vaddr)
 {
+  if (address_map != nullptr) {
+    const uint64_t vaddr_bytes = vaddr.to<uint64_t>() << LOG2_PAGE_SIZE;
+    auto entry = address_map->lookup(node_id, vaddr_bytes);
+    if (entry && entry->type == SST::csimCore::AddressType::Pool) {
+      const uint64_t start_page = entry->start >> LOG2_PAGE_SIZE;
+      const uint64_t offset_pages = vaddr.to<uint64_t>() - start_page;
+      const uint64_t pool_base_page = pool_pa_base >> LOG2_PAGE_SIZE;
+      const uint64_t pool_offset_pages = entry->pool_offset >> LOG2_PAGE_SIZE;
+      const champsim::page_number pool_ppage{pool_base_page + pool_offset_pages + offset_pages};
+
+      auto [ppage, inserted] = vpage_to_ppage_map.try_emplace({cpu_num, champsim::page_number{vaddr}}, pool_ppage);
+      auto penalty = inserted ? minor_fault_penalty : champsim::chrono::clock::duration::zero();
+      return std::pair{ppage->second, penalty};
+    }
+  }
+
   auto [ppage, fault] = vpage_to_ppage_map.try_emplace({cpu_num, champsim::page_number{vaddr}}, ppage_front());
 
   // this vpage doesn't yet have a ppage mapping
@@ -139,6 +155,13 @@ std::pair<champsim::page_number, champsim::chrono::clock::duration> VirtualMemor
   }
 
   return std::pair{ppage->second, penalty};
+}
+
+void VirtualMemory::set_address_map(const SST::csimCore::AddressMap* map, uint32_t node_id_, uint64_t pool_pa_base_)
+{
+  address_map = map;
+  node_id = node_id_;
+  pool_pa_base = pool_pa_base_;
 }
 
 std::pair<champsim::address, champsim::chrono::clock::duration> VirtualMemory::get_pte_pa(uint32_t cpu_num, champsim::page_number vaddr, std::size_t level)

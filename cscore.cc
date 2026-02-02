@@ -322,7 +322,6 @@ namespace SST {
 				} else {
 					cache_c.send_remote = {};
 				}
-				cache_c.pool_pa_base = pool_pa_base;
 			}
 
 			// Dump stat periodically
@@ -344,7 +343,12 @@ namespace SST {
 			if (!address_map_path.empty()) {
 				if (!address_map.load(address_map_path)) {
 					std::cerr << "WARNING: failed to load address_map_config from " << address_map_path << std::endl;
+					vmem.set_address_map(nullptr, static_cast<uint32_t>(node_id), pool_pa_base);
+				} else {
+					vmem.set_address_map(&address_map, static_cast<uint32_t>(node_id), pool_pa_base);
 				}
+			} else {
+				vmem.set_address_map(nullptr, static_cast<uint32_t>(node_id), pool_pa_base);
 			}
 
 			

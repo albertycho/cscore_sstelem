@@ -186,7 +186,6 @@ public:
   const SST::csimCore::AddressMap* address_map = nullptr;
   std::function<bool(const sst_request&)> send_remote;
   uint32_t node_id = 0;
-  uint64_t pool_pa_base = 0;
 
   long operate() final;
   void initialize() final;

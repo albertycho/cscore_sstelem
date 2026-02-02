@@ -11,14 +11,15 @@ SST element for a ChampSim-based node plus a simple CXL pool path (node -> fabri
 ## VA/PA + CXL addressing
 
 - **CXL routing is VA-based.** The AddressMap CSV segments VA space and marks which VA ranges go to the pool.
+- **Translation produces the final PA.** For pool ranges, the PTW/VMEM maps VA directly into the pool PA window, so caches/MSHRs see a consistent PA from the start.
 - **Pooling is explicit.** You decide which VA ranges map into the pool; they can be disjoint to model flexible placement.
-- **PA is still used internally.** Caches/MSHRs match on PA, so pool requests are mapped to a reserved PA window.
-- **Pool PA window is separate.** Pick a `pool_pa_base` outside DRAM (default is `dram_size_bytes`) to avoid overlap.
+- **Pool PA window is separate.** `pool_pa_base` defines where VMEM maps pool pages in PA space (default is `dram_size_bytes` to avoid overlap).
 
 Mapping rule for pool ranges:
 ```
-PA = pool_pa_base + (VA - range_start)
+PA = pool_pa_base + pool_offset + (VA - range_start)
 ```
+`pool_offset` is computed by sorting pool ranges and assigning a running sum, so disjoint VA ranges map to disjoint pool PA regions.
 
 ### AddressMap CSV
 
