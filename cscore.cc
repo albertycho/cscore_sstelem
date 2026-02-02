@@ -59,8 +59,8 @@ namespace SST {
             trace_name = params.find<std::string>("trace_name", "example_tracename.xz");
 			address_map_path = params.find<std::string>("address_map_config", "");
             node_id = params.find<int64_t>("node_id", 0);
-            warmup_insts = params.find<int64_t>("warmup_insts", 5000);
-            sim_insts = params.find<int64_t>("sim_insts", 50000);
+            warmup_insts = params.find<int64_t>("warmup_insts", 0);
+            sim_insts = params.find<int64_t>("sim_insts", 0);
             auto dram_size_bytes = params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES);
             pool_pa_base = params.find<uint64_t>("pool_pa_base", 0);
             if (pool_pa_base == 0) {
@@ -408,9 +408,9 @@ namespace SST {
 				curr_core_id++;
 			}
 
-            if (!cores.empty()) {
+            if (!cores.empty() && sim_insts > 0) {
                 auto retired = static_cast<uint64_t>(cores.front().num_retired);
-                if (!warmup_done && retired >= warmup_insts) {
+                if (!warmup_done && warmup_insts > 0 && retired >= warmup_insts) {
                     for (auto& cache : caches) {
                         cache.begin_phase();
                     }
@@ -420,7 +420,30 @@ namespace SST {
                     warmup_done = true;
                 }
 
-                if (warmup_done && retired >= (warmup_insts + sim_insts)) {
+                if (retired >= (warmup_insts + sim_insts)) {
+                    for (auto& cache : caches) {
+                        cache.end_phase(0);
+                    }
+                    for (auto& cpu : cores) {
+                        cpu.end_phase(0);
+                    }
+                    primaryComponentOKToEndSim();
+                    return true;
+                }
+            }
+
+            if (!cores.empty() && sim_insts == 0) {
+                auto& trace = traces.at(0);
+                bool drained = true;
+                for (auto& cpu : cores) {
+                    auto lq_empty = std::all_of(cpu.LQ.begin(), cpu.LQ.end(), [](const auto& e) { return !e.has_value(); });
+                    if (!cpu.input_queue.empty() || !cpu.ROB.empty() || !cpu.IFETCH_BUFFER.empty() || !cpu.DECODE_BUFFER.empty() ||
+                        !cpu.DISPATCH_BUFFER.empty() || !cpu.DIB_HIT_BUFFER.empty() || !lq_empty || !cpu.SQ.empty()) {
+                        drained = false;
+                        break;
+                    }
+                }
+                if (trace.eof() && drained) {
                     for (auto& cache : caches) {
                         cache.end_phase(0);
                     }

@@ -74,8 +74,8 @@ namespace SST {
             { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" },
             { "pool_pa_base", "Base physical address for pool mapping (0 means use dram_size_bytes)", "0" },
             { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
-            { "warmup_insts", "Warmup instructions before stats collection", "5000" },
-            { "sim_insts", "Simulation instructions to run after warmup", "50000" }
+            { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
+            { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
