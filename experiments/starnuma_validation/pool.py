@@ -13,6 +13,10 @@ BW_CXL_MB = 6000     # MB/s
 DRAM_SIZE_BYTES = 68719476736  # 64 GiB
 POOL_PA_BASE = 68719476736     # pool PA starts at 64 GiB
 
+# Absolute paths (avoid copying files)
+TRACE_DIR = "/shared/kshan/StarNUMA_BFS_traces"
+CXL_CONFIG = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/scripts/config.csv"
+
 # Optional: stop after a fixed number of cycles (SST wall-clock cap).
 # sst.setProgramOption("stopAtCycle", "1000000000")
 
@@ -28,8 +32,8 @@ for i in range(NUM_NODES):
     sock = sst.Component(f"s{i}", "cscore.csimCore")
     sock.addParams({
         "node_id": i,
-        "trace_name": os.path.join(os.getcwd(), f"champsim_{i}_0.trace.xz"),
-        "address_map_config": os.path.join(os.getcwd(), "cxl_config.csv"),
+        "trace_name": os.path.join(TRACE_DIR, f"champsim_{i}_0.trace.xz"),
+        "address_map_config": CXL_CONFIG,
         "dram_size_bytes": DRAM_SIZE_BYTES,
         "pool_pa_base": POOL_PA_BASE,
         # Cache heartbeat prints:
