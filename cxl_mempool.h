@@ -30,7 +30,8 @@ public:
     )
 
     SST_ELI_DOCUMENT_PARAMS(
-        { "clock", "Clock frequency for the memory pool", "1GHz" },
+        { "clock", "Clock frequency for the memory pool", "2.4GHz" },
+        { "pool_bw_cycles_per_req", "Pool DRAM bandwidth in cycles per request (overrides memory/device bandwidth if nonzero)", "0" },
         { "device_bandwidth", "Device side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "memory_bandwidth", "Memory side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "latency_cycles", "Fixed latency (in cycles) for the CXL path", "0" },
@@ -119,6 +120,7 @@ private:
 
     uint64_t device_bandwidth_;
     uint64_t memory_bandwidth_;
+    uint64_t pool_bw_cycles_per_req_ = 0;
     int64_t latency_cycles_;
     uint32_t pool_node_id_ = 100;
 

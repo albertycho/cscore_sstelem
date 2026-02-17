@@ -8,7 +8,7 @@ namespace csimCore {
 Fabric::Fabric(SST::ComponentId_t id, SST::Params& params)
     : Component(id)
 {
-    auto clock_frequency_str = params.find<std::string>("clock", "1GHz");
+    auto clock_frequency_str = params.find<std::string>("clock", "2.4GHz");
     link_bandwidth_ = static_cast<int64_t>(params.find<int>("link_bandwidth", 1));
     link_base_latency_ = static_cast<int64_t>(params.find<int>("link_base_latency", 1));
 

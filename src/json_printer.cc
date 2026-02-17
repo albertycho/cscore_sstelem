@@ -52,11 +52,14 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
   statsmap.emplace("useful prefetch", stats.pf_useful);
   statsmap.emplace("useless prefetch", stats.pf_useless);
 
-  uint64_t total_downstream_demands = stats.mshr_return.total();
-  for (std::size_t cpu = 0; cpu < NUM_CPUS; ++cpu)
-    total_downstream_demands -= stats.mshr_return.value_or(std::pair{access_type::PREFETCH, cpu}, mshr_return_value_type{});
+  uint64_t total_downstream_demands = 0;
+  for (std::size_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
+    total_downstream_demands += stats.mshr_return.value_or(std::pair{access_type::LOAD, cpu}, mshr_return_value_type{});
+    total_downstream_demands += stats.mshr_return.value_or(std::pair{access_type::RFO, cpu}, mshr_return_value_type{});
+  }
 
   statsmap.emplace("miss latency", std::ceil(stats.total_miss_latency_cycles) / std::ceil(total_downstream_demands));
+  statsmap.emplace("pool miss latency (load+rfo)", std::ceil(stats.pool_demand_miss_latency_sum) / std::max<uint64_t>(1, stats.pool_demand_miss_count));
   for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
     std::vector<hits_value_type> hits;
     std::vector<misses_value_type> misses;

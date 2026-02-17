@@ -47,6 +47,21 @@ void record_pool_latency(cache_stats& stats, uint64_t cycles)
 {
   stats.pool_latency_hist.at(pool_latency_bin(cycles))++;
 }
+
+std::size_t miss_latency_bin(champsim::chrono::clock::duration latency)
+{
+  auto ns = std::chrono::duration_cast<champsim::chrono::nanoseconds>(latency).count();
+  if (ns <= 0) {
+    return 0;
+  }
+  auto idx = static_cast<std::size_t>(ns / 10);
+  return std::min(idx, cache_stats::MISS_LAT_HIST_BINS - 1);
+}
+
+void record_miss_latency(cache_stats& stats, champsim::chrono::clock::duration latency)
+{
+  stats.miss_latency_hist.at(miss_latency_bin(latency))++;
+}
 } // namespace
 
 CACHE::CACHE(CACHE&& other)
@@ -258,8 +273,19 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
   }
 
   // COLLECT STATS
-  if (fill_mshr.type != access_type::PREFETCH)
-    sim_stats.total_miss_latency_cycles += (current_time - (fill_mshr.time_enqueued + clock_period)) / clock_period;
+  const bool is_std_req = (fill_mshr.type == access_type::LOAD || fill_mshr.type == access_type::RFO);
+  if (is_std_req) {
+    const auto miss_lat_time = current_time - fill_mshr.time_enqueued;
+    auto miss_lat_cycles = miss_lat_time / clock_period;
+    sim_stats.total_miss_latency_cycles += miss_lat_cycles;
+    if (fill_mshr.remote_is_pool) {
+      sim_stats.pool_demand_miss_latency_sum += miss_lat_cycles;
+      sim_stats.pool_demand_miss_count++;
+    }
+    if (NAME == "LLC") {
+      record_miss_latency(sim_stats, miss_lat_time);
+    }
+  }
   sim_stats.mshr_return.increment(std::pair{fill_mshr.type, fill_mshr.cpu});
 
   response_type response{fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, metadata_thru, fill_mshr.instr_depend_on_me};
@@ -397,6 +423,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
         sreq.ip = mshr_pkt.second.ip.to<uint64_t>();
         sreq.asid[0] = mshr_pkt.second.asid[0];
         sreq.asid[1] = mshr_pkt.second.asid[1];
+        sreq.msg_bytes = (sreq.type == access_type::WRITE) ? 64 : 8;
 
         bool accepted = send_remote(sreq); // pool is treated as remote memory
         if (accepted) {
@@ -531,7 +558,9 @@ long CACHE::operate()
   }
 
   // Initiate tag checks
-  const champsim::bandwidth::maximum_type bandwidth_from_tag_checks{champsim::to_underlying(MAX_TAG) * (long)(HIT_LATENCY / clock_period)
+  // Ensure progress even when HIT_LATENCY is 0 (e.g., ITLB/DTLB configured for 0-cycle hits).
+  const auto tag_lat_cycles = std::max<long>(1, (long)(HIT_LATENCY / clock_period));
+  const champsim::bandwidth::maximum_type bandwidth_from_tag_checks{champsim::to_underlying(MAX_TAG) * tag_lat_cycles
                                                                     - (long)std::size(inflight_tag_check)};
   champsim::bandwidth initiate_tag_bw{std::clamp(bandwidth_from_tag_checks, champsim::bandwidth::maximum_type{0}, MAX_TAG)};
   auto can_translate = [avail = (std::size(translation_stash) < static_cast<std::size_t>(MSHR_SIZE))](const auto& entry) {
@@ -961,7 +990,10 @@ void CACHE::end_phase(unsigned finished_cpu)
   roi_stats.pool_accesses = sim_stats.pool_accesses;
   roi_stats.pool_completed = sim_stats.pool_completed;
   roi_stats.pool_latency_sum = sim_stats.pool_latency_sum;
+  roi_stats.pool_demand_miss_count = sim_stats.pool_demand_miss_count;
+  roi_stats.pool_demand_miss_latency_sum = sim_stats.pool_demand_miss_latency_sum;
   roi_stats.pool_latency_hist = sim_stats.pool_latency_hist;
+  roi_stats.miss_latency_hist = sim_stats.miss_latency_hist;
 
   for (auto* ul : upper_levels) {
     ul->roi_stats.RQ_ACCESS = ul->sim_stats.RQ_ACCESS;

@@ -24,11 +24,14 @@ class lat_bw_queue {
     };
 public:
     using latency_function_type = std::function<int64_t(double)>;
-    lat_bw_queue(int64_t bandwidth, latency_function_type&& latency_function)
+    using bandwidth_function_type = std::function<int64_t(const T&)>;
+    lat_bw_queue(int64_t bandwidth, latency_function_type&& latency_function, bandwidth_function_type&& bw_cost_fn = {})
     : bandwidth{bandwidth} 
     , internal_clock{0}
     , last_insert_time{-bandwidth}
+    , last_insert_gap{bandwidth}
     , latency_function{std::forward<latency_function_type>(latency_function)}
+    , bw_cost_fn{std::forward<bandwidth_function_type>(bw_cost_fn)}
     , buffer{} {}
 
     /// Called once per tick (start of each cycle)
@@ -62,7 +65,9 @@ private:
 
     /// Attempts to fire a new request, from the blocked queue
     void try_fire_request() {
-        if(!blocked_queue.empty() && (last_insert_time + bandwidth <= internal_clock)) {
+        if(!blocked_queue.empty() && (last_insert_time + last_insert_gap <= internal_clock)) {
+            auto cost = bw_cost_fn ? bw_cost_fn(blocked_queue.front()) : bandwidth;
+            cost = std::max<int64_t>(cost, 1);
             buffer |= 1;
 
             active_queue.push(entry{
@@ -71,6 +76,7 @@ private:
                 internal_clock + std::max<int64_t>(latency_function(get_utilization()), 1)
             });
             last_insert_time = internal_clock;
+            last_insert_gap = cost;
 
             blocked_queue.pop();
         }
@@ -84,7 +90,9 @@ private:
     int64_t bandwidth;
     int64_t internal_clock;
     int64_t last_insert_time;
+    int64_t last_insert_gap;
     std::function<int64_t(double)> latency_function;
+    bandwidth_function_type bw_cost_fn;
 
     std::priority_queue<entry> active_queue;    // (packet, injection_time)
     std::queue<T> blocked_queue;                // waiting to enter

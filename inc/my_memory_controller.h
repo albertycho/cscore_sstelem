@@ -11,9 +11,9 @@
 #include "lat_bw_queue.h"
 
 // 64B request
-// 2 GHz: cycle = 0.5 ns
-// bw: 40 GB/s --> 20 bytes per cycle
-// 3 cycles per request
+// 2.4 GHz: cycle = ~0.4167 ns
+// bw: 40 GB/s --> ~16.7 bytes per cycle
+// ~4 cycles per request (64B)
 
 // lat:
 // - 0%:    30ns    --> 60 cycles
@@ -26,14 +26,20 @@
 // --> can define a lower BW to see if latency spikes
 
 inline int64_t estimate_latency_percentile(double util) {
-    if (util >= 0.70) return 400;  // 200 ns @ 2 GHz
-    if (util >= 0.60) return 300;  // 150 ns
-    if (util >= 0.50) return 200;  // 100 ns
-    if (util >= 0.30) return 100;  // 50 ns
-    return 60;                     // 30 ns
+    if (util >= 0.70) return 480;  // 200 ns @ 2.4 GHz
+    if (util >= 0.60) return 360;  // 150 ns
+    if (util >= 0.50) return 240;  // 100 ns
+    if (util >= 0.30) return 120;  // 50 ns
+    return 72;                     // 30 ns
 }
 
-const size_t DEFAULT_BW = 80; /* cycles per request */
+constexpr int64_t DEFAULT_FIXED_LATENCY_CYCLES = 300;
+
+inline int64_t estimate_latency_fixed(double) {
+    return DEFAULT_FIXED_LATENCY_CYCLES;
+}
+
+const size_t DEFAULT_BW = 96; /* cycles per request @ 2.4 GHz (scaled from 2.0 GHz) */
 constexpr uint64_t DEFAULT_DRAM_SIZE_BYTES = 1ULL << 30;
 
 class MY_MEMORY_CONTROLLER : public champsim::operable {

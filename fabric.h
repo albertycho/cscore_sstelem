@@ -30,7 +30,7 @@ public:
     )
 
     SST_ELI_DOCUMENT_PARAMS(
-        { "clock", "Clock frequency", "1GHz" },
+        { "clock", "Clock frequency", "2.4GHz" },
         { "link_bandwidth", "Bandwidth tokens per port (see lat_bw_queue bandwidth units)", "1" },
         { "link_base_latency", "Base latency (cycles) per port; latency function TODO", "1" }
     )

@@ -34,7 +34,6 @@
 #include "ooo_cpu.h"
 #include "operable.h"
 #include "ptw.h"
-#include "bimodal/bimodal.h"
 
 #include "tracereader.h"
 //#include <environment.h>
@@ -65,13 +64,15 @@ namespace SST {
         )
     
         SST_ELI_DOCUMENT_PARAMS(
-            { "clock", "Clock frequency", "1GHz" },
+            { "clock", "Clock frequency", "2.4GHz" },
             { "clockcount", "Number of clock ticks to execute", "100000" },
             { "trace_name", "Path to input trace file", ""},
             { "cxl_config", "Deprecated (unused): pool routing is controlled by address_map_config", "" },
             { "cxl_outstanding_limit", "Deprecated (unused): pool backpressure is modeled by link queues", "32" },
             { "address_map_config", "Path to CSV mapping address ranges to socket/pool (node_id,start,size,type,target; node_id matches component node_id)", "" },
             { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" },
+            { "dram_bw_cycles_per_req", "Local DRAM bandwidth in cycles per request (overrides dram_bandwidth_bytes_per_cycle if nonzero)", "0" },
+            { "dram_bandwidth_bytes_per_cycle", "Local DRAM bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE; 0 uses DEFAULT_BW)", "0" },
             { "pool_pa_base", "Base PA for pool mapping in VMEM (0 means use dram_size_bytes)", "0" },
             { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
@@ -109,19 +110,19 @@ namespace SST {
         private:
 
        std::vector<champsim::channel> channels {
-				champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1}, // 0
-				champsim::channel{std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), std::numeric_limits<std::size_t>::max(), champsim::data::bits{champsim::lg2(BLOCK_SIZE)}, 0},
-				champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-				champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-				champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0}, // 4
-				champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-				champsim::channel{32, 32, 32, champsim::data::bits{champsim::lg2(64)}, 0},
-				champsim::channel{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0},
-				champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1}, // 8
-				champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1},
-				champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0},
-				champsim::channel{64, 32, 64, champsim::data::bits{champsim::lg2(64)}, 1},
-				champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1} // 12
+				champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1},   // 0: CPU->L1D
+				champsim::channel{128, 0, 64, champsim::data::bits{champsim::lg2(BLOCK_SIZE)}, 0}, // 1: LLC->DRAM
+				champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 0}, // 2: DTLB->STLB
+				champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 0}, // 3: ITLB->STLB
+				champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0},  // 4: L1D->L2C
+				champsim::channel{32, 16, 32, champsim::data::bits{champsim::lg2(64)}, 0},  // 5: L1I->L2C
+				champsim::channel{32, 32, 32, champsim::data::bits{champsim::lg2(64)}, 0},  // 6: L2C->LLC
+				champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0}, // 7: STLB->PTW
+				champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1}, // 8: L1D->DTLB
+				champsim::channel{16, 0, 16, champsim::data::bits{champsim::lg2(4096)}, 1}, // 9: L1I->ITLB
+				champsim::channel{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0}, // 10: L2C->STLB
+				champsim::channel{64, 32, 64, champsim::data::bits{champsim::lg2(64)}, 1}, // 11: CPU->L1I
+				champsim::channel{64, 8, 64, champsim::data::bits{champsim::lg2(64)}, 1}   // 12: PTW->L1D
         	};
         //MEMORY_CONTROLLER DRAM;
         MY_MEMORY_CONTROLLER MYDRAM;
@@ -156,6 +157,7 @@ namespace SST {
         AddressMap address_map;
         std::string address_map_path;
         std::deque<sst_request> remote_outbox;
+        bool final_stats_printed = false;
 
         // champsim::channel cpu0_STLB_to_cpu0_PTW_queues{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0};
         // champsim::channel cpu0_DTLB_to_cpu0_STLB_queues{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0};
@@ -176,6 +178,7 @@ namespace SST {
         public:
         bool enqueue_remote_request(const sst_request& req);
         void advance_remote_requests();
+        void print_final_stats();
     
         void handleEvent_FABRIC(SST::Event *ev);
     };

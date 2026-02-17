@@ -32,8 +32,8 @@
 
 std::chrono::seconds elapsed_time();
 
-//constexpr long long STAT_PRINTING_PERIOD = 10000000;
-constexpr long long STAT_PRINTING_PERIOD = 1000;
+constexpr long long STAT_PRINTING_PERIOD = 10000000;
+// constexpr long long STAT_PRINTING_PERIOD = 1000;
 
 long O3_CPU::operate()
 {
@@ -311,14 +311,16 @@ long O3_CPU::promote_to_decode()
     return x.fetch_completed && x.ready_time <= time;
   };
 
-  champsim::bandwidth available_fetch_bandwidth{
-      std::min(FETCH_WIDTH, std::min(champsim::bandwidth::maximum_type{static_cast<long>(DIB_HIT_BUFFER_SIZE - std::size(DIB_HIT_BUFFER))},
-                                     champsim::bandwidth::maximum_type{static_cast<long>(DECODE_BUFFER_SIZE - std::size(DECODE_BUFFER))}))};
+  const auto decode_buffer_avail = champsim::bandwidth::maximum_type{static_cast<long>(DECODE_BUFFER_SIZE - std::size(DECODE_BUFFER))};
+  champsim::bandwidth available_fetch_bandwidth = (DIB_HIT_BUFFER_SIZE == 0)
+      ? champsim::bandwidth{std::min(FETCH_WIDTH, decode_buffer_avail)}
+      : champsim::bandwidth{std::min(FETCH_WIDTH,
+                                     std::min(champsim::bandwidth::maximum_type{static_cast<long>(DIB_HIT_BUFFER_SIZE - std::size(DIB_HIT_BUFFER))},
+                                              decode_buffer_avail))};
 
   auto fetched_check_end = std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), [](const ooo_model_instr& x) { return !x.fetch_completed; });
   // find the first not fetch completed
   auto [window_begin, window_end] = champsim::get_span_p(std::begin(IFETCH_BUFFER), fetched_check_end, available_fetch_bandwidth, fetch_complete_and_ready);
-  auto decoded_window_end = std::stable_partition(window_begin, window_end, is_decoded); // reorder instructions
   auto mark_for_decode = [time = current_time, lat = DECODE_LATENCY, warmup = warmup](auto& x) {
     return x.ready_time = time + (warmup ? champsim::chrono::clock::duration{} : lat);
   };
@@ -327,6 +329,23 @@ long O3_CPU::promote_to_decode()
     return x.ready_time = time + lat;
   };
 
+  // When the DIB hit buffer is disabled, preserve program order by avoiding reordering.
+  if (DIB_HIT_BUFFER_SIZE == 0) {
+    for (auto it = window_begin; it != window_end; ++it) {
+      if (it->decoded) {
+        mark_for_dib(*it);
+      } else {
+        mark_for_decode(*it);
+      }
+    }
+
+    std::move(window_begin, window_end, std::back_inserter(DECODE_BUFFER));
+    long progress{std::distance(window_begin, window_end)};
+    IFETCH_BUFFER.erase(window_begin, window_end);
+    return progress;
+  }
+
+  auto decoded_window_end = std::stable_partition(window_begin, window_end, is_decoded); // reorder instructions
   std::for_each(window_begin, decoded_window_end, mark_for_dib); // assume DECODE_LATENCY = DIB_HIT_LATENCY
   std::move(window_begin, decoded_window_end, std::back_inserter(DIB_HIT_BUFFER));
   // to DECODE_BUFFER
@@ -343,6 +362,44 @@ long O3_CPU::decode_instruction()
   auto is_ready = [time = current_time](const auto& x) {
     return x.ready_time <= time;
   };
+
+  if (DIB_HIT_BUFFER_SIZE == 0) {
+    auto decode_buffer_begin = std::begin(DECODE_BUFFER);
+    auto decode_buffer_end = decode_buffer_begin;
+    champsim::bandwidth available_decode_bandwidth{DECODE_WIDTH};
+    champsim::bandwidth available_dispatch_bandwidth{
+        std::min(DECODE_WIDTH, champsim::bandwidth::maximum_type{static_cast<long>(DISPATCH_BUFFER_SIZE - std::size(DISPATCH_BUFFER))})};
+
+    while (decode_buffer_end != std::end(DECODE_BUFFER) && available_dispatch_bandwidth.has_remaining() && available_decode_bandwidth.has_remaining()
+           && is_ready(*decode_buffer_end)) {
+      decode_buffer_end++;
+      available_dispatch_bandwidth.consume();
+      available_decode_bandwidth.consume();
+    }
+
+    auto do_decode = [&, this](auto& db_entry) {
+      this->do_dib_update(db_entry);
+
+      if (db_entry.branch_mispredicted) {
+        if ((db_entry.branch == BRANCH_DIRECT_JUMP) || (db_entry.branch == BRANCH_DIRECT_CALL)
+            || (((db_entry.branch == BRANCH_CONDITIONAL) || (db_entry.branch == BRANCH_OTHER)) && db_entry.branch_taken == db_entry.branch_prediction)) {
+          db_entry.branch_mispredicted = 0;
+          this->fetch_resume_time = this->current_time + BRANCH_MISPREDICT_PENALTY;
+        }
+      }
+      db_entry.ready_time = this->current_time + (this->warmup ? champsim::chrono::clock::duration{} : this->DISPATCH_LATENCY);
+
+      if constexpr (champsim::debug_print) {
+        fmt::print("[DECODE] do_decode instr_id: {} time: {}\n", db_entry.instr_id, this->current_time.time_since_epoch() / this->clock_period);
+      }
+    };
+
+    std::for_each(decode_buffer_begin, decode_buffer_end, do_decode);
+    long progress{std::distance(decode_buffer_begin, decode_buffer_end)};
+    std::move(decode_buffer_begin, decode_buffer_end, std::back_inserter(DISPATCH_BUFFER));
+    DECODE_BUFFER.erase(decode_buffer_begin, decode_buffer_end);
+    return progress;
+  }
 
   auto dib_hit_buffer_begin = std::begin(DIB_HIT_BUFFER);
   auto dib_hit_buffer_end = dib_hit_buffer_begin;

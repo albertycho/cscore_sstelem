@@ -15,7 +15,11 @@ namespace SST {
 namespace csimCore {
 
 namespace {
-int64_t resolve_mem_bw(uint64_t mem_bw, uint64_t dev_bw) {
+constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
+int64_t resolve_mem_bw(uint64_t mem_bw, uint64_t dev_bw, uint64_t bw_cycles) {
+    if (bw_cycles != 0) {
+        return static_cast<int64_t>(std::max<uint64_t>(bw_cycles, 1));
+    }
     auto chosen = mem_bw != 0 ? mem_bw : dev_bw;
     if (chosen == 0) {
         return static_cast<int64_t>(DEFAULT_BW);
@@ -27,16 +31,17 @@ int64_t resolve_mem_bw(uint64_t mem_bw, uint64_t dev_bw) {
 
 CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
     : Component(id),
+      pool_bw_cycles_per_req_(params.find<uint64_t>("pool_bw_cycles_per_req", 0)),
       device_bandwidth_(params.find<uint64_t>("device_bandwidth", 0)),
       memory_bandwidth_(params.find<uint64_t>("memory_bandwidth", 0)),
       latency_cycles_(static_cast<int64_t>(params.find<uint64_t>("latency_cycles", 50))),
       pool_node_id_(static_cast<uint32_t>(params.find<uint64_t>("pool_node_id", 100))),
-      clock_frequency_(params.find<std::string>("clock", "1GHz")),
+      clock_frequency_(params.find<std::string>("clock", "2.4GHz")),
       mem_channel_{},
-      mem_ctrl_(champsim::chrono::picoseconds{500},
+      mem_ctrl_(champsim::chrono::picoseconds{kClockPeriodPs},
                 std::vector<champsim::channel*>{&mem_channel_},
-                resolve_mem_bw(memory_bandwidth_, device_bandwidth_),
-                estimate_latency_percentile),
+                resolve_mem_bw(memory_bandwidth_, device_bandwidth_, pool_bw_cycles_per_req_),
+                estimate_latency_fixed),
       heartbeat_period_(params.find<uint64_t>("heartbeat_period", 1000)) {
 
     registerClock(clock_frequency_, new Clock::Handler<CXLMemoryPool>(this, &CXLMemoryPool::clock_tick));
@@ -132,6 +137,7 @@ void CXLMemoryPool::produce_placeholder_response(const champsim::channel::respon
                      response.pf_metadata,
                      route.cpu,
                      route.sst_cpu);
+    out.msg_bytes = 64;
     out.src_node = pool_node_id_;
     out.dst_node = route.src_node == std::numeric_limits<uint32_t>::max()
                        ? route.sst_cpu

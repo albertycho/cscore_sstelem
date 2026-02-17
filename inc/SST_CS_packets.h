@@ -37,6 +37,7 @@ struct sst_request {
     uint64_t data = 0;
     uint64_t instr_id = 0;
     uint64_t ip = 0;
+    uint16_t msg_bytes = 64;
 
 };
 
@@ -50,9 +51,10 @@ struct sst_response {
     uint32_t pf_metadata = 0;
     uint32_t cpu=0;
     uint32_t sst_cpu = 0;
+    uint16_t msg_bytes = 64;
 
     sst_response(uint64_t addr, uint64_t v_addr, uint64_t data_, uint32_t pf_meta, uint32_t cpu_n, uint32_t sst_cpu_n)
-        : address(addr), v_address(v_addr), data(data_), pf_metadata(pf_meta), cpu(cpu_n), sst_cpu(sst_cpu_n)
+        : address(addr), v_address(v_addr), data(data_), pf_metadata(pf_meta), cpu(cpu_n), sst_cpu(sst_cpu_n), msg_bytes(64)
     {
     }
     explicit sst_response(sst_request req) : sst_response(req.address, req.v_address, req.data, req.pf_metadata, req.cpu, req.sst_cpu) {}

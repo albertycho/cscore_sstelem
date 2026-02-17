@@ -88,3 +88,28 @@ for i in range(NUM_NODES):
     l1.connect((fabric, "port_handler1", "1ns"),
                (pool, f"port_handler_cores{i}", "1ns"))
 ```
+
+
+## Running instructions
+SST:
+Build with 
+```sh
+make install
+```
+To run:
+```sh
+sst pool.py 1>run.out 2>run.err
+```
+
+StarNUMA:
+Build with
+```sh
+python3 config.py CONFIGS/1C_4SOCKET.json
+make -j
+```
+
+To run
+```sh
+./bin/1C_4S_3tb --warmup_instructions 5000 --simulation_instructions 1000 --tb_cpu_trace_path /shared/kshan/StarNUMA_BFS_traces --tb_cpu_forward 0 /shared/kshan/StarNUMA_BFS_traces/champsim_0_0.trace.xz > run.out
+```
+
