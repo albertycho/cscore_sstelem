@@ -24,6 +24,7 @@
 #include <random>
 
 #include "address.h"
+#include "address_map.h"
 #include "champsim.h"
 #include "chrono.h"
 
@@ -49,6 +50,9 @@ private:
   std::deque<champsim::page_number> ppage_free_list;
   champsim::page_number active_pte_page{};
   champsim::address_slice<champsim::dynamic_extent> next_pte_page;
+  const SST::csimCore::AddressMap* address_map = nullptr;
+  uint32_t node_id = 0;
+  uint64_t pool_pa_base = 0;
 
   // champsim::page_number next_ppage;
   // champsim::page_number last_ppage;
@@ -107,6 +111,7 @@ public:
    * :returns: A pair of the physical address and the latency to be applied to the translation.
    */
   std::pair<champsim::page_number, champsim::chrono::clock::duration> va_to_pa(uint32_t cpu_num, champsim::page_number vaddr);
+  void set_address_map(const SST::csimCore::AddressMap* map, uint32_t node_id_, uint64_t pool_pa_base_);
 
   /**
    * Find the address for the page table page for the given virtual address (under translation), and the given level.

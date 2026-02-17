@@ -25,8 +25,12 @@ libcscore_la_SOURCES = \
     csEvent.h \
     convert_ev_packet.h \
 	convert_ev_packet.cc \
-	NW.h \
-	NW.cc \
+    inc/address_map.h \
+    src/address_map.cc \
+    cxl_mempool.h \
+    cxl_mempool.cc \
+    fabric.h \
+    fabric.cc \
     vcpkg_installed/x64-linux/include/fmt/core.h \
     vcpkg_installed/x64-linux/include/lzma.h \
     branch/bimodal/bimodal.cc \
@@ -59,6 +63,7 @@ libcscore_la_SOURCES = \
     inc/chrono.h \
     inc/core_builder.h \
     inc/core_stats.h \
+    inc/cxl_request_buffer.h \
     inc/deadlock.h \
     inc/defaults.hpp \
     inc/dram_controller.h \
@@ -77,6 +82,7 @@ libcscore_la_SOURCES = \
     inc/ooo_cpu.h \
     inc/operable.h \
     inc/phase_info.h \
+    inc/lat_bw_queue.h \
     inc/ptw_builder.h \
     inc/ptw.h \
     inc/register_allocator.h \
@@ -134,6 +140,7 @@ libcscore_la_SOURCES = \
     src/channel.cc \
     src/chrono.cc \
     src/core_stats.cc \
+    src/cxl_request_buffer.cc \
     src/dram_controller.cc \
     src/dram_stats.cc \
     src/extent.cc \
@@ -161,4 +168,3 @@ libcscore_la_LDFLAGS = -module -avoid-version
 install-exec-hook:
 	$(SST_REGISTER_TOOL) SST_ELEMENT_SOURCE     cscore=$(abs_srcdir)
 	$(SST_REGISTER_TOOL) SST_ELEMENT_TESTS      cscore=$(abs_srcdir)/tests
-

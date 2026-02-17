@@ -19,6 +19,7 @@
 
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -134,6 +135,14 @@ ooo_model_instr bulk_tracereader<T, F>::operator()()
 
   auto retval = instr_buffer.front();
   instr_buffer.pop_front();
+
+  static int dbg_prints = 0;
+  if (dbg_prints < 5) {
+    std::cout << "TRACE_DBG[" << dbg_prints << "] ip=0x" << std::hex << retval.ip.to<uint64_t>() << std::dec
+              << " is_branch=" << retval.is_branch << " branch_taken=" << retval.branch_taken
+              << " smem=" << retval.source_memory.size() << " dmem=" << retval.destination_memory.size() << "\n";
+    dbg_prints++;
+  }
 
   return retval;
 }

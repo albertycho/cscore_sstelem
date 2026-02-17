@@ -19,10 +19,9 @@
 #include <sst/core/event.h>
 
 /*
- * NW packet: 
- *      paylaod[0]=src
- *      paylaod[1]=dest
- *      paylaod[2]=incycle
+ * Fabric packet header (payload words):
+ *      payload[0]=src
+ *      payload[1]=dest
  */
 
 namespace SST {

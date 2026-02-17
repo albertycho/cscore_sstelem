@@ -35,7 +35,7 @@
 #define NUM_CPUS 1
 #define BLOCK_SIZE 64
 #define LOG2_BLOCK_SIZE 6
-#define PAGE_SIZE 4906
+#define PAGE_SIZE 4096
 #define LOG2_PAGE_SIZE 12
 
 namespace champsim

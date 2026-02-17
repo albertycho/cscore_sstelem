@@ -4,13 +4,20 @@
 #include <unistd.h>
 #include <random>
 
-MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER()
-{
-    std::cout<<" hello"<<std::endl;
-}
+MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER() {}
+
 MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
-                                           std::vector<channel_type*>&& ul)
-    : operable(mc_period), queues(std::move(ul))
+                                           std::vector<channel_type*>&& ul, int64_t bandwidth,
+                                           latency_function_type&& latency_function,
+                                           champsim::data::bytes size)
+    : operable(mc_period)
+    , queues(std::move(ul))
+    , lat_bw_queues(
+        queues.size(), 
+        lat_bw_queue_type(
+            /*badwidth=*/bandwidth, 
+            /*latency_function=*/std::forward<latency_function_type>(latency_function)))
+    , size_(size)
 {
     auto sleepcnt = rand() % 10;
     sleep(sleepcnt);
@@ -26,45 +33,39 @@ long MY_MEMORY_CONTROLLER::operate()
 {
     long progress = 0;
 
-    for (auto* ul : queues) {
-        if (ul == nullptr) continue;
+    for(size_t i = 0; i < queues.size(); ++i) {
+        if(queues[i] == nullptr) continue;
+        auto& champsim_channel = *queues[i];
+        auto& lat_bw_queue = lat_bw_queues[i];
 
-        // Process RQ: reads
-        while (!ul->RQ.empty()) {
-            auto req = std::move(ul->RQ.front());
-            ul->RQ.pop_front();
-            // create a response and push to returned if requested
-            if (req.response_requested) {
-                ul->returned.emplace_back(req);
+        // Get fulfilled requests
+        auto completed_requests = lat_bw_queue.on_tick();
+        while(!completed_requests.empty()) {
+            auto& req = completed_requests.back();
+            if(req.response_requested) {
+                champsim_channel.returned.emplace_back(std::move(req));
             }
-            ++progress;
+            completed_requests.pop_back();
+            progress++;
         }
 
-        // Process PQ: prefetch queue
-        while (!ul->PQ.empty()) {
-            auto req = std::move(ul->PQ.front());
-            ul->PQ.pop_front();
-            if (req.response_requested) {
-                ul->returned.emplace_back(req);
+        // Drain requests from the champsim channel into the latency/bandwidth queue
+        auto drain_into_queue = [&](auto& q) {
+            while(!q.empty()) {
+                lat_bw_queue.add_packet(std::move(q.front()));
+                q.pop_front();
+                progress++;
             }
-            ++progress;
-        }
+        };
+        drain_into_queue(champsim_channel.RQ);
+        drain_into_queue(champsim_channel.PQ);
+        drain_into_queue(champsim_channel.WQ);
 
-        // Process WQ: writes
-        while (!ul->WQ.empty()) {
-            auto req = std::move(ul->WQ.front());
-            ul->WQ.pop_front();
-            if (req.response_requested) {
-                ul->returned.emplace_back(req);
-            }
-            ++progress;
-        }
-
-        // Warn if more than one response was queued for this channel
-        if (ul->returned.size() > 1) {
-            std::cerr << "Warning: channel returned queue has " << ul->returned.size() << " responses (expected <=1) at "
-                      << static_cast<const void*>(ul) << std::endl;
-        }
+        // // Warn if more than one response was queued for this channel
+        // if (lat_bw_queue.returned.size() > 1) {
+        //     std::cerr << "Warning: channel returned queue has " << lat_bw_queue.returned.size() << " responses (expected <=1) at "
+        //               << static_cast<const void*>(ul) << std::endl;
+        // }
     }
 
     return progress;
@@ -82,4 +83,4 @@ void MY_MEMORY_CONTROLLER::print_deadlock()
 {
     std::cerr << "MY_MEMORY_CONTROLLER deadlock check" << std::endl;
 }
- // namespace champsim
+// namespace champsim

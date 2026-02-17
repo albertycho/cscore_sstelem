@@ -103,10 +103,10 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   bool branch_prediction = false;
   bool branch_mispredicted = false; // A branch can be mispredicted even if the direction prediction is correct when the predicted target is not correct
 
-  // Communication Module
-  uint8_t isMsg = 0;
-  uint64_t msgNode = 0;
-  uint64_t msgSize = 0;
+  // // Communication Module
+  // uint8_t isMsg = 0;
+  // uint64_t msgNode = 0;
+  // uint64_t msgSize = 0;
 
   std::array<uint8_t, 2> asid = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
@@ -146,10 +146,10 @@ private:
     auto smem_end = std::remove(std::begin(instr.source_memory), std::end(instr.source_memory), uint64_t{0});
     std::transform(std::begin(instr.source_memory), smem_end, std::back_inserter(this->source_memory), [](auto x) { return champsim::address{x}; });
 
-	// Communication Module
-    this->isMsg = instr.isMsg;
-    this->msgNode = instr.msgNode;
-	this->msgSize = instr.msgSize;
+	  // // Communication Module
+    // this->isMsg = instr.isMsg;
+    // this->msgNode = instr.msgNode;
+	  // this->msgSize = instr.msgSize;
 
     bool writes_sp = std::count(std::begin(destination_registers), std::end(destination_registers), champsim::REG_STACK_POINTER);
     bool writes_ip = std::count(std::begin(destination_registers), std::end(destination_registers), champsim::REG_INSTRUCTION_POINTER);

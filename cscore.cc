@@ -13,26 +13,55 @@
 
 #include "sst_config.h"
 #include "cscore.h"
-#include <vcpkg_installed/x64-linux/include/fmt/chrono.h>
-#include <vcpkg_installed/x64-linux/include/fmt/core.h>
-#include <vcpkg_installed/x64-linux/include/fmt/ranges.h>
 
 #include <stats_printer.h>
+#include <stdexcept>
+#include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <memory>
+#include <optional>
+#include <sstream>
+
+#include "trace_instruction.h"
+#include "bimodal/bimodal.h"
+#include "prefetcher/no/no.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
 std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time); }
 
+namespace {
+constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
+int64_t cycles_per_request_from_bw_bytes(uint64_t bytes_per_cycle) {
+    if (bytes_per_cycle == 0) {
+        return static_cast<int64_t>(DEFAULT_BW);
+    }
+    auto cycles = (BLOCK_SIZE + bytes_per_cycle - 1) / bytes_per_cycle;
+    return static_cast<int64_t>(std::max<uint64_t>(cycles, 1));
+}
+int64_t resolve_dram_bw_cycles(uint64_t cycles_per_req, uint64_t bytes_per_cycle) {
+    if (cycles_per_req != 0) {
+        return static_cast<int64_t>(std::max<uint64_t>(cycles_per_req, 1));
+    }
+    return cycles_per_request_from_bw_bytes(bytes_per_cycle);
+}
+} // namespace
+
 
 namespace SST {
 	namespace csimCore {
-	
+
 		csimCore::csimCore(ComponentId_t id, Params& params) : Component(id),
-			//DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192),
-			MYDRAM(champsim::chrono::picoseconds{500}, {&channels.at(1)}),
-			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{500*200}, MYDRAM, 1)
+		//DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192),
+		MYDRAM(champsim::chrono::picoseconds{kClockPeriodPs},
+               {&channels.at(1)},
+               resolve_dram_bw_cycles(
+                   params.find<uint64_t>("dram_bw_cycles_per_req", 0),
+                   params.find<uint64_t>("dram_bandwidth_bytes_per_cycle", 0)),
+               estimate_latency_fixed,
+               champsim::data::bytes{params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES)}),
+			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{kClockPeriodPs * 200}, MYDRAM, 1)
 		{
 			/* This function sets up and builds core (and cache and bp and etc) */
 			std::cout<<"Starting cscore constructor"<<std::endl;
@@ -40,28 +69,35 @@ namespace SST {
 
 			// SST variable initialization
 
-			clock_frequency_str = params.find<std::string>("clock", "2GHz");
+			clock_frequency_str = params.find<std::string>("clock", "2.4GHz");
 
-			trace_name = params.find<std::string>("trace_name", "example_tracename.xz");
-			send_trace_name = params.find<std::string>("send_trace_name", "/scratch/acho44/DIST_CXL/TRACES/SendRecv/250228/sendI_2891634_0_110.trace.xz");
-			recv_trace_name = params.find<std::string>("recv_trace_name", "/scratch/acho44/DIST_CXL/TRACES/SendRecv/250228/recv_2891635_0_120.trace.xz");
-			outfile_name = params.find<std::string>("output_file", "~/SST_TEST/sst-elements/src/sst/elements/cscore/tests/asdfasdf2.out");
-			node_id = params.find<int64_t>("node_id", 0);
-			cpuid = params.find<int64_t>("cpu_id", 0);
-			uint64_t warmup_insts=params.find<int64_t>("warmup_insts", 5000);
-			uint64_t sim_insts=params.find<int64_t>("sim_insts", 50000);
+            trace_name = params.find<std::string>("trace_name", "example_tracename.xz");
+			address_map_path = params.find<std::string>("address_map_config", "");
+            node_id = params.find<int64_t>("node_id", 0);
+            warmup_insts = params.find<int64_t>("warmup_insts", 0);
+            sim_insts = params.find<int64_t>("sim_insts", 0);
+            auto dram_size_bytes = params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES);
+            pool_pa_base = params.find<uint64_t>("pool_pa_base", 0);
+            if (pool_pa_base == 0) {
+                pool_pa_base = dram_size_bytes;
+            }
+            if (pool_pa_base < dram_size_bytes) {
+                std::cerr << "WARNING: pool_pa_base overlaps DRAM range. Forcing pool_pa_base = dram_size_bytes." << std::endl;
+                pool_pa_base = dram_size_bytes;
+            }
+            cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
 		    primaryComponentDoNotEndSim();
 			
 
-			tmp_instr.msgSize=0;
+			// tmp_instr.msgSize=0;
 
 			std::cout<<"trace_name: "<<trace_name<<std::endl;
 			std::vector<std::string> trace_names;
 			trace_names.push_back(trace_name);
-			traces.push_back(get_tracereader(trace_name, 0, false, true));
+			traces.push_back(get_tracereader(trace_name, 0, false, false));
 
 			
 			std::cout<<"traces.size(): "<<traces.size()<<std::endl;
@@ -83,7 +119,7 @@ namespace SST {
 			.mshr_size(5)
 			.tag_bandwidth(champsim::bandwidth::maximum_type{2})
 			.fill_bandwidth(champsim::bandwidth::maximum_type{2})
-			.clock_period(champsim::chrono::picoseconds{500})
+			.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
 			.add_pscl(5, 1, 2)
 			.add_pscl(4, 1, 4)
 			.add_pscl(3, 2, 4)
@@ -103,6 +139,7 @@ namespace SST {
 				.pq_size(32)
 				.mshr_size(64)
 				.latency(20)
+				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{1})
 				.fill_bandwidth(champsim::bandwidth::maximum_type{1})
 				.offset_bits(champsim::data::bits{champsim::lg2(64)})
@@ -110,8 +147,9 @@ namespace SST {
 				.replacement<class lru>()
 				.prefetcher<class no>()
 				.lower_level(&channels.at(1))
-				.clock_period(champsim::chrono::picoseconds{500})
+				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
 				.reset_prefetch_as_load()
+				.reset_wq_checks_full_addr()
 				.reset_virtual_prefetch();
 			caches.push_back(CACHE(llc_builder));
 
@@ -123,14 +161,18 @@ namespace SST {
 				.pq_size(0)
 				.mshr_size(8)
 				.latency(1)
+				.hit_latency(0)
+				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{2})
 				.fill_bandwidth(champsim::bandwidth::maximum_type{2})
 				.offset_bits(champsim::data::bits{champsim::lg2(4096)})
 				.replacement<class lru>()
 				.prefetcher<class no>()
 				.lower_level(&channels.at(2))
-				.clock_period(champsim::chrono::picoseconds{500})
-				.reset_prefetch_as_load();
+				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
+				.reset_prefetch_as_load()
+				.set_wq_checks_full_addr()
+				.reset_virtual_prefetch();
 			caches.push_back(CACHE(dtlb_builder));
 
 			auto itlb_builder = champsim::cache_builder{ champsim::defaults::default_itlb }
@@ -141,14 +183,18 @@ namespace SST {
 				.pq_size(0)
 				.mshr_size(8)
 				.latency(1)
+				.hit_latency(0)
+				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{2})
 				.fill_bandwidth(champsim::bandwidth::maximum_type{2})
 				.offset_bits(champsim::data::bits{champsim::lg2(4096)})
 				.replacement<class lru>()
 				.prefetcher<class no>()
 				.lower_level(&channels.at(3))
-				.clock_period(champsim::chrono::picoseconds{500})
-				.reset_prefetch_as_load();
+				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
+				.reset_prefetch_as_load()
+				.set_wq_checks_full_addr()
+				.set_virtual_prefetch();
 			caches.push_back(CACHE(itlb_builder));
 
 			auto l1d_builder = champsim::cache_builder{ champsim::defaults::default_l1d }
@@ -159,6 +205,7 @@ namespace SST {
 				.pq_size(8)
 				.mshr_size(16)
 				.latency(5)
+				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{2})
 				.fill_bandwidth(champsim::bandwidth::maximum_type{2})
 				.offset_bits(champsim::data::bits{champsim::lg2(64)})
@@ -167,8 +214,9 @@ namespace SST {
 				.prefetcher<class no>()
 				.lower_translate(&channels.at(8))
 				.lower_level(&channels.at(4))
-				.clock_period(champsim::chrono::picoseconds{500})
+				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
 				.reset_prefetch_as_load()
+				.set_wq_checks_full_addr()
 				.reset_virtual_prefetch();
 			caches.push_back(CACHE(l1d_builder));
 
@@ -180,6 +228,7 @@ namespace SST {
 				.pq_size(32)
 				.mshr_size(8)
 				.latency(4)
+				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{2})
 				.fill_bandwidth(champsim::bandwidth::maximum_type{2})
 				.offset_bits(champsim::data::bits{champsim::lg2(64)})
@@ -188,8 +237,9 @@ namespace SST {
 				.prefetcher<class no>()
 				.lower_translate(&channels.at(9))
 				.lower_level(&channels.at(5))
-				.clock_period(champsim::chrono::picoseconds{500})
+				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
 				.reset_prefetch_as_load()
+				.set_wq_checks_full_addr()
 				.set_virtual_prefetch();
 			caches.push_back(CACHE(l1i_builder));
 
@@ -201,6 +251,7 @@ namespace SST {
 				.pq_size(16)
 				.mshr_size(32)
 				.latency(10)
+				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{1})
 				.fill_bandwidth(champsim::bandwidth::maximum_type{1})
 				.offset_bits(champsim::data::bits{champsim::lg2(64)})
@@ -209,8 +260,9 @@ namespace SST {
 				.prefetcher<class no>()
 				.lower_translate(&channels.at(10))
 				.lower_level(&channels.at(6))
-				.clock_period(champsim::chrono::picoseconds{500})
+				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
 				.reset_prefetch_as_load()
+				.reset_wq_checks_full_addr()
 				.reset_virtual_prefetch();
 			caches.push_back(CACHE(l2c_builder));
 
@@ -222,14 +274,17 @@ namespace SST {
 				.pq_size(0)
 				.mshr_size(16)
 				.latency(8)
+				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{1})
 				.fill_bandwidth(champsim::bandwidth::maximum_type{1})
 				.offset_bits(champsim::data::bits{champsim::lg2(4096)})
 				.replacement<class lru>()
 				.prefetcher<class no>()
 				.lower_level(&channels.at(7))
-				.clock_period(champsim::chrono::picoseconds{500})
-				.reset_prefetch_as_load();
+				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
+				.reset_prefetch_as_load()
+				.reset_wq_checks_full_addr()
+				.reset_virtual_prefetch();
 			caches.push_back(CACHE(stlb_builder));
 			
 			std::cout<<"Done instantiating caches"<<std::endl;
@@ -240,20 +295,23 @@ namespace SST {
 
 			auto o3corebuilder = champsim::core_builder{ champsim::defaults::default_core }
 			.ifetch_buffer_size(64)
-			.decode_buffer_size(32)
+			.decode_buffer_size(24)
 			.dispatch_buffer_size(32)
-			.register_file_size(128)
-			.rob_size(352)
-			.lq_size(128)
-			.sq_size(72)
-			.fetch_width(champsim::bandwidth::maximum_type{6})
-			.decode_width(champsim::bandwidth::maximum_type{6})
+			.register_file_size(4096)
+			.rob_size(256)
+			.lq_size(116)
+			.sq_size(64)
+			.fetch_width(champsim::bandwidth::maximum_type{4})
+			.decode_width(champsim::bandwidth::maximum_type{4})
 			.dispatch_width(champsim::bandwidth::maximum_type{6})
-			.schedule_width(champsim::bandwidth::maximum_type{128})
-			.execute_width(champsim::bandwidth::maximum_type{4})
-			.lq_width(champsim::bandwidth::maximum_type{2})
+			.schedule_width(champsim::bandwidth::maximum_type{160})
+			.execute_width(champsim::bandwidth::maximum_type{6})
+			.lq_width(champsim::bandwidth::maximum_type{3})
 			.sq_width(champsim::bandwidth::maximum_type{2})
-			.retire_width(champsim::bandwidth::maximum_type{5})
+			.retire_width(champsim::bandwidth::maximum_type{8})
+			.dib_hit_buffer_size(0)
+			.dib_inorder_width(champsim::bandwidth::maximum_type{4})
+			.dib_hit_latency(0)
 			.mispredict_penalty(1)
 			.decode_latency(1)
 			.dispatch_latency(1)
@@ -267,7 +325,7 @@ namespace SST {
 			.branch_predictor<class bimodal>()
 			.btb<class basic_btb>()
 			.index(0)
-			.clock_period(champsim::chrono::picoseconds{500})
+			.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})
 			.dib_set(32)
 			.dib_way(8)
 			.dib_window(16);
@@ -288,10 +346,23 @@ namespace SST {
 				cache_c.initialize();
 				cache_c.begin_phase();
 				cache_c.warmup=false;
+				cache_c.node_id = static_cast<uint32_t>(node_id);
+				if (!address_map_path.empty()) {
+					cache_c.address_map = &address_map;
+				} else {
+					cache_c.address_map = nullptr;
+				}
+				if (cache_c.NAME == "LLC" && cache_c.address_map != nullptr) {
+					cache_c.send_remote = [this](const sst_request& req) {
+						return enqueue_remote_request(req);
+					};
+				} else {
+					cache_c.send_remote = {};
+				}
 			}
 
 			// Dump stat periodically
-			heartbeat_file = std::make_shared<std::ofstream>("heartbeat_Node" + std::to_string(node_id) + ".log");
+			heartbeat_file = std::make_shared<std::ofstream>();
 			for (O3_CPU& core : cores){
 				core.initialize();
 				core.warmup=false;
@@ -306,10 +377,21 @@ namespace SST {
 				//std::cout << "time quantum: " << fmt::format("{}", time_quantum) << std::endl;
 				//std::cout << "time quantum: " << time_quantum.count() <<" picoseconds"<< std::endl;
 
+			if (!address_map_path.empty()) {
+				if (!address_map.load(address_map_path)) {
+					std::cerr << "WARNING: failed to load address_map_config from " << address_map_path << std::endl;
+					vmem.set_address_map(nullptr, static_cast<uint32_t>(node_id), pool_pa_base);
+				} else {
+					vmem.set_address_map(&address_map, static_cast<uint32_t>(node_id), pool_pa_base);
+				}
+			} else {
+				vmem.set_address_map(nullptr, static_cast<uint32_t>(node_id), pool_pa_base);
+			}
+
 			
-			linkHandler_NW = configureLink("port_handler_NW", new Event::Handler<csimCore>(this, &csimCore::handleEvent_NW));
-			if (!linkHandler_NW) {
-				std::cerr << "ERROR: linkHandler_NW is NULL for node " << node_id << std::endl;
+			linkHandler_FABRIC = configureLink("port_handler_FABRIC", new Event::Handler<csimCore>(this, &csimCore::handleEvent_FABRIC));
+			if (!linkHandler_FABRIC) {
+				std::cerr << "ERROR: linkHandler_FABRIC is NULL for node " << node_id << std::endl;
 			}
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
 				&csimCore::champsim_tick));	
@@ -337,27 +419,22 @@ namespace SST {
 				cache_c.operate_on(global_clock);
 			
 				
-				if(heartbeat_count % 1000 ==0){
-					auto cache_formats = champsim::plain_printer{*heartbeat_file}.format(cache_c.sim_stats);
+				if(cache_heartbeat_period > 0 && (heartbeat_count % cache_heartbeat_period == 0)){
+					auto cache_formats = champsim::plain_printer::format(cache_c.sim_stats);
 					for (const auto& line : cache_formats) {
-						*heartbeat_file << line << '\n';
+						std::cout << line << '\n';
 					}
-					heartbeat_file->flush(); // Optional: ensure output is written immediately
 				}
-				
+					
 			}
+
+			advance_remote_requests();
 
 			uint8_t curr_core_id=0;
 			for (O3_CPU& cpu : cores){
 				//cpu.operate();
 				cpu.operate_on(global_clock);
 				//std::cout<<"core retired_insts: "<<cpu.num_retired<<std::endl;
-
-				if(!cpu.egress_buffer.empty()){
-					// get the egress packet and send it
-					NW_packet_t outpacket = get_egress_packet(curr_core_id);
-					send_NW_packet(outpacket);
-				}
 
 				auto& trace = traces.at(0); // TODO change if multiple cores
 				for (auto pkt_count = cpu.IN_QUEUE_SIZE - static_cast<long>(std::size(cpu.input_queue)); !trace.eof() && pkt_count > 0; --pkt_count) {
@@ -372,76 +449,156 @@ namespace SST {
 				curr_core_id++;
 			}
 
+            if (!cores.empty() && sim_insts > 0) {
+                auto retired = static_cast<uint64_t>(cores.front().num_retired);
+                if (!warmup_done && warmup_insts > 0 && retired >= warmup_insts) {
+                    for (auto& cache : caches) {
+                        cache.begin_phase();
+                    }
+                    for (auto& cpu : cores) {
+                        cpu.begin_phase();
+                    }
+                    warmup_done = true;
+                }
+
+                if (retired >= (warmup_insts + sim_insts)) {
+                    for (auto& cache : caches) {
+                        cache.end_phase(0);
+                    }
+                    for (auto& cpu : cores) {
+                        cpu.end_phase(0);
+                    }
+                    print_final_stats();
+                    primaryComponentOKToEndSim();
+                    return true;
+                }
+            }
+
+            if (!cores.empty() && sim_insts == 0) {
+                auto& trace = traces.at(0);
+                bool drained = true;
+                for (auto& cpu : cores) {
+                    auto lq_empty = std::all_of(cpu.LQ.begin(), cpu.LQ.end(), [](const auto& e) { return !e.has_value(); });
+                    if (!cpu.input_queue.empty() || !cpu.ROB.empty() || !cpu.IFETCH_BUFFER.empty() || !cpu.DECODE_BUFFER.empty() ||
+                        !cpu.DISPATCH_BUFFER.empty() || !cpu.DIB_HIT_BUFFER.empty() || !lq_empty || !cpu.SQ.empty()) {
+                        drained = false;
+                        break;
+                    }
+                }
+                if (trace.eof() && drained) {
+                    for (auto& cache : caches) {
+                        cache.end_phase(0);
+                    }
+                    for (auto& cpu : cores) {
+                        cpu.end_phase(0);
+                    }
+                    print_final_stats();
+                    primaryComponentOKToEndSim();
+                    return true;
+                }
+            }
+
 			//std::cout<<"ptw current_cycle after champsim_tick completed: "<<ptws.front().current_cycle()<<std::endl;
-			// if(heartbeat_count % 100000 == (node_id+1*100)){
-			// 	send_NW_packet();
-			// }
 
 			return false;
+        }
+
+        void csimCore::print_final_stats()
+        {
+            if (final_stats_printed) {
+                return;
+            }
+            final_stats_printed = true;
+
+            champsim::phase_stats stats;
+            stats.name = "Node " + std::to_string(node_id);
+            stats.trace_names.push_back(trace_name);
+
+            stats.sim_cpu_stats.reserve(cores.size());
+            stats.roi_cpu_stats.reserve(cores.size());
+            for (auto& cpu : cores) {
+                stats.sim_cpu_stats.push_back(cpu.sim_stats);
+                stats.roi_cpu_stats.push_back(cpu.roi_stats);
+            }
+
+            stats.sim_cache_stats.reserve(caches.size());
+            stats.roi_cache_stats.reserve(caches.size());
+            for (auto& cache : caches) {
+                stats.sim_cache_stats.push_back(cache.sim_stats);
+                stats.roi_cache_stats.push_back(cache.roi_stats);
+            }
+
+            // MY_MEMORY_CONTROLLER does not expose DRAM_CHANNEL stats; leave DRAM stats empty.
+
+            champsim::plain_printer printer{std::cout};
+            printer.print(stats);
+
+            // StarNUMA-style LLC demand-miss summary (LOAD+RFO only), post-merge (MSHR return).
+            const auto demand_return_count = [](const CACHE::stats_type& st) {
+                uint64_t total = 0;
+                for (const auto& key : st.mshr_return.get_keys()) {
+                    if (key.first == access_type::LOAD || key.first == access_type::RFO) {
+                        total += static_cast<uint64_t>(st.mshr_return.value_or(key, 0));
+                    }
+                }
+                return total;
+            };
+
+            for (const auto& cache : caches) {
+                if (cache.NAME != "LLC") {
+                    continue;
+                }
+                const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
+                const uint64_t total_demand_miss = demand_return_count(st);
+                const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
+                const double avg_miss_lat = (total_demand_miss > 0)
+                    ? static_cast<double>(st.total_miss_latency_cycles) / static_cast<double>(total_demand_miss)
+                    : 0.0;
+                const double avg_cxl_lat = (cxl_demand_miss > 0)
+                    ? static_cast<double>(st.pool_demand_miss_latency_sum) / static_cast<double>(cxl_demand_miss)
+                    : 0.0;
+                std::cout << cxl_demand_miss << " / " << total_demand_miss << " LLC misses are CXL" << std::endl;
+                std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl lat: " << avg_cxl_lat << std::endl;
+                std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
+                for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
+                    std::cout << (i * 10) << " : " << st.miss_latency_hist[i] << std::endl;
+                }
+                break;
+            }
+        }
+
+		void csimCore::handleEvent_FABRIC(SST::Event *ev)
+		{
+			auto* cevent = static_cast<csEvent*>(ev);
+			auto resp = convert_event_to_response(*cevent);
+			for (auto& cache : caches) {
+				if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {
+					delete cevent;
+					return;
+				}
+			}
+			delete cevent;
 		}
 
-		bool csimCore::send_NW_packet(NW_packet_t outpacket){
-
-			int dest_id= outpacket.receiver_core_id;
-			// TODO for dummy testing, setting dest_id to 0 for all packets for now
-			//if(dest_id>3)dest_id=0; // TODO remove this line later
-			cycle_count++;
-			std::cout<<"Node "<<node_id<<" has outgoing packet to "<< dest_id<<std::endl;
-			*heartbeat_file<<"Node "<<node_id<<" has outgoing packet to "<< dest_id<<std::endl;
-			csEvent * nev = new csEvent();
-			nev->payload.push_back(node_id);
-			nev->payload.push_back(dest_id);
-			nev->payload.push_back(cycle_count);
-
-			std::cout << "Node" << node_id << " sending event at " << cycle_count << std::endl;
-			// << nev << " with payload size " << nev->payload.size() << std::endl;
-			linkHandler_NW->send(nev);
-			std::cout << "Node" << node_id << " linkHandler_NW->send() returned" << std::endl;
-			*heartbeat_file << "Node" << node_id << " linkHandler_NW->send() returned" << std::endl;
+		bool csimCore::enqueue_remote_request(const sst_request& req)
+		{
+			remote_outbox.emplace_back(req);
 			return true;
 		}
 
-		void csimCore::handleEvent_NW(SST::Event *ev)
+		void csimCore::advance_remote_requests()
 		{
-			csEvent *cevent = dynamic_cast<csEvent*>(ev);
-			if(cevent){
-				//std::cout<<"node "<<node_id<<" recieved csEvent @ cycle "<<cycle_count<<"from node"<<cevent->payload[0] <<std::endl;
-				NW_packet_t inpacket;
-				inpacket.sender_core_id=cevent->payload[0];
-				inpacket.receiver_core_id = cevent->payload[1];
-				inpacket.instr_id=0;
-				inpacket.payload=0;
-				inpacket.received_cycle= cycle_count;
-				inpacket.event_cycle = cevent->payload[2];
-				
-				// TODO implement ingress buffer injection to core
-				//NW_ingress_buffer.push_back(inpacket);
-
-				std::cout<<"Node"<< node_id<<" handleEvent_NW recieved packet from NW, from Node "<<inpacket.sender_core_id<<", took " <<(cycle_count - inpacket.event_cycle) <<"cycles (sent at cycle "<<inpacket.event_cycle<<")"<<std::endl;
-				*heartbeat_file<<"Node"<< node_id<<" handleEvent_NW recieved packet from NW, from Node "<<inpacket.sender_core_id<<", took " <<(cycle_count - inpacket.event_cycle) <<"cycles (sent at cycle "<<inpacket.event_cycle<<")"<<std::endl;
-				
-				delete(cevent);
+			if (!linkHandler_FABRIC) {
+				return;
 			}
-			else{
-				std::cout<<"cevent NULL"<<std::endl;
+			while (!remote_outbox.empty()) {
+				auto req = remote_outbox.front();
+				auto* event = convert_request_to_event(req);
+				// TODO: path selection/routing metadata if needed
+				linkHandler_FABRIC->send(event);
+				remote_outbox.pop_front();
 			}
-			return;
 		}
-
-		NW_packet_t csimCore::get_egress_packet(uint32_t core_id){
-			if(cores[core_id].egress_buffer.empty()){
-				*(heartbeat_file) << "Expected egress packet but egress buffer is empty!"<<std::endl;
-				NW_packet_t dummypacket;
-				return dummypacket;
-			}
-			NW_packet_t outpacket = *(cores[core_id].egress_buffer.begin());
-			cores[core_id].egress_buffer.erase(cores[core_id].egress_buffer.begin());
-			if(cores[core_id].egress_buffer.empty()){ // unset egress check flag if no packets left
-				cores[core_id].egress_check=false;
-			}
-			return outpacket;
-		}
-			
 
 	} // namespace csimCore
 } // namespace SST

@@ -47,10 +47,10 @@ struct input_instr {
   unsigned long long destination_memory[NUM_INSTR_DESTINATIONS]; // output memory
   unsigned long long source_memory[NUM_INSTR_SOURCES];           // input memory
 
-  // Variables used to track MPI_Send and MPI_Recv
-  uint8_t isMsg; // 0:not a msg, 1:send, 2:recv
-  uint64_t msgNode; // Holds the remote node's ID
-  uint64_t msgSize; // size of msg
+  // // Variables used to track MPI_Send and MPI_Recv
+  // uint8_t isMsg; // 0:not a msg, 1:send, 2:recv
+  // uint64_t msgNode; // Holds the remote node's ID
+  // uint64_t msgSize; // size of msg
 
 };
 
@@ -70,10 +70,10 @@ struct cloudsuite_instr {
 
   unsigned char asid[2];
 
-  // Variables used to track MPI_Send and MPI_Recv
-  uint8_t isMsg; // 0:not a msg, 1:send, 2:recv
-  uint64_t msgNode; // Holds the remote node's ID
-  uint64_t msgSize; // size of msg
+  // // Variables used to track MPI_Send and MPI_Recv
+  // uint8_t isMsg; // 0:not a msg, 1:send, 2:recv
+  // uint64_t msgNode; // Holds the remote node's ID
+  // uint64_t msgSize; // size of msg
 };
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 

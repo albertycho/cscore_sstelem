@@ -21,10 +21,6 @@ sst.enableAllStatisticsForAllComponents({
 #######################################
 NUM_NODES = 2
 CORES_PER_NODE=1
-#nw_lat = "500ns"
-nw_lat = "1us"
-#nw_lat = "50ns"
-cxl_lat_overhead = "50ns"
 
 TRACE_PATH = "/scratch/acho44/DIST_CXL/TRACES/SPMV/BASELINE/250411_cage/"
 OUTPUT_PATH = os.getcwd()
@@ -60,26 +56,3 @@ for i in range(NUM_NODES):
             "sim_insts": siminsts
         }
     )
-
-#########################
-#### NW and CXL Pool ####
-#########################
-nwsim = sst.Component("nwsim", "cscore.NWsim")
-nwsim.addParams(
-    {"output_file": OUTPUT_PATH + "/NW.out"}
-)
-
-
-# Initialize nwls list and connect the links
-nwls = []
-for i in range(NUM_NODES):
-    for j in range(CORES_PER_NODE):
-        k = (i*CORES_PER_NODE)+j
-        print(f"nwl for node {k}")
-        nwls.append(sst.Link(f"node{k}_nw_link"))
-        nwls[k].connect(
-            (cscores[k], "port_handler_NW", nw_lat),
-            (nwsim, f"port_handler{k}", nw_lat)
-        )
-
-

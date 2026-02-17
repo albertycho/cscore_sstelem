@@ -37,14 +37,6 @@
  */
 #define CYCLES_CXL_REQ 23
 #define CYCLES_CXL_DATA 91
-#define CYCLES_NW   160
-
-/* NW_LIM_MSG_PER_CYCLE = (NWBW_in_GBps) / (msgsize * NW_frequency) 
- *                      = (12GBps) / (64B? * 2Billion?)
- * may need cycle countdown (1 msg per N cycles)
- */
-#define NW_LIM_MSG_PER_CYCLE 100
-
 #define HEARTBEAT_PERIOD 10000000
 
 #define DBG_PRINT_ON 1

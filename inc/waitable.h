@@ -75,6 +75,7 @@ public:
 
   bool is_ready_at(time_type cycle) const;
   bool has_unknown_readiness() const;
+  std::optional<time_type> ready_time() const { return event_cycle; }
 
   auto& operator*();
   auto& operator*() const;

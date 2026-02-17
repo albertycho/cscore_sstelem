@@ -26,6 +26,7 @@
 #include <cstddef> // for size_t
 #include <cstdint> // for uint64_t, uint32_t, uint8_t
 #include <deque>
+#include <functional>
 #include <iterator> // for size
 #include <limits>   // for numeric_limits
 #include <memory>
@@ -36,6 +37,7 @@
 #include <iostream>
 
 
+#include "SST_CS_packets.h"
 #include "address.h"
 #include "bandwidth.h"
 #include "block.h"
@@ -48,6 +50,7 @@
 #include "operable.h"
 #include "util/to_underlying.h" // for to_underlying
 #include "waitable.h"
+#include "address_map.h"
 
 class CACHE : public champsim::operable
 {
@@ -106,6 +109,8 @@ public:
     uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
     champsim::chrono::clock::time_point time_enqueued;
+    champsim::chrono::clock::time_point remote_issue_time = champsim::chrono::clock::time_point::max();
+    bool remote_is_pool = false;
 
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
@@ -177,10 +182,17 @@ public:
   std::deque<mshr_type> MSHR;
   std::deque<mshr_type> inflight_writes;
 
+  // Optional remote routing support
+  const SST::csimCore::AddressMap* address_map = nullptr;
+  std::function<bool(const sst_request&)> send_remote;
+  uint32_t node_id = 0;
+
   long operate() final;
   void initialize() final;
   void begin_phase() final;
   void end_phase(unsigned cpu) final;
+
+  bool handle_remote_response(const sst_response& resp);
 
   [[deprecated]] std::size_t get_occupancy(uint8_t queue_type, champsim::address address) const;
   [[deprecated]] std::size_t get_size(uint8_t queue_type, champsim::address address) const;
