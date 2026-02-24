@@ -7,9 +7,27 @@ import sst
 NUM_NODES = 4
 POOL_NODE_ID = 100
 
+# Latency/bandwidth (cycles per packet) for the CXL links.
+T_CXL = 120
+BW_CXL_CYCLES = 25
+
+# Memory sizing
+DRAM_SIZE_BYTES = 68719476736  # 64 GiB
+POOL_PA_BASE = 68719476736     # pool PA starts at 64 GiB
+
+# Local DRAM bandwidth as cycles per 64B request
+DRAM_BW_CYCLES_PER_REQ = 4
+
+# Inputs
+TRACE_DIR = os.getcwd()
+TRACE_NAME = "champsim.trace"
+CXL_CONFIG = os.path.join(os.getcwd(), "cxl_config.csv")
+
 pool = sst.Component("cxl_pool", "cscore.CXLMemoryPool")
 pool.addParams({
     "pool_node_id": POOL_NODE_ID,
+    "clock": "2.4GHz",
+    "pool_bw_cycles_per_req": DRAM_BW_CYCLES_PER_REQ,
     "heartbeat_period": 0,
 })
 
@@ -17,17 +35,22 @@ for i in range(NUM_NODES):
     sock = sst.Component(f"s{i}", "cscore.csimCore")
     sock.addParams({
         "node_id": i,
-        "trace_name": os.path.join(os.getcwd(), "champsim.trace"),
-        "address_map_config": os.path.join(os.getcwd(), "cxl_config.csv"),
-        "dram_size_bytes": 1073741824,  # 1 GiB
-        "pool_pa_base": 1073741824,     # pool PA starts at 1 GiB
-        "cache_heartbeat_period": 1000,
+        "trace_name": os.path.join(TRACE_DIR, TRACE_NAME),
+        "address_map_config": CXL_CONFIG,
+        "dram_size_bytes": DRAM_SIZE_BYTES,
+        "dram_bw_cycles_per_req": DRAM_BW_CYCLES_PER_REQ,
+        "pool_pa_base": POOL_PA_BASE,
+        "cache_heartbeat_period": 0,
+        "clock": "2.4GHz",
+        "warmup_insts": 10000,
+        "sim_insts": 50000,
     })
 
     fabric = sst.Component(f"fabric{i}", "cscore.Fabric")
     fabric.addParams({
-        "link_bandwidth": 1,
-        "link_base_latency": 1,
+        "link_bandwidth": BW_CXL_CYCLES,
+        "link_base_latency": T_CXL,
+        "clock": "2.4GHz",
     })
 
     l0 = sst.Link(f"s{i}_to_fabric{i}")
