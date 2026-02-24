@@ -20,9 +20,9 @@ POOL_PA_BASE = 68719476736     # pool PA starts at 64 GiB
 DRAM_BW_CYCLES_PER_REQ = 4
 
 # Inputs
-TRACE_DIR = os.getcwd()
+TRACE_DIR = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/simple"
 TRACE_NAME = "champsim.trace"
-CXL_CONFIG = os.path.join(os.getcwd(), "cxl_config.csv")
+CXL_CONFIG = os.path.join(TRACE_DIR, "cxl_config.csv")
 
 
 def switch_node_port(node_idx: int) -> str:
