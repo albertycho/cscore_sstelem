@@ -49,6 +49,10 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
 
     registerClock(clock_frequency_, new Clock::Handler<CXLMemoryPool>(this, &CXLMemoryPool::clock_tick));
 
+    pool_link_ = configureLink(
+        "port_handler_pool",
+        new Event::Handler<CXLMemoryPool>(this, &CXLMemoryPool::handle_request));
+
     for (int i = 0; i < MAX_CXL_PORTS; ++i) {
         std::string port_name = "port_handler_cores" + std::to_string(i);
         core_links_[i] = configureLink(
@@ -148,6 +152,17 @@ bool CXLMemoryPool::produce_placeholder_response(const champsim::channel::respon
     OutstandingRequest route = pending_it->second;
     pending_.erase(pending_it);
 
+    auto idx = static_cast<int>(route.sst_cpu);
+
+    SST::Link* target_link = nullptr;
+    if (pool_link_ != nullptr) {
+        target_link = pool_link_;
+    } else if (idx >= 0 && idx < MAX_CXL_PORTS) {
+        target_link = core_links_[idx];
+    }
+
+    assert(target_link != nullptr && "CXLMemoryPool: target_link is null for requested port");
+
     sst_response out(response.address.to<uint64_t>(),
                      response.v_address.to<uint64_t>(),
                      response.data.to<uint64_t>(),
@@ -170,7 +185,9 @@ bool CXLMemoryPool::produce_placeholder_response(const champsim::channel::respon
 void CXLMemoryPool::send_response_event(const sst_response& resp) {
     auto idx = static_cast<int>(resp.sst_cpu);
     SST::Link* target_link = nullptr;
-    if (idx >= 0 && idx < MAX_CXL_PORTS) {
+    if (pool_link_ != nullptr) {
+        target_link = pool_link_;
+    } else if (idx >= 0 && idx < MAX_CXL_PORTS) {
         target_link = core_links_[idx];
     }
     assert(target_link != nullptr && "CXLMemoryPool: target_link is null for requested port");
