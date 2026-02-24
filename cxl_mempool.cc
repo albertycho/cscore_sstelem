@@ -152,6 +152,17 @@ bool CXLMemoryPool::produce_placeholder_response(const champsim::channel::respon
     OutstandingRequest route = pending_it->second;
     pending_.erase(pending_it);
 
+    auto idx = static_cast<int>(route.sst_cpu);
+
+    SST::Link* target_link = nullptr;
+    if (pool_link_ != nullptr) {
+        target_link = pool_link_;
+    } else if (idx >= 0 && idx < MAX_CXL_PORTS) {
+        target_link = core_links_[idx];
+    }
+
+    assert(target_link != nullptr && "CXLMemoryPool: target_link is null for requested port");
+
     sst_response out(response.address.to<uint64_t>(),
                      response.v_address.to<uint64_t>(),
                      response.data.to<uint64_t>(),
