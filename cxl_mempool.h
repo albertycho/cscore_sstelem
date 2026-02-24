@@ -40,6 +40,7 @@ public:
     )
 
     SST_ELI_DOCUMENT_PORTS(
+        { "port_handler_pool", "Bidirectional CXL traffic (single-port mode)", { "cscore.CXLMemoryPool", "" } },
         { "port_handler_cores0", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
         { "port_handler_cores1", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
         { "port_handler_cores2", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
@@ -127,6 +128,7 @@ private:
     std::string clock_frequency_;
     static constexpr int MAX_CXL_PORTS = 64;
     SST::Link* core_links_[MAX_CXL_PORTS] = {};
+    SST::Link* pool_link_ = nullptr;
 
     champsim::channel mem_channel_{};
     MY_MEMORY_CONTROLLER mem_ctrl_;

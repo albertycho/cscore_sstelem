@@ -21,7 +21,7 @@ for i in range(NUM_NODES):
         "address_map_config": os.path.join(os.getcwd(), "cxl_config.csv"),
         "dram_size_bytes": 1073741824,  # 1 GiB
         "pool_pa_base": 1073741824,     # pool PA starts at 1 GiB
-        "cache_heartbeat_period":1000,
+        "cache_heartbeat_period": 1000,
     })
 
     fabric = sst.Component(f"fabric{i}", "cscore.Fabric")

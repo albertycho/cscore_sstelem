@@ -46,6 +46,10 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
 
     registerClock(clock_frequency_, new Clock::Handler<CXLMemoryPool>(this, &CXLMemoryPool::clock_tick));
 
+    pool_link_ = configureLink(
+        "port_handler_pool",
+        new Event::Handler<CXLMemoryPool>(this, &CXLMemoryPool::handle_request));
+
     for (int i = 0; i < MAX_CXL_PORTS; ++i) {
         std::string port_name = "port_handler_cores" + std::to_string(i);
         core_links_[i] = configureLink(
@@ -125,7 +129,9 @@ void CXLMemoryPool::produce_placeholder_response(const champsim::channel::respon
     auto idx = static_cast<int>(route.sst_cpu);
 
     SST::Link* target_link = nullptr;
-    if (idx >= 0 && idx < MAX_CXL_PORTS) {
+    if (pool_link_ != nullptr) {
+        target_link = pool_link_;
+    } else if (idx >= 0 && idx < MAX_CXL_PORTS) {
         target_link = core_links_[idx];
     }
 
