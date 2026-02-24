@@ -3,9 +3,6 @@ import sst
 
 # Replication topology (with switch):
 #   nodes -> fabric -> switch -> fabric -> pools
-#
-# For testing parity with experiments/simple/pool.py, keep NUM_NODES and NUM_POOLS
-# identical across both scripts.
 
 NUM_NODES = 4
 NUM_POOLS = 1
@@ -65,37 +62,37 @@ for i in range(NUM_NODES):
         "pool_pa_base": POOL_PA_BASE,
         "cache_heartbeat_period": 0,
         "clock": "2.4GHz",
-        "warmup_insts": 1000000,
-        "sim_insts": 5000000,
+        "warmup_insts": 10000,
+        "sim_insts": 50000,
     })
 
-    node_fabric = sst.Component(f"fabric_node{i}", "cscore.Fabric")
-    node_fabric.addParams({
+    fabric = sst.Component(f"fabric{i}", "cscore.Fabric")
+    fabric.addParams({
         "link_bandwidth": BW_CXL_CYCLES,
         "link_base_latency": T_CXL,
         "clock": "2.4GHz",
     })
 
-    link_node_to_fabric = sst.Link(f"link_node{i}_to_fabric")
-    link_node_to_fabric.connect((sock, "port_handler_FABRIC", "1ns"),
-                                (node_fabric, "port_handler0", "1ns"))
+    l0 = sst.Link(f"s{i}_to_fabric{i}")
+    l0.connect((sock, "port_handler_FABRIC", "1ns"),
+               (fabric, "port_handler0", "1ns"))
 
-    link_fabric_to_switch = sst.Link(f"link_fabric_node{i}_to_switch")
-    link_fabric_to_switch.connect((node_fabric, "port_handler1", "1ns"),
-                                  (switch, switch_node_port(i), "1ns"))
+    l1 = sst.Link(f"fabric{i}_to_switch")
+    l1.connect((fabric, "port_handler1", "1ns"),
+               (switch, switch_node_port(i), "1ns"))
 
 for j, pool in enumerate(pools):
-    pool_fabric = sst.Component(f"fabric_pool{j}", "cscore.Fabric")
-    pool_fabric.addParams({
+    fabric = sst.Component(f"fabric_pool{j}", "cscore.Fabric")
+    fabric.addParams({
         "link_bandwidth": BW_CXL_CYCLES,
         "link_base_latency": T_CXL,
         "clock": "2.4GHz",
     })
 
-    link_switch_to_fabric = sst.Link(f"link_switch_to_fabric_pool{j}")
-    link_switch_to_fabric.connect((switch, switch_pool_port(j), "1ns"),
-                                  (pool_fabric, "port_handler0", "1ns"))
+    l2 = sst.Link(f"switch_to_fabric{j}")
+    l2.connect((switch, switch_pool_port(j), "1ns"),
+               (fabric, "port_handler0", "1ns"))
 
-    link_fabric_to_pool = sst.Link(f"link_fabric_pool{j}_to_pool")
-    link_fabric_to_pool.connect((pool_fabric, "port_handler1", "1ns"),
-                                (pool, "port_handler_pool", "1ns"))
+    l3 = sst.Link(f"fabric{j}_to_pool")
+    l3.connect((fabric, "port_handler1", "1ns"),
+               (pool, "port_handler_pool", "1ns"))
