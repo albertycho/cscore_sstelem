@@ -31,6 +31,8 @@ libcscore_la_SOURCES = \
     cxl_mempool.cc \
     fabric.h \
     fabric.cc \
+    switch.h \
+    switch.cc \
     vcpkg_installed/x64-linux/include/fmt/core.h \
     vcpkg_installed/x64-linux/include/lzma.h \
     branch/bimodal/bimodal.cc \
