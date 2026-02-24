@@ -29,6 +29,8 @@ libcscore_la_SOURCES = \
     src/address_map.cc \
     cxl_mempool.h \
     cxl_mempool.cc \
+    switch.h \
+    switch.cc \
     vcpkg_installed/x64-linux/include/fmt/core.h \
     vcpkg_installed/x64-linux/include/lzma.h \
     branch/bimodal/bimodal.cc \
