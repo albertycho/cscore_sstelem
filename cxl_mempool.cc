@@ -35,6 +35,9 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
       device_bandwidth_(params.find<uint64_t>("device_bandwidth", 0)),
       memory_bandwidth_(params.find<uint64_t>("memory_bandwidth", 0)),
       latency_cycles_(static_cast<int64_t>(params.find<uint64_t>("latency_cycles", 50))),
+      link_bw_cycles_(params.find<int64_t>("link_bw_cycles", 0)),
+      link_latency_cycles_(params.find<int64_t>("link_latency_cycles", 0)),
+      link_queue_size_(params.find<int64_t>("link_queue_size", 0)),
       pool_node_id_(static_cast<uint32_t>(params.find<uint64_t>("pool_node_id", 100))),
       clock_frequency_(params.find<std::string>("clock", "2.4GHz")),
       mem_channel_{},
@@ -52,15 +55,38 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
             port_name,
             new Event::Handler<CXLMemoryPool>(this, &CXLMemoryPool::handle_request));
     }
+
+    if (link_bw_cycles_ > 0 || link_latency_cycles_ > 0 || link_queue_size_ > 0) {
+        const int64_t bw_cycles = std::max<int64_t>(link_bw_cycles_, 1);
+        const int64_t lat_cycles = std::max<int64_t>(link_latency_cycles_, 1);
+        auto latency_fn = [lat_cycles](double) { return lat_cycles; };
+        auto bw_cost_fn = [bw_cycles](const sst_response& resp) {
+            const uint64_t bytes = (resp.msg_bytes == 0) ? 64 : resp.msg_bytes;
+            const uint64_t cost = (bw_cycles * bytes) / 64;
+            return static_cast<int64_t>(std::max<uint64_t>(cost, 1));
+        };
+        resp_link_queue_ = std::make_unique<lat_bw_queue<sst_response>>(bw_cycles, std::move(latency_fn), bw_cost_fn, link_queue_size_);
+    }
 }
 
 bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
     ++tick_count_;
     mem_ctrl_.operate();
+    if (resp_link_queue_) {
+        auto ready = resp_link_queue_->on_tick();
+        for (auto& resp : ready) {
+            send_response_event(resp);
+        }
+    }
     while (!mem_channel_.returned.empty()) {
-        auto response = std::move(mem_channel_.returned.front());
+        if (resp_link_queue_ && resp_link_queue_->is_full()) {
+            break;
+        }
+        const auto& response = mem_channel_.returned.front();
+        if (!produce_placeholder_response(response)) {
+            break;
+        }
         mem_channel_.returned.pop_front();
-        produce_placeholder_response(response);
         ++total_completed_;
     }
     if (heartbeat_period_ > 0 && (tick_count_ % heartbeat_period_ == 0)) {
@@ -109,27 +135,18 @@ void CXLMemoryPool::handle_request(SST::Event* ev) {
     delete cevent;
 }
 
-void CXLMemoryPool::produce_placeholder_response(const champsim::channel::response_type& response) {
+bool CXLMemoryPool::produce_placeholder_response(const champsim::channel::response_type& response) {
     if (response.instr_depend_on_me.empty()) {
-        return;
+        return true;
     }
 
     auto tag = response.instr_depend_on_me.front();
     auto pending_it = pending_.find(tag);
     if (pending_it == pending_.end()) {
-        return;
+        return true;
     }
     OutstandingRequest route = pending_it->second;
     pending_.erase(pending_it);
-
-    auto idx = static_cast<int>(route.sst_cpu);
-
-    SST::Link* target_link = nullptr;
-    if (idx >= 0 && idx < MAX_CXL_PORTS) {
-        target_link = core_links_[idx];
-    }
-
-    assert(target_link != nullptr && "CXLMemoryPool: target_link is null for requested port");
 
     sst_response out(response.address.to<uint64_t>(),
                      response.v_address.to<uint64_t>(),
@@ -143,7 +160,21 @@ void CXLMemoryPool::produce_placeholder_response(const champsim::channel::respon
                        ? route.sst_cpu
                        : route.src_node;
 
-    auto* event = convert_response_to_event(out);
+    if (resp_link_queue_) {
+        return resp_link_queue_->add_packet(std::move(out));
+    }
+    send_response_event(out);
+    return true;
+}
+
+void CXLMemoryPool::send_response_event(const sst_response& resp) {
+    auto idx = static_cast<int>(resp.sst_cpu);
+    SST::Link* target_link = nullptr;
+    if (idx >= 0 && idx < MAX_CXL_PORTS) {
+        target_link = core_links_[idx];
+    }
+    assert(target_link != nullptr && "CXLMemoryPool: target_link is null for requested port");
+    auto* event = convert_response_to_event(resp);
     target_link->send(event);
 }
 

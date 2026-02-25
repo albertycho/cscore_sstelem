@@ -25,13 +25,17 @@ class lat_bw_queue {
 public:
     using latency_function_type = std::function<int64_t(double)>;
     using bandwidth_function_type = std::function<int64_t(const T&)>;
-    lat_bw_queue(int64_t bandwidth, latency_function_type&& latency_function, bandwidth_function_type&& bw_cost_fn = {})
+    lat_bw_queue(int64_t bandwidth,
+                 latency_function_type&& latency_function,
+                 bandwidth_function_type&& bw_cost_fn = {},
+                 int64_t max_pending = 0)
     : bandwidth{bandwidth} 
     , internal_clock{0}
     , last_insert_time{-bandwidth}
     , last_insert_gap{bandwidth}
     , latency_function{std::forward<latency_function_type>(latency_function)}
     , bw_cost_fn{std::forward<bandwidth_function_type>(bw_cost_fn)}
+    , max_pending{max_pending}
     , buffer{} {}
 
     /// Called once per tick (start of each cycle)
@@ -56,9 +60,21 @@ public:
     }
 
     /// Adds a single packet to the channel. Packet will be queued if there is not sufficient bandwidth.
-    void add_packet(T&& packet) {
+    bool add_packet(T&& packet) {
+        if (is_full()) {
+            return false;
+        }
         blocked_queue.emplace(std::forward<T>(packet));
         try_fire_request();
+        return true;
+    }
+
+    std::size_t occupancy() const {
+        return blocked_queue.size() + active_queue.size();
+    }
+
+    bool is_full() const {
+        return max_pending > 0 && static_cast<int64_t>(occupancy()) >= max_pending;
     }
 
 private:
@@ -97,4 +113,5 @@ private:
     std::priority_queue<entry> active_queue;    // (packet, injection_time)
     std::queue<T> blocked_queue;                // waiting to enter
     std::bitset<256> buffer;                    // history buffer
+    int64_t max_pending;
 };

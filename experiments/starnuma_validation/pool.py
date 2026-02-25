@@ -10,6 +10,7 @@ T_CXL = 120          # cycles (matches icn_sim.t_cxl in StarNUMA config)
 # Bandwidth here is cycles-per-packet (not MB/s). For 64B packets @ 2.4GHz:
 # cycles = ceil(64 / (MBps * 1e6) * 2.4e9). 6000 MB/s -> 25 cycles.
 BW_CXL_CYCLES = 25
+REMOTE_LINK_QUEUE_SIZE = 8192  # matches StarNUMA DELAY_Q_SIZE
 
 # Local DRAM bandwidth as cycles per 64B request.
 # StarNUMA physical_memory: channels=2, channel_width=8 bytes => 16 B/cycle.
@@ -32,6 +33,9 @@ pool.addParams({
     "pool_node_id": POOL_NODE_ID,
     "clock": "2.4GHz",
     "pool_bw_cycles_per_req": DRAM_BW_CYCLES_PER_REQ,
+    "link_bw_cycles": BW_CXL_CYCLES,
+    "link_latency_cycles": T_CXL,
+    "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     # CXL pool heartbeat prints:
     "heartbeat_period": 100000,
 })
@@ -49,19 +53,11 @@ for i in range(NUM_NODES):
         "clock": "2.4GHz",
         "warmup_insts": 5000,
         "sim_insts": 1000,
+        "remote_link_bw_cycles": BW_CXL_CYCLES,
+        "remote_link_latency_cycles": T_CXL,
+        "remote_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     })
 
-    fabric = sst.Component(f"fabric{i}", "cscore.Fabric")
-    fabric.addParams({
-        "link_bandwidth": BW_CXL_CYCLES,
-        "link_base_latency": T_CXL,
-        "clock": "2.4GHz",
-    })
-
-    l0 = sst.Link(f"s{i}_to_fabric{i}")
-    l0.connect((sock, "port_handler_FABRIC", "1ns"),
-               (fabric, "port_handler0", "1ns"))
-
-    l1 = sst.Link(f"fabric{i}_to_pool")
-    l1.connect((fabric, "port_handler1", "1ns"),
-               (pool, f"port_handler_cores{i}", "1ns"))
+    link_node_to_pool = sst.Link(f"s{i}_to_pool")
+    link_node_to_pool.connect((sock, "port_handler_FABRIC", "1ns"),
+                              (pool, f"port_handler_cores{i}", "1ns"))
