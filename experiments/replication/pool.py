@@ -84,8 +84,8 @@ for i in range(NUM_NODES):
 for j, pool in enumerate(pools):
     fabric = sst.Component(f"fabric_pool{j}", "cscore.Fabric")
     fabric.addParams({
-        "link_bandwidth": BW_CXL_CYCLES,
-        "link_base_latency": T_CXL,
+        "link_bandwidth": 1,
+        "link_base_latency": 1,
         "clock": "2.4GHz",
     })
 
