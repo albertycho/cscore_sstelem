@@ -86,6 +86,21 @@ namespace SST {
                 pool_pa_base = dram_size_bytes;
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
+            remote_link_bw_cycles = params.find<int64_t>("remote_link_bw_cycles", 0);
+            remote_link_latency_cycles = params.find<int64_t>("remote_link_latency_cycles", 0);
+            remote_link_queue_size = params.find<int64_t>("remote_link_queue_size", 0);
+
+            if (remote_link_bw_cycles > 0 || remote_link_latency_cycles > 0 || remote_link_queue_size > 0) {
+                const int64_t bw_cycles = std::max<int64_t>(remote_link_bw_cycles, 1);
+                const int64_t lat_cycles = std::max<int64_t>(remote_link_latency_cycles, 1);
+                auto latency_fn = [lat_cycles](double) { return lat_cycles; };
+                auto bw_cost_fn = [bw_cycles](const sst_request& req) {
+                    const uint64_t bytes = (req.msg_bytes == 0) ? 64 : req.msg_bytes;
+                    const uint64_t cost = (bw_cycles * bytes) / 64;
+                    return static_cast<int64_t>(std::max<uint64_t>(cost, 1));
+                };
+                remote_link_queue = std::make_unique<lat_bw_queue<sst_request>>(bw_cycles, std::move(latency_fn), bw_cost_fn, remote_link_queue_size);
+            }
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -582,6 +597,9 @@ namespace SST {
 
 		bool csimCore::enqueue_remote_request(const sst_request& req)
 		{
+			if (remote_link_queue) {
+				return remote_link_queue->add_packet(sst_request{req});
+			}
 			remote_outbox.emplace_back(req);
 			return true;
 		}
@@ -591,6 +609,15 @@ namespace SST {
 			if (!linkHandler_FABRIC) {
 				return;
 			}
+			if (remote_link_queue) {
+				auto ready = remote_link_queue->on_tick();
+				for (auto& req : ready) {
+					auto* event = convert_request_to_event(req);
+					linkHandler_FABRIC->send(event);
+				}
+				return;
+			}
+
 			while (!remote_outbox.empty()) {
 				auto req = remote_outbox.front();
 				auto* event = convert_request_to_event(req);
