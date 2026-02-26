@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -10,7 +9,6 @@
 #include <sst/core/link.h>
 
 #include "channel.h"
-#include "lat_bw_queue.h"
 #include "my_memory_controller.h"
 #include "SST_CS_packets.h"
 
@@ -37,9 +35,6 @@ public:
         { "device_bandwidth", "Device side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "memory_bandwidth", "Memory side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "latency_cycles", "Fixed latency (in cycles) for the CXL path", "0" },
-        { "link_bw_cycles", "CXL egress bandwidth in cycles per 64B response", "0" },
-        { "link_latency_cycles", "CXL egress base latency in cycles for responses", "0" },
-        { "link_queue_size", "CXL egress queue capacity in packets (0 = unbounded)", "0" },
         { "pool_node_id", "Logical node id used in fabric headers", "100" },
         { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" }
     )
@@ -121,16 +116,12 @@ private:
 
     bool clock_tick(SST::Cycle_t current);
     void handle_request(SST::Event* ev);
-    bool produce_placeholder_response(const champsim::channel::response_type& response);
-    void send_response_event(const sst_response& resp);
+    void produce_placeholder_response(const champsim::channel::response_type& response);
 
     uint64_t device_bandwidth_;
     uint64_t memory_bandwidth_;
     uint64_t pool_bw_cycles_per_req_ = 0;
     int64_t latency_cycles_;
-    int64_t link_bw_cycles_ = 0;
-    int64_t link_latency_cycles_ = 0;
-    int64_t link_queue_size_ = 0;
     uint32_t pool_node_id_ = 100;
 
     std::string clock_frequency_;
@@ -145,8 +136,6 @@ private:
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
     uint64_t heartbeat_period_ = 1000;
-
-    std::unique_ptr<lat_bw_queue<sst_response>> resp_link_queue_;
 };
 
 } // namespace csimCore

@@ -30,7 +30,6 @@
 
 #include "cache.h"
 #include "dram_controller.h"
-#include "lat_bw_queue.h"
 #include "my_memory_controller.h"
 #include "ooo_cpu.h"
 #include "operable.h"
@@ -76,9 +75,6 @@ namespace SST {
             { "dram_bandwidth_bytes_per_cycle", "Local DRAM bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE; 0 uses DEFAULT_BW)", "0" },
             { "pool_pa_base", "Base PA for pool mapping in VMEM (0 means use dram_size_bytes)", "0" },
             { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
-            { "remote_link_bw_cycles", "Remote link bandwidth in cycles per 64B (enables sender-side link queue if nonzero)", "0" },
-            { "remote_link_latency_cycles", "Remote link base latency in cycles (sender-side link queue)", "0" },
-            { "remote_link_queue_size", "Remote link queue capacity in packets (0 = unbounded)", "0" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" }
             
@@ -161,10 +157,6 @@ namespace SST {
         AddressMap address_map;
         std::string address_map_path;
         std::deque<sst_request> remote_outbox;
-        int64_t remote_link_bw_cycles = 0;
-        int64_t remote_link_latency_cycles = 0;
-        int64_t remote_link_queue_size = 0;
-        std::unique_ptr<lat_bw_queue<sst_request>> remote_link_queue;
         bool final_stats_printed = false;
 
         // champsim::channel cpu0_STLB_to_cpu0_PTW_queues{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0};
