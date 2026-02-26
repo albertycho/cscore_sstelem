@@ -404,9 +404,9 @@ namespace SST {
 			}
 
 			
-			linkHandler_FABRIC = configureLink("port_handler_FABRIC", new Event::Handler<csimCore>(this, &csimCore::handleEvent_FABRIC));
-			if (!linkHandler_FABRIC) {
-				std::cerr << "ERROR: linkHandler_FABRIC is NULL for node " << node_id << std::endl;
+			linkHandler_cxl = configureLink("port_handler_cxl", new Event::Handler<csimCore>(this, &csimCore::handleEvent_CXL));
+			if (!linkHandler_cxl) {
+				std::cerr << "ERROR: linkHandler_cxl is NULL for node " << node_id << std::endl;
 			}
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
 				&csimCore::champsim_tick));	
@@ -582,7 +582,7 @@ namespace SST {
             }
         }
 
-		void csimCore::handleEvent_FABRIC(SST::Event *ev)
+		void csimCore::handleEvent_CXL(SST::Event *ev)
 		{
 			auto* cevent = static_cast<csEvent*>(ev);
 			auto resp = convert_event_to_response(*cevent);
@@ -606,14 +606,14 @@ namespace SST {
 
 		void csimCore::advance_remote_requests()
 		{
-			if (!linkHandler_FABRIC) {
+			if (!linkHandler_cxl) {
 				return;
 			}
 			if (remote_link_queue) {
 				auto ready = remote_link_queue->on_tick();
 				for (auto& req : ready) {
 					auto* event = convert_request_to_event(req);
-					linkHandler_FABRIC->send(event);
+					linkHandler_cxl->send(event);
 				}
 				return;
 			}
@@ -622,7 +622,7 @@ namespace SST {
 				auto req = remote_outbox.front();
 				auto* event = convert_request_to_event(req);
 				// TODO: path selection/routing metadata if needed
-				linkHandler_FABRIC->send(event);
+				linkHandler_cxl->send(event);
 				remote_outbox.pop_front();
 			}
 		}

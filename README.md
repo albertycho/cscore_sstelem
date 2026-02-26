@@ -81,7 +81,7 @@ for i in range(NUM_NODES):
     fabric.addParams({"link_bandwidth": 1, "link_base_latency": 1})
 
     l0 = sst.Link(f"s{i}_to_fabric{i}")
-    l0.connect((sock, "port_handler_FABRIC", "1ns"),
+    l0.connect((sock, "port_handler_cxl", "1ns"),
                (fabric, "port_handler0", "1ns"))
 
     l1 = sst.Link(f"fabric{i}_to_pool")

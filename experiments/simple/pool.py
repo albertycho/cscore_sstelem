@@ -11,6 +11,8 @@ POOL_NODE_ID = 100
 T_CXL = 120
 BW_CXL_CYCLES = 25
 REMOTE_LINK_QUEUE_SIZE = 8192
+CLOCK_GHZ = 2.4
+LINK_LAT = f"{T_CXL / CLOCK_GHZ}ns"
 
 # Memory sizing
 DRAM_SIZE_BYTES = 68719476736  # 64 GiB
@@ -54,5 +56,5 @@ for i in range(NUM_NODES):
     })
 
     link_node_to_pool = sst.Link(f"s{i}_to_pool")
-    link_node_to_pool.connect((sock, "port_handler_FABRIC", "1ns"),
-                               (pool, f"port_handler_cores{i}", "1ns"))
+    link_node_to_pool.connect((sock, "port_handler_cxl", LINK_LAT),
+                               (pool, f"port_handler_cores{i}", LINK_LAT))
