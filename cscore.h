@@ -84,7 +84,7 @@ namespace SST {
             
         )
         SST_ELI_DOCUMENT_PORTS(
-            {"port_handler_FABRIC", "Fabric link for off-socket traffic.", { "cscore.csimCore", ""} }
+            {"port_handler_cxl", "CXL link for off-socket traffic.", { "cscore.csimCore", ""} }
         )
         
 
@@ -103,7 +103,7 @@ namespace SST {
         std::string clock_frequency_str;
         std::string trace_name;
         int node_id;
-        SST::Link* linkHandler_FABRIC = nullptr;
+        SST::Link* linkHandler_cxl = nullptr;
         //champsim::csim_sst *csst;
         //champsim::csim_sst csst;
 
@@ -188,7 +188,7 @@ namespace SST {
         void advance_remote_requests();
         void print_final_stats();
     
-        void handleEvent_FABRIC(SST::Event *ev);
+        void handleEvent_CXL(SST::Event *ev);
     };
     
     } // namespace cscore

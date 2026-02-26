@@ -25,7 +25,7 @@ for i in range(NUM_NODES):
     })
 
     l0 = sst.Link(f"s{i}_to_fabric{i}")
-    l0.connect((sock, "port_handler_FABRIC", "1ns"),
+    l0.connect((sock, "port_handler_cxl", "1ns"),
                (fabric, "port_handler0", "1ns"))
 
     l1 = sst.Link(f"fabric{i}_to_pool")
