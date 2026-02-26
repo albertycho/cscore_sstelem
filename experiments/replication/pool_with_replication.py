@@ -1,7 +1,7 @@
 import os
 import sst
 
-# Replication topology (with switch, no Fabric):
+# Replication topology:
 #   nodes -> switch -> pools
 
 NUM_NODES = 4
@@ -26,7 +26,7 @@ TRACE_NAME = "champsim.trace"
 CXL_CONFIG = os.path.join(TRACE_DIR, "cxl_config.csv")
 
 # Switch policy
-REPLICATE_WRITES = 0
+REPLICATE_WRITES = 1
 
 
 def switch_node_port(node_idx: int) -> str:

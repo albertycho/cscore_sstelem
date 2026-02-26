@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <sst/core/component.h>
 #include <sst/core/link.h>
 
 #include "csEvent.h"
+#include "lat_bw_queue.h"
 
 namespace SST {
 namespace csimCore {
@@ -31,7 +33,12 @@ public:
     SST_ELI_DOCUMENT_PARAMS(
         { "num_nodes", "Number of node-facing ports", "0" },
         { "num_pools", "Number of pool-facing ports", "0" },
-        { "pool_node_id_base", "Base node_id for pools (contiguous)", "100" }
+        { "pool_node_id_base", "Base node_id for pools (contiguous)", "100" },
+        { "replicate_writes", "If set, send write/RFO requests to all pools", "0" },
+        { "clock", "Clock frequency for queue timing", "2.4GHz" },
+        { "link_bw_cycles", "Link bandwidth in cycles per 64B (enables egress queues if nonzero)", "0" },
+        { "link_latency_cycles", "Link base latency in cycles (egress queues)", "0" },
+        { "link_queue_size", "Link queue capacity in packets (0 = unbounded)", "0" }
     )
 
     SST_ELI_DOCUMENT_PORTS(
@@ -166,18 +173,26 @@ public:
     )
 
 private:
-private:
     Switch();
     Switch(const Switch&) = delete;
     void operator=(const Switch&) = delete;
 
     void handle_event(SST::Event* ev);
+    bool clock_tick(SST::Cycle_t cycle);
 
     int num_nodes_ = 0;
     int num_pools_ = 0;
     uint64_t pool_node_id_base_ = 100;
+    bool replicate_writes_ = false;
+    std::string clock_frequency_{"2.4GHz"};
+    int64_t link_bw_cycles_ = 0;
+    int64_t link_latency_cycles_ = 0;
+    int64_t link_queue_size_ = 0;
+    bool use_link_queues_ = false;
     std::vector<SST::Link*> node_links_;
     std::vector<SST::Link*> pool_links_;
+    std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>> node_queues_;
+    std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>> pool_queues_;
 };
 
 } // namespace csimCore
