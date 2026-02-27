@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iostream>
 #include <limits>
 #include <string>
 
@@ -172,6 +173,7 @@ void Switch::handle_event(SST::Event* ev)
                 }
                 const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
                 auto* clone = clone_event_with_dst(*cevent, pool_dst);
+                replicated_count_++;
                 if (use_link_queues_ && p < static_cast<int>(pool_queues_.size()) && pool_queues_[p]) {
                     if (!pool_queues_[p]->add_packet(std::move(clone))) {
                         delete clone;
@@ -208,6 +210,11 @@ void Switch::handle_event(SST::Event* ev)
     }
 
     delete cevent;
+}
+
+void Switch::finish()
+{
+    std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
 }
 
 } // namespace csimCore

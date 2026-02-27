@@ -34,7 +34,7 @@ public:
         { "num_nodes", "Number of node-facing ports", "0" },
         { "num_pools", "Number of pool-facing ports", "0" },
         { "pool_node_id_base", "Base node_id for pools (contiguous)", "100" },
-        { "replicate_writes", "If set, send write/RFO requests to all pools", "0" },
+        { "replicate_writes", "If set, send WRITE requests to all pools", "0" },
         { "pool_select_policy", "Pool selection policy for reads/non-replicated requests (round_robin|fixed0)", "round_robin" },
         { "clock", "Clock frequency for queue timing", "2.4GHz" },
         { "link_bw_cycles", "Link bandwidth in cycles per 64B (enables egress queues if nonzero)", "0" },
@@ -179,6 +179,7 @@ private:
     void operator=(const Switch&) = delete;
 
     void handle_event(SST::Event* ev);
+    void finish() override;
     bool clock_tick(SST::Cycle_t cycle);
 
     int num_nodes_ = 0;
@@ -197,6 +198,7 @@ private:
     std::vector<SST::Link*> pool_links_;
     std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>> node_queues_;
     std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>> pool_queues_;
+    uint64_t replicated_count_ = 0;
 };
 
 } // namespace csimCore
