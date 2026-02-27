@@ -76,7 +76,6 @@ class CACHE : public champsim::operable
     bool prefetch_from_this;
     bool skip_fill;
     bool is_translated;
-    bool response_requested;
     bool translate_issued = false;
 
     uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
