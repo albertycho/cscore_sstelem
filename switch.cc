@@ -215,6 +215,23 @@ void Switch::handle_event(SST::Event* ev)
 void Switch::finish()
 {
     std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
+    if (!use_link_queues_) {
+        return;
+    }
+    auto avg_util = [](const std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>>& qs) {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for (const auto& q : qs) {
+            if (!q) {
+                continue;
+            }
+            sum += q->average_utilization();
+            count++;
+        }
+        return count > 0 ? sum / static_cast<double>(count) : 0.0;
+    };
+    std::cout << "Switch avg util node egress: " << avg_util(node_queues_) << std::endl;
+    std::cout << "Switch avg util pool egress: " << avg_util(pool_queues_) << std::endl;
 }
 
 } // namespace csimCore

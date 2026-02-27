@@ -17,6 +17,7 @@
 #include <stats_printer.h>
 #include <stdexcept>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <memory>
@@ -46,6 +47,19 @@ int64_t resolve_dram_bw_cycles(uint64_t cycles_per_req, uint64_t bytes_per_cycle
     }
     return cycles_per_request_from_bw_bytes(bytes_per_cycle);
 }
+
+MY_MEMORY_CONTROLLER::latency_function_type select_latency_fn(SST::Params& params, const char* model_key, const char* fixed_key,
+                                                               int64_t default_fixed_cycles) {
+    auto model = params.find<std::string>(model_key, "fixed");
+    for (auto& ch : model) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    if (model == "percentile" || model == "util" || model == "utilization") {
+        return estimate_latency_percentile;
+    }
+    const auto fixed_cycles = static_cast<int64_t>(params.find<uint64_t>(fixed_key, static_cast<uint64_t>(default_fixed_cycles)));
+    return [fixed_cycles](double) { return fixed_cycles; };
+}
 } // namespace
 
 
@@ -59,7 +73,7 @@ namespace SST {
                resolve_dram_bw_cycles(
                    params.find<uint64_t>("dram_bw_cycles_per_req", 0),
                    params.find<uint64_t>("dram_bandwidth_bytes_per_cycle", 0)),
-               estimate_latency_fixed,
+               select_latency_fn(params, "dram_latency_model", "dram_fixed_latency_cycles", DEFAULT_FIXED_LATENCY_CYCLES),
                champsim::data::bytes{params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES)}),
 			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{kClockPeriodPs * 200}, MYDRAM, 1)
 		{
@@ -86,6 +100,7 @@ namespace SST {
                 pool_pa_base = dram_size_bytes;
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
+            util_heartbeat_period = params.find<uint64_t>("util_heartbeat_period", 0);
             remote_link_bw_cycles = params.find<int64_t>("remote_link_bw_cycles", 0);
             remote_link_latency_cycles = params.find<int64_t>("remote_link_latency_cycles", 0);
             remote_link_queue_size = params.find<int64_t>("remote_link_queue_size", 0);
@@ -579,6 +594,12 @@ namespace SST {
                     std::cout << (i * 10) << " : " << st.miss_latency_hist[i] << std::endl;
                 }
                 break;
+            }
+
+            std::cout << "UTILIZATION SUMMARY\n";
+            std::cout << "  DRAM avg util: " << MYDRAM.queue_average_utilization(0) << '\n';
+            if (remote_link_queue) {
+                std::cout << "  Remote link avg util: " << remote_link_queue->average_utilization() << '\n';
             }
         }
 

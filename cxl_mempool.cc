@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -27,6 +28,17 @@ int64_t resolve_mem_bw(uint64_t mem_bw, uint64_t dev_bw, uint64_t bw_cycles) {
     auto cycles = (BLOCK_SIZE + chosen - 1) / chosen;
     return static_cast<int64_t>(std::max<uint64_t>(cycles, 1));
 }
+
+MY_MEMORY_CONTROLLER::latency_function_type select_pool_latency_fn(SST::Params& params, int64_t fixed_cycles) {
+    auto model = params.find<std::string>("pool_latency_model", "fixed");
+    for (auto& ch : model) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    if (model == "percentile" || model == "util" || model == "utilization") {
+        return estimate_latency_percentile;
+    }
+    return [fixed_cycles](double) { return fixed_cycles; };
+}
 } // namespace
 
 CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
@@ -34,7 +46,7 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
       pool_bw_cycles_per_req_(params.find<uint64_t>("pool_bw_cycles_per_req", 0)),
       device_bandwidth_(params.find<uint64_t>("device_bandwidth", 0)),
       memory_bandwidth_(params.find<uint64_t>("memory_bandwidth", 0)),
-      latency_cycles_(static_cast<int64_t>(params.find<uint64_t>("latency_cycles", 50))),
+      latency_cycles_(static_cast<int64_t>(params.find<uint64_t>("latency_cycles", DEFAULT_FIXED_LATENCY_CYCLES))),
       link_bw_cycles_(params.find<int64_t>("link_bw_cycles", 0)),
       link_latency_cycles_(params.find<int64_t>("link_latency_cycles", 0)),
       link_queue_size_(params.find<int64_t>("link_queue_size", 0)),
@@ -44,7 +56,7 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
       mem_ctrl_(champsim::chrono::picoseconds{kClockPeriodPs},
                 std::vector<champsim::channel*>{&mem_channel_},
                 resolve_mem_bw(memory_bandwidth_, device_bandwidth_, pool_bw_cycles_per_req_),
-                estimate_latency_fixed),
+                select_pool_latency_fn(params, latency_cycles_)),
       heartbeat_period_(params.find<uint64_t>("heartbeat_period", 1000)) {
 
     registerClock(clock_frequency_, new Clock::Handler<CXLMemoryPool>(this, &CXLMemoryPool::clock_tick));
@@ -98,6 +110,12 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
         std::cout << "  total_enqueued:     " << total_enqueued_ << '\n';
         std::cout << "  total_completed:    " << total_completed_ << '\n';
         std::cout << "  pending_responses:  " << pending_.size() << '\n';
+        std::cout << "  mem queue occ:      " << mem_ctrl_.queue_occupancy(0)
+                  << " util: " << mem_ctrl_.queue_utilization(0) << '\n';
+        if (resp_link_queue_) {
+            std::cout << "  resp link occ:      " << resp_link_queue_->occupancy()
+                      << " util: " << resp_link_queue_->utilization() << '\n';
+        }
         std::cout << std::flush;
     }
     return false;
@@ -193,6 +211,15 @@ void CXLMemoryPool::send_response_event(const sst_response& resp) {
     assert(target_link != nullptr && "CXLMemoryPool: target_link is null for requested port");
     auto* event = convert_response_to_event(resp);
     target_link->send(event);
+}
+
+void CXLMemoryPool::finish() {
+    std::cout << "CXL pool " << pool_node_id_ << " utilization summary\n";
+    std::cout << "  mem avg util: " << mem_ctrl_.queue_average_utilization(0) << '\n';
+    if (resp_link_queue_) {
+        std::cout << "  resp link avg util: " << resp_link_queue_->average_utilization() << '\n';
+    }
+    std::cout << std::flush;
 }
 
 } // namespace csimCore

@@ -21,6 +21,7 @@ namespace csimCore {
 class CXLMemoryPool : public SST::Component {
 public:
     CXLMemoryPool(SST::ComponentId_t id, SST::Params& params);
+    void finish() override;
 
     SST_ELI_REGISTER_COMPONENT(
         CXLMemoryPool,
@@ -36,7 +37,8 @@ public:
         { "pool_bw_cycles_per_req", "Pool DRAM bandwidth in cycles per request (overrides memory/device bandwidth if nonzero)", "0" },
         { "device_bandwidth", "Device side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "memory_bandwidth", "Memory side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
-        { "latency_cycles", "Fixed latency (in cycles) for the CXL path", "0" },
+        { "pool_latency_model", "Pool memory latency model: fixed or percentile", "fixed" },
+        { "latency_cycles", "Fixed pool memory latency in cycles (used when pool_latency_model=fixed)", "300" },
         { "link_bw_cycles", "CXL egress bandwidth in cycles per 64B response", "0" },
         { "link_latency_cycles", "CXL egress base latency in cycles for responses", "0" },
         { "link_queue_size", "CXL egress queue capacity in packets (0 = unbounded)", "0" },

@@ -56,6 +56,10 @@ public:
         // Refill from blocked queue up to available bandwidth
         try_fire_request();
 
+        const auto util = get_utilization();
+        util_sum += util;
+        util_samples++;
+
         return completed_on_tick;
     }
 
@@ -71,6 +75,14 @@ public:
 
     std::size_t occupancy() const {
         return blocked_queue.size() + active_queue.size();
+    }
+
+    double utilization() const {
+        return get_utilization();
+    }
+
+    double average_utilization() const {
+        return util_samples > 0 ? util_sum / static_cast<double>(util_samples) : 0.0;
     }
 
     bool is_full() const {
@@ -114,4 +126,6 @@ private:
     std::queue<T> blocked_queue;                // waiting to enter
     std::bitset<256> buffer;                    // history buffer
     int64_t max_pending;
+    double util_sum = 0.0;
+    uint64_t util_samples = 0;
 };

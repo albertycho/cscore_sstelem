@@ -71,5 +71,16 @@ public:
     champsim::data::bytes size() const { return size_; }
     //champsim::data::bytes size() const { return champsim::data::bytes{size_}; }
 
+    std::size_t queue_count() const { return lat_bw_queues.size(); }
+    std::size_t queue_occupancy(std::size_t idx) const {
+        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].occupancy() : 0;
+    }
+    double queue_utilization(std::size_t idx) const {
+        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].utilization() : 0.0;
+    }
+    double queue_average_utilization(std::size_t idx) const {
+        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].average_utilization() : 0.0;
+    }
+
 };
 // namespace champsim
