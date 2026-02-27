@@ -35,6 +35,7 @@ public:
         { "num_pools", "Number of pool-facing ports", "0" },
         { "pool_node_id_base", "Base node_id for pools (contiguous)", "100" },
         { "replicate_writes", "If set, send write/RFO requests to all pools", "0" },
+        { "pool_select_policy", "Pool selection policy for reads/non-replicated requests (round_robin|fixed0)", "round_robin" },
         { "clock", "Clock frequency for queue timing", "2.4GHz" },
         { "link_bw_cycles", "Link bandwidth in cycles per 64B (enables egress queues if nonzero)", "0" },
         { "link_latency_cycles", "Link base latency in cycles (egress queues)", "0" },
@@ -184,6 +185,9 @@ private:
     int num_pools_ = 0;
     uint64_t pool_node_id_base_ = 100;
     bool replicate_writes_ = false;
+    enum class PoolSelectPolicy { Fixed0, RoundRobin };
+    PoolSelectPolicy pool_select_policy_ = PoolSelectPolicy::RoundRobin;
+    std::size_t rr_pool_idx_ = 0;
     std::string clock_frequency_{"2.4GHz"};
     int64_t link_bw_cycles_ = 0;
     int64_t link_latency_cycles_ = 0;

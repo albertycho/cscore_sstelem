@@ -5,7 +5,7 @@ import sst
 #   nodes -> switch -> pools
 
 NUM_NODES = 4
-NUM_POOLS = 1
+NUM_POOLS = 2
 POOL_NODE_ID_BASE = 100
 
 # Latency/bandwidth (cycles per packet) for the CXL links.
@@ -43,6 +43,7 @@ switch.addParams({
     "num_pools": NUM_POOLS,
     "pool_node_id_base": POOL_NODE_ID_BASE,
     "replicate_writes": REPLICATE_WRITES,
+    "pool_select_policy": "round_robin",
     "link_bw_cycles": BW_CXL_CYCLES,
     "link_latency_cycles": T_CXL,
     "link_queue_size": REMOTE_LINK_QUEUE_SIZE,

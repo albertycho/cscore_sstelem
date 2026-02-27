@@ -1,6 +1,7 @@
 #include "switch.h"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <string>
 
@@ -16,6 +17,17 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     num_pools_ = params.find<int>("num_pools", 0);
     pool_node_id_base_ = params.find<uint64_t>("pool_node_id_base", 100);
     replicate_writes_ = params.find<int>("replicate_writes", 0) != 0;
+    {
+        auto policy = params.find<std::string>("pool_select_policy", "round_robin");
+        for (auto& ch : policy) {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        if (policy == "fixed0" || policy == "fixed") {
+            pool_select_policy_ = PoolSelectPolicy::Fixed0;
+        } else {
+            pool_select_policy_ = PoolSelectPolicy::RoundRobin;
+        }
+    }
     clock_frequency_ = params.find<std::string>("clock", "2.4GHz");
     link_bw_cycles_ = params.find<int64_t>("link_bw_cycles", 0);
     link_latency_cycles_ = params.find<int64_t>("link_latency_cycles", 0);
@@ -69,7 +81,7 @@ bool is_write_request(const csEvent& ev) {
         return false;
     }
     const auto type = static_cast<access_type>(ev.payload[10]);
-    return type == access_type::WRITE || type == access_type::RFO;
+    return type == access_type::WRITE;
 }
 
 csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
@@ -172,16 +184,24 @@ void Switch::handle_event(SST::Event* ev)
             return;
         }
         const auto pool_idx = static_cast<size_t>(0);
-        if (pool_idx < pool_links_.size() && pool_links_[pool_idx]) {
-            cevent->payload[1] = pool_node_id_base_ + pool_idx;
-            if (use_link_queues_ && pool_idx < pool_queues_.size() && pool_queues_[pool_idx]) {
-                if (!pool_queues_[pool_idx]->add_packet(std::move(cevent))) {
-                    delete cevent;
+        (void)pool_idx;
+        if (!pool_links_.empty()) {
+            std::size_t pick = 0;
+            if (pool_select_policy_ == PoolSelectPolicy::RoundRobin) {
+                pick = rr_pool_idx_ % pool_links_.size();
+                rr_pool_idx_++;
+            }
+            if (pool_links_[pick]) {
+                cevent->payload[1] = pool_node_id_base_ + pick;
+                if (use_link_queues_ && pick < pool_queues_.size() && pool_queues_[pick]) {
+                    if (!pool_queues_[pick]->add_packet(std::move(cevent))) {
+                        delete cevent;
+                    }
+                    return;
                 }
+                pool_links_[pick]->send(cevent);
                 return;
             }
-            pool_links_[pool_idx]->send(cevent);
-            return;
         }
         delete cevent;
         return;
