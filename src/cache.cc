@@ -126,7 +126,8 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
 
 CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref, bool skip)
     : address(req.address), v_address(req.v_address), data(req.data), ip(req.ip), instr_id(req.instr_id), pf_metadata(req.pf_metadata), cpu(req.cpu),
-      type(req.type), prefetch_from_this(local_pref), skip_fill(skip), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
+      type(req.type), prefetch_from_this(local_pref), skip_fill(skip), is_translated(req.is_translated), response_requested(req.response_requested),
+      instr_depend_on_me(req.instr_depend_on_me)
 {
 }
 
@@ -397,7 +398,10 @@ auto CACHE::mshr_and_forward_packet(const tag_lookup_type& handle_pkt) -> std::p
   fwd_pkt.ip = handle_pkt.ip;
 
   fwd_pkt.instr_depend_on_me = handle_pkt.instr_depend_on_me;
-  fwd_pkt.response_requested = (!handle_pkt.prefetch_from_this || !handle_pkt.skip_fill);
+  fwd_pkt.response_requested = handle_pkt.response_requested;
+  if (handle_pkt.prefetch_from_this && handle_pkt.skip_fill) {
+    fwd_pkt.response_requested = false;
+  }
 
   return std::pair{std::move(to_allocate), std::move(fwd_pkt)};
 }
