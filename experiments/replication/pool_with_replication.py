@@ -21,7 +21,7 @@ POOL_PA_BASE = 68719476736     # pool PA starts at 64 GiB
 DRAM_BW_CYCLES_PER_REQ = 4
 
 # Inputs
-TRACE_DIR = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/simple"
+TRACE_DIR = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication"
 TRACE_NAME = "champsim.trace"
 CXL_CONFIG = os.path.join(TRACE_DIR, "cxl_config.csv")
 
@@ -74,8 +74,8 @@ for i in range(NUM_NODES):
         "pool_pa_base": POOL_PA_BASE,
         "cache_heartbeat_period": 0,
         "clock": "2.4GHz",
-        "warmup_insts": 10000,
-        "sim_insts": 50000,
+        "warmup_insts": 2000000,
+        "sim_insts": 5000000,
         "remote_link_bw_cycles": BW_CXL_CYCLES,
         "remote_link_latency_cycles": T_CXL,
         "remote_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
