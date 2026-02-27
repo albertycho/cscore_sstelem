@@ -228,25 +228,61 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
   }
 
   if (way != set_end && way->valid && way->dirty) {
-    request_type writeback_packet;
+    bool writeback_sent = false;
+    if (address_map && send_remote) {
+      auto entry = address_map->lookup(static_cast<uint32_t>(node_id), way->v_address.to<uint64_t>());
+      if (entry && entry->type != SST::csimCore::AddressType::Local) {
+        sst_request sreq;
+        sreq.src_node = static_cast<uint32_t>(node_id);
+        sreq.dst_node = static_cast<uint32_t>(entry->target);
+        sreq.forward_checked = false;
+        sreq.is_translated = true;
+        sreq.response_requested = false;
+        sreq.type = access_type::WRITE;
+        sreq.pf_metadata = way->pf_metadata;
+        sreq.cpu = fill_mshr.cpu;
+        sreq.sst_cpu = static_cast<uint32_t>(node_id);
+        sreq.address = way->address.to<uint64_t>();
+        sreq.v_address = way->v_address.to<uint64_t>();
+        sreq.data = way->data.to<uint64_t>();
+        sreq.instr_id = fill_mshr.instr_id;
+        sreq.ip = 0;
+        sreq.msg_bytes = 64;
 
-    writeback_packet.cpu = fill_mshr.cpu;
-    writeback_packet.address = way->address;
-    writeback_packet.data = way->data;
-    writeback_packet.instr_id = fill_mshr.instr_id;
-    writeback_packet.ip = champsim::address{};
-    writeback_packet.type = access_type::WRITE;
-    writeback_packet.pf_metadata = way->pf_metadata;
-    writeback_packet.response_requested = false;
+        if constexpr (champsim::debug_print) {
+          fmt::print("[{}] {} remote writeback address: {:#x} v_address: {:#x}\n", NAME, __func__,
+                     sreq.address, sreq.v_address);
+        }
 
-    if constexpr (champsim::debug_print) {
-      fmt::print("[{}] {} evict address: {:#x} v_address: {:#x} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address, writeback_packet.v_address,
-                 fill_mshr.data_promise->pf_metadata);
+        if (!send_remote(sreq)) {
+          return false;
+        }
+        writeback_sent = true;
+      }
     }
 
-    auto success = lower_level->add_wq(writeback_packet);
-    if (!success) {
-      return false;
+    if (!writeback_sent) {
+      request_type writeback_packet;
+
+      writeback_packet.cpu = fill_mshr.cpu;
+      writeback_packet.address = way->address;
+      writeback_packet.v_address = way->v_address;
+      writeback_packet.data = way->data;
+      writeback_packet.instr_id = fill_mshr.instr_id;
+      writeback_packet.ip = champsim::address{};
+      writeback_packet.type = access_type::WRITE;
+      writeback_packet.pf_metadata = way->pf_metadata;
+      writeback_packet.response_requested = false;
+
+      if constexpr (champsim::debug_print) {
+        fmt::print("[{}] {} evict address: {:#x} v_address: {:#x} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address,
+                   writeback_packet.v_address, fill_mshr.data_promise->pf_metadata);
+      }
+
+      auto success = lower_level->add_wq(writeback_packet);
+      if (!success) {
+        return false;
+      }
     }
   }
 
