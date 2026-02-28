@@ -3,12 +3,16 @@
 #include <queue>
 #include <utility>
 #include <functional>
-#include <bitset>
 #include <algorithm>
 #include <vector>
+#include <array>
 
 template<typename T>
 class lat_bw_queue {
+    struct pending_entry {
+        T payload;
+        double remaining_bytes;
+    };
     struct entry {
         T payload;
         int64_t injection_time;
@@ -24,19 +28,18 @@ class lat_bw_queue {
     };
 public:
     using latency_function_type = std::function<int64_t(double)>;
-    using bandwidth_function_type = std::function<int64_t(const T&)>;
-    lat_bw_queue(int64_t bandwidth,
+    using bandwidth_function_type = std::function<double(const T&)>;
+    static constexpr std::size_t kUtilWindow = 256;
+    lat_bw_queue(double peak_bw_per_cycle,
                  latency_function_type&& latency_function,
                  bandwidth_function_type&& bw_cost_fn = {},
                  int64_t max_pending = 0)
-    : bandwidth{bandwidth} 
+    : peak_bw_per_cycle{peak_bw_per_cycle} 
     , internal_clock{0}
-    , last_insert_time{-bandwidth}
-    , last_insert_gap{bandwidth}
     , latency_function{std::forward<latency_function_type>(latency_function)}
     , bw_cost_fn{std::forward<bandwidth_function_type>(bw_cost_fn)}
     , max_pending{max_pending}
-    , buffer{} {}
+    , bw_hist{} {}
 
     /// Called once per tick (start of each cycle)
     /// Returns packets completed on this tick
@@ -50,11 +53,14 @@ public:
             active_queue.pop();
         }
 
-        // Shift buffer
-        buffer <<= 1;
+        // Transmit bytes for this cycle
+        service_bandwidth();
 
-        // Refill from blocked queue up to available bandwidth
-        try_fire_request();
+        // Update bandwidth history for utilization
+        bw_sum -= bw_hist[bw_idx];
+        bw_hist[bw_idx] = bw_used_this_cycle;
+        bw_sum += bw_hist[bw_idx];
+        bw_idx = (bw_idx + 1) % kUtilWindow;
 
         const auto util = get_utilization();
         util_sum += util;
@@ -68,8 +74,9 @@ public:
         if (is_full()) {
             return false;
         }
-        blocked_queue.emplace(std::forward<T>(packet));
-        try_fire_request();
+        auto bytes = bw_cost_fn ? bw_cost_fn(packet) : 64.0;
+        bytes = std::max<double>(bytes, 1.0);
+        blocked_queue.emplace(pending_entry{std::forward<T>(packet), bytes});
         return true;
     }
 
@@ -82,7 +89,18 @@ public:
     }
 
     double average_utilization() const {
-        return util_samples > 0 ? util_sum / static_cast<double>(util_samples) : 0.0;
+        if (util_samples == 0) {
+            return 0.0;
+        }
+        return util_sum / static_cast<double>(util_samples);
+    }
+
+    void reset_utilization() {
+        util_sum = 0.0;
+        util_samples = 0;
+        bw_hist.fill(0.0);
+        bw_sum = 0.0;
+        bw_used_this_cycle = 0.0;
     }
 
     bool is_full() const {
@@ -90,42 +108,56 @@ public:
     }
 
 private:
+    void service_bandwidth() {
+        bw_used_this_cycle = 0.0;
+        auto avail = peak_bw_per_cycle;
+        if (avail <= 0.0) {
+            return;
+        }
 
-    /// Attempts to fire a new request, from the blocked queue
-    void try_fire_request() {
-        if(!blocked_queue.empty() && (last_insert_time + last_insert_gap <= internal_clock)) {
-            auto cost = bw_cost_fn ? bw_cost_fn(blocked_queue.front()) : bandwidth;
-            cost = std::max<int64_t>(cost, 1);
-            buffer |= 1;
+        while (avail > 0.0 && !blocked_queue.empty()) {
+            auto& front = blocked_queue.front();
+            const double send = std::min(avail, front.remaining_bytes);
+            front.remaining_bytes -= send;
+            avail -= send;
+            bw_used_this_cycle += send;
 
-            active_queue.push(entry{
-                std::move(blocked_queue.front()), 
-                internal_clock, 
-                internal_clock + std::max<int64_t>(latency_function(get_utilization()), 1)
-            });
-            last_insert_time = internal_clock;
-            last_insert_gap = cost;
-
-            blocked_queue.pop();
+            if (front.remaining_bytes <= 0.0) {
+                active_queue.push(entry{
+                    std::move(front.payload),
+                    internal_clock,
+                    internal_clock + std::max<int64_t>(latency_function(get_utilization()), 1)
+                });
+                blocked_queue.pop();
+            } else {
+                break;
+            }
         }
     }
 
-    // computes the current utilization
     double get_utilization() const {
-        return std::clamp(buffer.count() / 256.0 * bandwidth, 0.0, 1.0);
+        if (peak_bw_per_cycle <= 0.0) {
+            return 0.0;
+        }
+        const double denom = static_cast<double>(kUtilWindow) * peak_bw_per_cycle;
+        if (denom <= 0.0) {
+            return 0.0;
+        }
+        return std::clamp(bw_sum / denom, 0.0, 1.0);
     }
 
-    int64_t bandwidth;
+    double peak_bw_per_cycle;
     int64_t internal_clock;
-    int64_t last_insert_time;
-    int64_t last_insert_gap;
     std::function<int64_t(double)> latency_function;
     bandwidth_function_type bw_cost_fn;
 
     std::priority_queue<entry> active_queue;    // (packet, injection_time)
-    std::queue<T> blocked_queue;                // waiting to enter
-    std::bitset<256> buffer;                    // history buffer
+    std::queue<pending_entry> blocked_queue;    // waiting to transmit
     int64_t max_pending;
     double util_sum = 0.0;
     uint64_t util_samples = 0;
+    std::array<double, kUtilWindow> bw_hist{};
+    std::size_t bw_idx = 0;
+    double bw_sum = 0.0;
+    double bw_used_this_cycle = 0.0;
 };

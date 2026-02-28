@@ -27,6 +27,7 @@
 #include "trace_instruction.h"
 #include "bimodal/bimodal.h"
 #include "prefetcher/no/no.h"
+#include "control_event.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -109,12 +110,12 @@ namespace SST {
                 const int64_t bw_cycles = std::max<int64_t>(remote_link_bw_cycles, 1);
                 const int64_t lat_cycles = std::max<int64_t>(remote_link_latency_cycles, 1);
                 auto latency_fn = [lat_cycles](double) { return lat_cycles; };
-                auto bw_cost_fn = [bw_cycles](const sst_request& req) {
-                    const uint64_t bytes = (req.msg_bytes == 0) ? 64 : req.msg_bytes;
-                    const uint64_t cost = (bw_cycles * bytes) / 64;
-                    return static_cast<int64_t>(std::max<uint64_t>(cost, 1));
+                const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw_cycles);
+                auto bw_cost_fn = [](const sst_request& req) {
+                    const double bytes = (req.msg_bytes == 0) ? 64.0 : static_cast<double>(req.msg_bytes);
+                    return std::max<double>(bytes, 1.0);
                 };
-                remote_link_queue = std::make_unique<lat_bw_queue<sst_request>>(bw_cycles, std::move(latency_fn), bw_cost_fn, remote_link_queue_size);
+                remote_link_queue = std::make_unique<lat_bw_queue<sst_request>>(peak_bw_per_cycle, std::move(latency_fn), bw_cost_fn, remote_link_queue_size);
             }
 
 			// Older version registered this as primary component
@@ -488,6 +489,14 @@ namespace SST {
                     for (auto& cpu : cores) {
                         cpu.begin_phase();
                     }
+                    MYDRAM.reset_utilization();
+                    if (remote_link_queue) {
+                        remote_link_queue->reset_utilization();
+                    }
+                    if (linkHandler_cxl) {
+                        auto* ctrl = make_control_event(static_cast<uint64_t>(node_id), kControlBroadcast, kControlResetUtil);
+                        linkHandler_cxl->send(ctrl);
+                    }
                     warmup_done = true;
                 }
 
@@ -606,6 +615,11 @@ namespace SST {
 		void csimCore::handleEvent_CXL(SST::Event *ev)
 		{
 			auto* cevent = static_cast<csEvent*>(ev);
+            uint64_t ctrl_code = 0;
+            if (is_control_event(*cevent, &ctrl_code)) {
+                delete cevent;
+                return;
+            }
 			auto resp = convert_event_to_response(*cevent);
 			for (auto& cache : caches) {
 				if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {

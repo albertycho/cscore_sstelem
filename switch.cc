@@ -7,6 +7,7 @@
 #include <string>
 
 #include "access_type.h"
+#include "control_event.h"
 
 namespace SST {
 namespace csimCore {
@@ -51,25 +52,25 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
         const int64_t bw_cycles = std::max<int64_t>(link_bw_cycles_, 1);
         const int64_t lat_cycles = std::max<int64_t>(link_latency_cycles_, 1);
         auto latency_fn = [lat_cycles](double) { return lat_cycles; };
-        auto bw_cost_fn = [bw_cycles](const csEvent* ev) {
-            uint64_t bytes = 64;
+        const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw_cycles);
+        auto bw_cost_fn = [](const csEvent* ev) {
+            double bytes = 64.0;
             if (ev && ev->payload.size() > 16) {
-                bytes = ev->payload[16];
+                bytes = static_cast<double>(ev->payload[16]);
             } else if (ev && ev->payload.size() > 8) {
-                bytes = ev->payload[8];
+                bytes = static_cast<double>(ev->payload[8]);
             }
-            const uint64_t cost = (bw_cycles * bytes) / 64;
-            return static_cast<int64_t>(std::max<uint64_t>(cost, 1));
+            return std::max<double>(bytes, 1.0);
         };
         node_queues_.resize(std::max(num_nodes_, 0));
         for (int i = 0; i < num_nodes_; ++i) {
             node_queues_[i] = std::make_unique<lat_bw_queue<csEvent*>>(
-                bw_cycles, latency_fn, bw_cost_fn, link_queue_size_);
+                peak_bw_per_cycle, latency_fn, bw_cost_fn, link_queue_size_);
         }
         pool_queues_.resize(std::max(num_pools_, 0));
         for (int p = 0; p < num_pools_; ++p) {
             pool_queues_[p] = std::make_unique<lat_bw_queue<csEvent*>>(
-                bw_cycles, latency_fn, bw_cost_fn, link_queue_size_);
+                peak_bw_per_cycle, latency_fn, bw_cost_fn, link_queue_size_);
         }
 
         registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));
@@ -101,7 +102,6 @@ bool Switch::clock_tick(SST::Cycle_t /*cycle*/)
     if (!use_link_queues_) {
         return false;
     }
-
     for (size_t i = 0; i < node_queues_.size(); ++i) {
         auto& q = node_queues_[i];
         if (!q) {
@@ -140,6 +140,33 @@ void Switch::handle_event(SST::Event* ev)
     auto* cevent = dynamic_cast<csEvent*>(ev);
     if (!cevent || cevent->payload.size() < 2) {
         delete ev;
+        return;
+    }
+
+    uint64_t ctrl_code = 0;
+    if (is_control_event(*cevent, &ctrl_code)) {
+        if (ctrl_code == kControlResetUtil) {
+            for (auto& q : node_queues_) {
+                if (q) {
+                    q->reset_utilization();
+                }
+            }
+            for (auto& q : pool_queues_) {
+                if (q) {
+                    q->reset_utilization();
+                }
+            }
+        }
+        // Broadcast control to all pools immediately (bypass queues)
+        for (int p = 0; p < num_pools_; ++p) {
+            if (p >= static_cast<int>(pool_links_.size()) || pool_links_[p] == nullptr) {
+                continue;
+            }
+            const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
+            auto* clone = make_control_event(cevent->payload[0], pool_dst, ctrl_code);
+            pool_links_[p]->send(clone);
+        }
+        delete cevent;
         return;
     }
 

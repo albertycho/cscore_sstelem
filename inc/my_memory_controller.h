@@ -51,7 +51,7 @@ public:
     MY_MEMORY_CONTROLLER();
     MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
                          std::vector<channel_type*>&& queues, 
-                         int64_t bandwidth = DEFAULT_BW,
+                         int64_t bw_cycles_per_req = DEFAULT_BW,
                          latency_function_type&& latency_function = estimate_latency_percentile,
                          champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES});
 
@@ -80,6 +80,11 @@ public:
     }
     double queue_average_utilization(std::size_t idx) const {
         return idx < lat_bw_queues.size() ? lat_bw_queues[idx].average_utilization() : 0.0;
+    }
+    void reset_utilization() {
+        for (auto& q : lat_bw_queues) {
+            q.reset_utilization();
+        }
     }
 
 };

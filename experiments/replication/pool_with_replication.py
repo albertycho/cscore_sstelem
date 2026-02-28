@@ -8,7 +8,7 @@ NUM_NODES = 4
 NUM_POOLS = 2
 POOL_NODE_ID_BASE = 100
 
-# Latency/bandwidth (cycles per packet) for the CXL links.
+# Latency/bandwidth (cycles per 64B) for the CXL links.
 T_CXL = 120
 BW_CXL_CYCLES = 25
 REMOTE_LINK_QUEUE_SIZE = 8192

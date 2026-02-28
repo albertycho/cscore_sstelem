@@ -1,5 +1,6 @@
 #include "my_memory_controller.h"
 
+#include <algorithm>
 #include <iostream>
 #include <unistd.h>
 #include <random>
@@ -7,7 +8,7 @@
 MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER() {}
 
 MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
-                                           std::vector<channel_type*>&& ul, int64_t bandwidth,
+                                           std::vector<channel_type*>&& ul, int64_t bw_cycles_per_req,
                                            latency_function_type&& latency_function,
                                            champsim::data::bytes size)
     : operable(mc_period)
@@ -15,8 +16,11 @@ MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_peri
     , lat_bw_queues(
         queues.size(), 
         lat_bw_queue_type(
-            /*badwidth=*/bandwidth, 
-            /*latency_function=*/std::forward<latency_function_type>(latency_function)))
+            /*peak_bw_per_cycle=*/(bw_cycles_per_req > 0
+                ? (64.0 / static_cast<double>(bw_cycles_per_req))
+                : 0.0),
+            /*latency_function=*/std::forward<latency_function_type>(latency_function),
+            /*bw_cost_fn=*/[](const channel_type::request_type&) { return 64.0; }))
     , size_(size)
 {
     auto sleepcnt = rand() % 10;

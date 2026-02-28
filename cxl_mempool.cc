@@ -11,6 +11,7 @@
 #include "convert_ev_packet.h"
 #include "chrono.h"
 #include "champsim.h"
+#include "control_event.h"
 
 namespace SST {
 namespace csimCore {
@@ -76,12 +77,12 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
         const int64_t bw_cycles = std::max<int64_t>(link_bw_cycles_, 1);
         const int64_t lat_cycles = std::max<int64_t>(link_latency_cycles_, 1);
         auto latency_fn = [lat_cycles](double) { return lat_cycles; };
-        auto bw_cost_fn = [bw_cycles](const sst_response& resp) {
-            const uint64_t bytes = (resp.msg_bytes == 0) ? 64 : resp.msg_bytes;
-            const uint64_t cost = (bw_cycles * bytes) / 64;
-            return static_cast<int64_t>(std::max<uint64_t>(cost, 1));
+        const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw_cycles);
+        auto bw_cost_fn = [](const sst_response& resp) {
+            const double bytes = (resp.msg_bytes == 0) ? 64.0 : static_cast<double>(resp.msg_bytes);
+            return std::max<double>(bytes, 1.0);
         };
-        resp_link_queue_ = std::make_unique<lat_bw_queue<sst_response>>(bw_cycles, std::move(latency_fn), bw_cost_fn, link_queue_size_);
+        resp_link_queue_ = std::make_unique<lat_bw_queue<sst_response>>(peak_bw_per_cycle, std::move(latency_fn), bw_cost_fn, link_queue_size_);
     }
 }
 
@@ -125,6 +126,18 @@ void CXLMemoryPool::handle_request(SST::Event* ev) {
     auto* cevent = dynamic_cast<csEvent*>(ev);
     if (!cevent) {
         delete ev;
+        return;
+    }
+
+    uint64_t ctrl_code = 0;
+    if (is_control_event(*cevent, &ctrl_code)) {
+        if (ctrl_code == kControlResetUtil) {
+            mem_ctrl_.reset_utilization();
+            if (resp_link_queue_) {
+                resp_link_queue_->reset_utilization();
+            }
+        }
+        delete cevent;
         return;
     }
 
