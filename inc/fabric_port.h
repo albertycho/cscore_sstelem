@@ -11,17 +11,14 @@
 #include <sst/core/link.h>
 
 #include "SST_CS_packets.h"
+#include "control_event.h"
 #include "csEvent.h"
-
-template<typename T>
-class lat_bw_queue;
+#include "lat_bw_queue.h"
 
 extern template class lat_bw_queue<SST::csimCore::csEvent*>;
 
 namespace SST {
 namespace csimCore {
-
-constexpr uint64_t kControlBroadcast = std::numeric_limits<uint64_t>::max();
 
 // Construct a control event that resets utilization counters.
 csEvent* make_reset_util_event(uint64_t src, uint64_t dst);
@@ -39,6 +36,10 @@ private:
 public:
     FabricPort();
     ~FabricPort();
+    FabricPort(const FabricPort&) = delete;
+    FabricPort& operator=(const FabricPort&) = delete;
+    FabricPort(FabricPort&&) = default;
+    FabricPort& operator=(FabricPort&&) = default;
 
     // Configure the port using default type traits for conversion/bytes.
     // Parameters:

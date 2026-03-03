@@ -40,7 +40,7 @@ public:
     std::vector<T> on_tick();
 
     /// Adds a single packet to the channel. Packet will be queued if there is not sufficient bandwidth.
-    bool add_packet(T&& packet);
+    bool add_packet(T packet);
 
     std::size_t occupancy() const;
 

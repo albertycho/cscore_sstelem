@@ -43,13 +43,13 @@ std::vector<T> lat_bw_queue<T>::on_tick() {
 }
 
 template<typename T>
-bool lat_bw_queue<T>::add_packet(T&& packet) {
+bool lat_bw_queue<T>::add_packet(T packet) {
     if (is_full()) {
         return false;
     }
     auto bytes = bw_cost_fn ? bw_cost_fn(packet) : 64.0;
     bytes = std::max<double>(bytes, 1.0);
-    blocked_queue.emplace(pending_entry{std::forward<T>(packet), bytes});
+    blocked_queue.emplace(pending_entry{std::move(packet), bytes});
     return true;
 }
 

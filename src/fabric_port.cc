@@ -11,7 +11,6 @@ namespace csimCore {
 namespace {
 constexpr uint64_t kDefaultMsgBytes = 64;
 constexpr int64_t kInfiniteCredits = std::numeric_limits<int64_t>::max() / 4;
-constexpr uint64_t kControlResetUtil = 1;
 constexpr uint64_t kControlCredit = 2;
 
 uint64_t msg_bytes(const csEvent& ev) {
@@ -63,15 +62,6 @@ uint64_t event_credit_dst(csEvent* const& ev) {
     return kControlBroadcast;
 }
 
-csEvent* make_control_event(uint64_t src, uint64_t dst, uint64_t code) {
-    auto* ev = new csEvent();
-    ev->payload.reserve(3);
-    ev->payload.push_back(src);
-    ev->payload.push_back(dst);
-    ev->payload.push_back(code);
-    return ev;
-}
-
 csEvent* make_credit_event(uint64_t src, uint64_t dst, uint64_t bytes) {
     auto* ev = new csEvent();
     ev->payload.reserve(4);
@@ -84,7 +74,7 @@ csEvent* make_credit_event(uint64_t src, uint64_t dst, uint64_t bytes) {
 } // namespace
 
 csEvent* make_reset_util_event(uint64_t src, uint64_t dst) {
-    return make_control_event(src, dst, kControlResetUtil);
+    return ::SST::csimCore::make_control_event(src, dst, kControlResetUtil);
 }
 
 FabricPort::FabricPort()

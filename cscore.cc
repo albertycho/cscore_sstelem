@@ -75,7 +75,7 @@ namespace SST {
                    params.find<uint64_t>("dram_bw_cycles_per_req", 0),
                    params.find<uint64_t>("dram_bandwidth_bytes_per_cycle", 0)),
                select_latency_fn(params, "dram_latency_model", "dram_fixed_latency_cycles", DEFAULT_FIXED_LATENCY_CYCLES),
-               champsim::data::bytes{params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES)}),
+               champsim::data::bytes{static_cast<long long>(params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES))}),
 			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{kClockPeriodPs * 200}, MYDRAM, 1)
 		{
 			/* This function sets up and builds core (and cache and bp and etc) */

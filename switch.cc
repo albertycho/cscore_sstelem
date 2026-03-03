@@ -7,7 +7,6 @@
 #include <string>
 
 #include "access_type.h"
-#include <sst/core/simulation.h>
 
 namespace SST {
 namespace csimCore {
@@ -147,11 +146,7 @@ void Switch::handle_event(SST::Event* ev)
     port->port.handle_event(cevent);
 
     if (!use_link_model_) {
-        if (auto* sim = SST::Simulation::getSimulation()) {
-            current_cycle_ = static_cast<uint64_t>(sim->getCurrentSimCycle());
-        } else {
-            current_cycle_++;
-        }
+        current_cycle_++;
         try_receive_and_route(*port, current_cycle_);
     }
 }
