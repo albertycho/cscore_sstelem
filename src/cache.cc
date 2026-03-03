@@ -21,6 +21,7 @@
 #include <cmath>
 #include <iomanip>
 #include <numeric>
+#include <stdexcept>
 #include <fmt/core.h>
 
 #include "bandwidth.h"
@@ -985,6 +986,18 @@ void CACHE::impl_replacement_final_stats() const { repl_module_pimpl->impl_repla
 
 void CACHE::initialize()
 {
+  if (NUM_SET == 0 || NUM_WAY == 0) {
+    throw std::runtime_error("CACHE::initialize: NUM_SET and NUM_WAY must be > 0 for " + NAME);
+  }
+  if (MSHR_SIZE == 0) {
+    throw std::runtime_error("CACHE::initialize: MSHR_SIZE must be > 0 for " + NAME);
+  }
+  if (lower_level == nullptr) {
+    throw std::runtime_error("CACHE::initialize: lower_level must be set for " + NAME);
+  }
+  if (!pref_module_pimpl || !repl_module_pimpl) {
+    throw std::runtime_error("CACHE::initialize: prefetch/replacement modules must be set for " + NAME);
+  }
   impl_prefetcher_initialize();
   impl_initialize_replacement();
 }

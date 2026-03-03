@@ -144,6 +144,8 @@ libcscore_la_SOURCES = \
     src/dram_controller.cc \
     src/dram_stats.cc \
     src/extent.cc \
+    src/fabric_port.cc \
+    src/lat_bw_queue.cc \
 	src/json_printer.cc \
     src/modules.cc \
     src/my_memory_controller.cc \

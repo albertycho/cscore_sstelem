@@ -3,14 +3,39 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
-#include <limits>
+#include <stdexcept>
 #include <string>
 
 #include "access_type.h"
-#include "control_event.h"
+#include <sst/core/simulation.h>
 
 namespace SST {
 namespace csimCore {
+
+namespace {
+bool is_write_request(const csEvent& ev) {
+    if (ev.payload.size() <= 10) {
+        return false;
+    }
+    const auto type = static_cast<access_type>(ev.payload[10]);
+    return type == access_type::WRITE;
+}
+
+bool is_reset_event(const csEvent& ev) {
+    return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == 1;
+}
+
+csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
+    auto* out = new csEvent();
+    out->payload = ev.payload;
+    out->last = ev.last;
+    if (out->payload.size() >= 2) {
+        out->payload[1] = dst;
+    }
+    return out;
+}
+
+} // namespace
 
 Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     : Component(id)
@@ -34,231 +59,264 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     link_bw_cycles_ = params.find<int64_t>("link_bw_cycles", 0);
     link_latency_cycles_ = params.find<int64_t>("link_latency_cycles", 0);
     link_queue_size_ = params.find<int64_t>("link_queue_size", 0);
-    use_link_queues_ = (link_bw_cycles_ > 0 || link_latency_cycles_ > 0 || link_queue_size_ > 0);
+    use_link_model_ = (link_bw_cycles_ > 0 || link_latency_cycles_ > 0 || link_queue_size_ > 0);
 
-    node_links_.resize(std::max(num_nodes_, 0));
+    if (num_nodes_ <= 0) {
+        throw std::runtime_error("Switch: num_nodes must be > 0.");
+    }
+    if (num_pools_ <= 0) {
+        throw std::runtime_error("Switch: num_pools must be > 0.");
+    }
+    if (pool_node_id_base_ < static_cast<uint64_t>(num_nodes_)) {
+        throw std::runtime_error("Switch: pool_node_id_base overlaps node id range. "
+                                 "pool_node_id_base must be >= num_nodes.");
+    }
+
+    node_ports_.resize(std::max(num_nodes_, 0));
     for (int i = 0; i < num_nodes_; ++i) {
         std::string port_name = "port_handler_nodes" + std::to_string(i);
-        node_links_[i] = configureLink(port_name, new Event::Handler<Switch>(this, &Switch::handle_event));
+        auto* link = configureLink(port_name, new Event::Handler<Switch>(this, &Switch::handle_event));
+        if (!link) {
+            throw std::runtime_error("Switch: missing link for " + port_name +
+                                     ". Ensure the topology connects all configured node ports.");
+        }
+        node_ports_[i].port.configure(link,
+                                      static_cast<uint64_t>(i),
+                                      link_bw_cycles_,
+                                      link_latency_cycles_,
+                                      link_queue_size_);
     }
 
-    pool_links_.resize(std::max(num_pools_, 0));
+    pool_ports_.resize(std::max(num_pools_, 0));
     for (int p = 0; p < num_pools_; ++p) {
         std::string port_name = "port_handler_pools" + std::to_string(p);
-        pool_links_[p] = configureLink(port_name, new Event::Handler<Switch>(this, &Switch::handle_event));
+        auto* link = configureLink(port_name, new Event::Handler<Switch>(this, &Switch::handle_event));
+        if (!link) {
+            throw std::runtime_error("Switch: missing link for " + port_name +
+                                     ". Ensure the topology connects all configured pool ports.");
+        }
+        const uint64_t port_id = pool_node_id_base_ + static_cast<uint64_t>(p);
+        pool_ports_[p].port.configure(link,
+                                      port_id,
+                                      link_bw_cycles_,
+                                      link_latency_cycles_,
+                                      link_queue_size_);
     }
 
-    if (use_link_queues_) {
-        const int64_t bw_cycles = std::max<int64_t>(link_bw_cycles_, 1);
-        const int64_t lat_cycles = std::max<int64_t>(link_latency_cycles_, 1);
-        auto latency_fn = [lat_cycles](double) { return lat_cycles; };
-        const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw_cycles);
-        auto bw_cost_fn = [](const csEvent* ev) {
-            double bytes = 64.0;
-            if (ev && ev->payload.size() > 16) {
-                bytes = static_cast<double>(ev->payload[16]);
-            } else if (ev && ev->payload.size() > 8) {
-                bytes = static_cast<double>(ev->payload[8]);
-            }
-            return std::max<double>(bytes, 1.0);
-        };
-        node_queues_.resize(std::max(num_nodes_, 0));
-        for (int i = 0; i < num_nodes_; ++i) {
-            node_queues_[i] = std::make_unique<lat_bw_queue<csEvent*>>(
-                peak_bw_per_cycle, latency_fn, bw_cost_fn, link_queue_size_);
-        }
-        pool_queues_.resize(std::max(num_pools_, 0));
-        for (int p = 0; p < num_pools_; ++p) {
-            pool_queues_[p] = std::make_unique<lat_bw_queue<csEvent*>>(
-                peak_bw_per_cycle, latency_fn, bw_cost_fn, link_queue_size_);
-        }
-
+    if (use_link_model_) {
         registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));
     }
 }
 
-namespace {
-bool is_write_request(const csEvent& ev) {
-    if (ev.payload.size() <= 10) {
-        return false;
-    }
-    const auto type = static_cast<access_type>(ev.payload[10]);
-    return type == access_type::WRITE;
-}
-
-csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
-    auto* out = new csEvent();
-    out->payload = ev.payload;
-    out->last = ev.last;
-    if (out->payload.size() >= 2) {
-        out->payload[1] = dst;
-    }
-    return out;
-}
-} // namespace
-
-bool Switch::clock_tick(SST::Cycle_t /*cycle*/)
+bool Switch::clock_tick(SST::Cycle_t cycle)
 {
-    if (!use_link_queues_) {
-        return false;
-    }
-    for (size_t i = 0; i < node_queues_.size(); ++i) {
-        auto& q = node_queues_[i];
-        if (!q) {
-            continue;
-        }
-        auto ready = q->on_tick();
-        for (auto* ev : ready) {
-            if (i < node_links_.size() && node_links_[i]) {
-                node_links_[i]->send(ev);
-            } else {
-                delete ev;
-            }
-        }
-    }
-
-    for (size_t p = 0; p < pool_queues_.size(); ++p) {
-        auto& q = pool_queues_[p];
-        if (!q) {
-            continue;
-        }
-        auto ready = q->on_tick();
-        for (auto* ev : ready) {
-            if (p < pool_links_.size() && pool_links_[p]) {
-                pool_links_[p]->send(ev);
-            } else {
-                delete ev;
-            }
-        }
-    }
-
+    current_cycle_ = static_cast<uint64_t>(cycle);
+    for_each_port([&](PortState& port) { try_receive_and_route(port, current_cycle_); });
     return false;
 }
 
 void Switch::handle_event(SST::Event* ev)
 {
     auto* cevent = dynamic_cast<csEvent*>(ev);
-    if (!cevent || cevent->payload.size() < 2) {
+    if (!cevent) {
+        throw std::runtime_error("Switch: received non-csEvent on a switch port.");
+    }
+    if (cevent->payload.size() < 2) {
+        throw std::runtime_error("Switch: received malformed csEvent (payload size < 2).");
+    }
+    PortState* port = nullptr;
+    const uint64_t src = cevent->payload[0];
+    if (src < static_cast<uint64_t>(num_nodes_)) {
+        const auto idx = static_cast<size_t>(src);
+        if (idx >= node_ports_.size()) {
+            throw std::runtime_error("Switch: src node id out of range for configured ports.");
+        }
+        port = &node_ports_[idx];
+    } else if (src >= pool_node_id_base_) {
+        const auto idx = static_cast<size_t>(src - pool_node_id_base_);
+        if (idx >= pool_ports_.size()) {
+            throw std::runtime_error("Switch: src pool id out of range for configured ports.");
+        }
+        port = &pool_ports_[idx];
+    }
+
+    if (!port) {
+        throw std::runtime_error("Switch: unable to map src id to a port.");
+    }
+
+    port->port.handle_event(cevent);
+
+    if (!use_link_model_) {
+        if (auto* sim = SST::Simulation::getSimulation()) {
+            current_cycle_ = static_cast<uint64_t>(sim->getCurrentSimCycle());
+        } else {
+            current_cycle_++;
+        }
+        try_receive_and_route(*port, current_cycle_);
+    }
+}
+
+bool Switch::try_route_event(csEvent* ev)
+{
+    if (!ev) {
+        throw std::runtime_error("Switch: null event in try_route_event.");
+    }
+    if (ev->payload.size() < 2) {
+        throw std::runtime_error("Switch: received malformed csEvent (payload size < 2).");
+    }
+    if (is_reset_event(*ev)) {
+        for (const auto& pool : pool_ports_) {
+            if (!pool.port.can_send()) {
+                return false;
+            }
+        }
+        reset_stats_and_broadcast();
         delete ev;
-        return;
+        return true;
     }
 
-    uint64_t ctrl_code = 0;
-    if (is_control_event(*cevent, &ctrl_code)) {
-        if (ctrl_code == kControlResetUtil) {
-            for (auto& q : node_queues_) {
-                if (q) {
-                    q->reset_utilization();
-                }
-            }
-            for (auto& q : pool_queues_) {
-                if (q) {
-                    q->reset_utilization();
-                }
-            }
-        }
-        // Broadcast control to all pools immediately (bypass queues)
-        for (int p = 0; p < num_pools_; ++p) {
-            if (p >= static_cast<int>(pool_links_.size()) || pool_links_[p] == nullptr) {
-                continue;
-            }
-            const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
-            auto* clone = make_control_event(cevent->payload[0], pool_dst, ctrl_code);
-            pool_links_[p]->send(clone);
-        }
-        delete cevent;
-        return;
-    }
-
-    const uint64_t dst = cevent->payload[1];
-
+    const uint64_t dst = ev->payload[1];
     if (dst < static_cast<uint64_t>(num_nodes_)) {
-        const auto node_idx = static_cast<size_t>(dst);
-        if (node_idx < node_links_.size() && node_links_[node_idx]) {
-            if (use_link_queues_ && node_idx < node_queues_.size() && node_queues_[node_idx]) {
-                if (!node_queues_[node_idx]->add_packet(std::move(cevent))) {
-                    delete cevent;
-                }
-                return;
-            }
-            node_links_[node_idx]->send(cevent);
-            return;
+        const auto idx = static_cast<size_t>(dst);
+        if (idx >= node_ports_.size()) {
+            throw std::runtime_error("Switch: dst node id out of range for configured ports.");
         }
-        delete cevent;
-        return;
+        if (!node_ports_[idx].port.can_send()) {
+            return false;
+        }
+        if (!node_ports_[idx].port.send(ev)) {
+            delete ev;
+        }
+        return true;
     }
 
     if (dst >= pool_node_id_base_) {
-        if (num_pools_ <= 0) {
-            delete cevent;
-            return;
+        const auto idx = static_cast<size_t>(dst - pool_node_id_base_);
+        if (idx >= pool_ports_.size()) {
+            throw std::runtime_error("Switch: dst pool id out of range for configured ports.");
         }
-        if (replicate_writes_ && is_write_request(*cevent)) {
+        if (replicate_writes_ && is_write_request(*ev)) {
+            for (const auto& pool : pool_ports_) {
+                if (!pool.port.can_send()) {
+                    return false;
+                }
+            }
             for (int p = 0; p < num_pools_; ++p) {
-                if (p >= static_cast<int>(pool_links_.size()) || pool_links_[p] == nullptr) {
-                    continue;
-                }
                 const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
-                auto* clone = clone_event_with_dst(*cevent, pool_dst);
+                auto* clone = clone_event_with_dst(*ev, pool_dst);
                 replicated_count_++;
-                if (use_link_queues_ && p < static_cast<int>(pool_queues_.size()) && pool_queues_[p]) {
-                    if (!pool_queues_[p]->add_packet(std::move(clone))) {
-                        delete clone;
-                    }
-                    continue;
+                if (!pool_ports_[static_cast<size_t>(p)].port.send(clone)) {
+                    delete clone;
                 }
-                pool_links_[p]->send(clone);
             }
-            delete cevent;
-            return;
+            delete ev;
+            return true;
         }
-        const auto pool_idx = static_cast<size_t>(0);
-        (void)pool_idx;
-        if (!pool_links_.empty()) {
-            std::size_t pick = 0;
-            if (pool_select_policy_ == PoolSelectPolicy::RoundRobin) {
-                pick = rr_pool_idx_ % pool_links_.size();
-                rr_pool_idx_++;
-            }
-            if (pool_links_[pick]) {
-                cevent->payload[1] = pool_node_id_base_ + pick;
-                if (use_link_queues_ && pick < pool_queues_.size() && pool_queues_[pick]) {
-                    if (!pool_queues_[pick]->add_packet(std::move(cevent))) {
-                        delete cevent;
-                    }
-                    return;
-                }
-                pool_links_[pick]->send(cevent);
-                return;
-            }
+        std::size_t pick = pick_pool_index(true);
+        if (pick >= pool_ports_.size()) {
+            return false;
         }
-        delete cevent;
-        return;
+        if (!pool_ports_[pick].port.can_send()) {
+            return false;
+        }
+        ev->payload[1] = pool_node_id_base_ + pick;
+        if (!pool_ports_[pick].port.send(ev)) {
+            delete ev;
+        }
+        return true;
     }
 
-    delete cevent;
+    const std::string msg =
+        "Switch: dst id " + std::to_string(dst) +
+        " is not in node range [0," + std::to_string(num_nodes_ - 1) +
+        "] or pool range [" + std::to_string(pool_node_id_base_) + "," +
+        std::to_string(pool_node_id_base_ + static_cast<uint64_t>(num_pools_ - 1)) + "].";
+    delete ev;
+    throw std::runtime_error(msg);
+}
+
+void Switch::try_receive_and_route(PortState& port, uint64_t cycle)
+{
+    port.port.try_receive(cycle, [this](csEvent* ev) {
+        return try_route_event(ev);
+    });
+}
+
+void Switch::for_each_port(const std::function<void(PortState&)>& fn)
+{
+    for (auto& port : node_ports_) {
+        fn(port);
+    }
+    for (auto& port : pool_ports_) {
+        fn(port);
+    }
+}
+
+void Switch::for_each_port(const std::function<void(const PortState&)>& fn) const
+{
+    for (const auto& port : node_ports_) {
+        fn(port);
+    }
+    for (const auto& port : pool_ports_) {
+        fn(port);
+    }
+}
+
+std::size_t Switch::pick_pool_index(bool advance)
+{
+    if (pool_ports_.empty()) {
+        return pool_ports_.size();
+    }
+    if (pool_select_policy_ == PoolSelectPolicy::Fixed0) {
+        return 0;
+    }
+    const std::size_t total = pool_ports_.size();
+    for (std::size_t offset = 0; offset < total; ++offset) {
+        const std::size_t idx = (rr_pool_idx_ + offset) % total;
+        const auto& port = pool_ports_[idx].port;
+        if (!port.can_send()) {
+            continue;
+        }
+        if (advance) {
+            rr_pool_idx_ = (idx + 1) % total;
+        }
+        return idx;
+    }
+    return total;
+}
+
+void Switch::reset_stats_and_broadcast()
+{
+    for_each_port([](PortState& port) { port.port.reset_ingress_utilization(); });
+    for (int p = 0; p < num_pools_; ++p) {
+        const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
+        auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
+        if (!pool_ports_[p].port.send(clone)) {
+            delete clone;
+        }
+    }
 }
 
 void Switch::finish()
 {
     std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
-    if (!use_link_queues_) {
+    if (!use_link_model_) {
         return;
     }
-    auto avg_util = [](const std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>>& qs) {
+    auto avg_util = [](const std::vector<PortState>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
-        for (const auto& q : qs) {
-            if (!q) {
+        for (const auto& port : ports) {
+            if (!port.port.has_ingress()) {
                 continue;
             }
-            sum += q->average_utilization();
+            sum += port.port.ingress_avg_utilization();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    std::cout << "Switch avg util node egress: " << avg_util(node_queues_) << std::endl;
-    std::cout << "Switch avg util pool egress: " << avg_util(pool_queues_) << std::endl;
+    std::cout << "Switch avg util node ingress: " << avg_util(node_ports_) << std::endl;
+    std::cout << "Switch avg util pool ingress: " << avg_util(pool_ports_) << std::endl;
 }
 
 } // namespace csimCore

@@ -90,4 +90,4 @@ for i in range(NUM_NODES):
 for j, pool in enumerate(pools):
     l1 = sst.Link(f"switch_to_pool{j}")
     l1.connect((switch, switch_pool_port(j), "0ns"),
-               (pool, "port_handler_pool", "0ns"))
+               (pool, "port_handler_switch", "0ns"))

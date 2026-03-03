@@ -1,7 +1,7 @@
 import os
 import sst
 
-# Simple wiring with a pass-through switch (no Fabric):
+# Simple wiring with a switch:
 #   nodes -> switch -> pool
 
 NUM_NODES = 4
@@ -74,4 +74,4 @@ for i in range(NUM_NODES):
 
 link_switch_to_pool = sst.Link("switch_to_pool")
 link_switch_to_pool.connect((switch, "port_handler_pools0", "0ns"),
-                            (pool, "port_handler_pool", "0ns"))
+                            (pool, "port_handler_switch", "0ns"))

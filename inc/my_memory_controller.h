@@ -10,6 +10,8 @@
 #include "channel.h"
 #include "lat_bw_queue.h"
 
+extern template class lat_bw_queue<champsim::channel::request_type>;
+
 // 64B request
 // 2.4 GHz: cycle = ~0.4167 ns
 // bw: 40 GB/s --> ~16.7 bytes per cycle
@@ -39,7 +41,7 @@ inline int64_t estimate_latency_fixed(double) {
     return DEFAULT_FIXED_LATENCY_CYCLES;
 }
 
-const size_t DEFAULT_BW = 96; /* cycles per request @ 2.4 GHz (scaled from 2.0 GHz) */
+const size_t DEFAULT_BW = 96; /* cycles per request @ 2.4 GHz */
 constexpr uint64_t DEFAULT_DRAM_SIZE_BYTES = 1ULL << 30;
 
 class MY_MEMORY_CONTROLLER : public champsim::operable {

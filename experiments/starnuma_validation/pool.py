@@ -62,4 +62,4 @@ for i in range(NUM_NODES):
 
     link_node_to_pool = sst.Link(f"s{i}_to_pool")
     link_node_to_pool.connect((sock, "port_handler_cxl", "0ns"),
-                              (pool, f"port_handler_cores{i}", "0ns"))
+                              (pool, f"port_handler_nodes{i}", "0ns"))

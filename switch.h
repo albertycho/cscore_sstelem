@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -8,13 +9,13 @@
 #include <sst/core/link.h>
 
 #include "csEvent.h"
-#include "lat_bw_queue.h"
+#include "fabric_port.h"
 
 namespace SST {
 namespace csimCore {
 
 /**
- * Switch is a multi-port pass-through router.
+ * Switch is a multi-port router.
  * For now, all pool-bound traffic is forwarded to pool 0.
  */
 class Switch : public SST::Component {
@@ -37,9 +38,9 @@ public:
         { "replicate_writes", "If set, send WRITE requests to all pools", "0" },
         { "pool_select_policy", "Pool selection policy for reads/non-replicated requests (round_robin|fixed0)", "round_robin" },
         { "clock", "Clock frequency for queue timing", "2.4GHz" },
-        { "link_bw_cycles", "Link bandwidth in cycles per 64B (enables egress queues if nonzero)", "0" },
-        { "link_latency_cycles", "Link base latency in cycles (egress queues)", "0" },
-        { "link_queue_size", "Link queue capacity in packets (0 = unbounded)", "0" }
+        { "link_bw_cycles", "Link bandwidth in cycles per 64B (enables ingress queues if nonzero)", "0" },
+        { "link_latency_cycles", "Link base latency in cycles (ingress queues)", "0" },
+        { "link_queue_size", "Link ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" }
     )
 
     SST_ELI_DOCUMENT_PORTS(
@@ -178,9 +179,17 @@ private:
     Switch(const Switch&) = delete;
     void operator=(const Switch&) = delete;
 
+    struct PortState;
+
     void handle_event(SST::Event* ev);
     void finish() override;
     bool clock_tick(SST::Cycle_t cycle);
+    void reset_stats_and_broadcast();
+    bool try_route_event(csEvent* ev);
+    void try_receive_and_route(PortState& port, uint64_t cycle);
+    void for_each_port(const std::function<void(PortState&)>& fn);
+    void for_each_port(const std::function<void(const PortState&)>& fn) const;
+    std::size_t pick_pool_index(bool advance);
 
     int num_nodes_ = 0;
     int num_pools_ = 0;
@@ -193,12 +202,14 @@ private:
     int64_t link_bw_cycles_ = 0;
     int64_t link_latency_cycles_ = 0;
     int64_t link_queue_size_ = 0;
-    bool use_link_queues_ = false;
-    std::vector<SST::Link*> node_links_;
-    std::vector<SST::Link*> pool_links_;
-    std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>> node_queues_;
-    std::vector<std::unique_ptr<lat_bw_queue<csEvent*>>> pool_queues_;
+    bool use_link_model_ = false;
+    struct PortState {
+        FabricPort port;
+    };
+    std::vector<PortState> node_ports_;
+    std::vector<PortState> pool_ports_;
     uint64_t replicated_count_ = 0;
+    uint64_t current_cycle_ = 0;
 };
 
 } // namespace csimCore
