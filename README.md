@@ -43,7 +43,7 @@ Example (map one 4 KiB VA page to pool 100):
 - `dram_size_bytes` (default 1 GiB; must be > 1 MiB)
 - `pool_pa_base` (default 0 -> set to `dram_size_bytes`)
 - `dram_bw_cycles_per_req` (cycles per 64B request; optional)
-- `dram_latency_model` (`fixed` or `percentile`)
+- `dram_latency_model` (`fixed` or `utilization-based`)
 - `cache_heartbeat_period` (0 disables)
 - `remote_link_bw_cycles`, `remote_link_latency_cycles`, `remote_link_queue_size` (CXL link model)
 
@@ -58,7 +58,7 @@ Example (map one 4 KiB VA page to pool 100):
 `cscore.CXLMemoryPool`:
 - `pool_node_id` (must match AddressMap `target`)
 - `pool_bw_cycles_per_req` (cycles per 64B request; optional)
-- `pool_latency_model` (`fixed` or `percentile`/`utilization`)
+- `pool_latency_model` (`fixed` or `utilization-based`)
 - `latency_cycles` (fixed model)
 - `link_bw_cycles`, `link_latency_cycles`, `link_queue_size` (pool ingress link model)
 - `heartbeat_period` (0 disables)
@@ -76,7 +76,7 @@ pool = sst.Component("cxl_pool", "cscore.CXLMemoryPool")
 pool.addParams({
     "pool_node_id": POOL_NODE_ID,
     "pool_bw_cycles_per_req": 4,
-    "pool_latency_model": "utilization",
+    "pool_latency_model": "utilization-based",
     "link_bw_cycles": 25,
     "link_latency_cycles": 120,
     "link_queue_size": 8192,
@@ -92,7 +92,7 @@ for i in range(NUM_NODES):
         "dram_size_bytes": 1073741824,
         "pool_pa_base": 1073741824,
         "dram_bw_cycles_per_req": 4,
-        "dram_latency_model": "percentile",
+        "dram_latency_model": "utilization-based",
         "cache_heartbeat_period": 10000,
         "remote_link_bw_cycles": 25,
         "remote_link_latency_cycles": 120,

@@ -40,7 +40,7 @@ public:
         { "pool_bw_cycles_per_req", "Pool DRAM bandwidth in cycles per request (overrides memory/device bandwidth if nonzero)", "0" },
         { "device_bandwidth", "Device side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "memory_bandwidth", "Memory side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
-        { "pool_latency_model", "Pool memory latency model: fixed or percentile", "fixed" },
+        { "pool_latency_model", "Pool memory latency model: fixed or utilization-based", "fixed" },
         { "latency_cycles", "Fixed pool memory latency in cycles (used when pool_latency_model=fixed)", "300" },
         { "link_bw_cycles", "CXL ingress bandwidth in cycles per 64B request", "0" },
         { "link_latency_cycles", "CXL ingress base latency in cycles", "0" },

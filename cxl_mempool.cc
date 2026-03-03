@@ -40,8 +40,8 @@ MY_MEMORY_CONTROLLER::latency_function_type select_pool_latency_fn(SST::Params& 
     for (auto& ch : model) {
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }
-    if (model == "percentile" || model == "util" || model == "utilization") {
-        return estimate_latency_percentile;
+    if (model == "utilization-based") {
+        return estimate_latency_utilization_based;
     }
     return [fixed_cycles](double) { return fixed_cycles; };
 }

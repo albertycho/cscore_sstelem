@@ -55,8 +55,8 @@ MY_MEMORY_CONTROLLER::latency_function_type select_latency_fn(SST::Params& param
     for (auto& ch : model) {
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }
-    if (model == "percentile" || model == "util" || model == "utilization") {
-        return estimate_latency_percentile;
+    if (model == "utilization-based") {
+        return estimate_latency_utilization_based;
     }
     const auto fixed_cycles = static_cast<int64_t>(params.find<uint64_t>(fixed_key, static_cast<uint64_t>(default_fixed_cycles)));
     return [fixed_cycles](double) { return fixed_cycles; };

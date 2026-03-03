@@ -27,7 +27,7 @@ extern template class lat_bw_queue<champsim::channel::request_type>;
 
 // --> can define a lower BW to see if latency spikes
 
-inline int64_t estimate_latency_percentile(double util) {
+inline int64_t estimate_latency_utilization_based(double util) {
     if (util >= 0.70) return 480;  // 200 ns @ 2.4 GHz
     if (util >= 0.60) return 360;  // 150 ns
     if (util >= 0.50) return 240;  // 100 ns
@@ -54,7 +54,7 @@ public:
     MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
                          std::vector<channel_type*>&& queues, 
                          int64_t bw_cycles_per_req = DEFAULT_BW,
-                         latency_function_type&& latency_function = estimate_latency_percentile,
+                         latency_function_type&& latency_function = estimate_latency_utilization_based,
                          champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES});
 
     void initialize() final;

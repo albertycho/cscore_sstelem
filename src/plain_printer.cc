@@ -39,7 +39,7 @@ auto print_ratio(N num, D denom)
   return std::string{"-"};
 }
 
-uint64_t hist_percentile(const std::array<uint64_t, cache_stats::POOL_LAT_HIST_BINS>& hist, double pct)
+uint64_t hist_quantile(const std::array<uint64_t, cache_stats::POOL_LAT_HIST_BINS>& hist, double pct)
 {
   uint64_t total = std::accumulate(hist.begin(), hist.end(), uint64_t{0});
   if (total == 0) {
@@ -157,8 +157,8 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   }
 
   auto pool_avg = ::print_ratio(stats.pool_latency_sum, stats.pool_completed);
-  auto pool_p95 = stats.pool_completed > 0 ? fmt::format("{}", hist_percentile(stats.pool_latency_hist, 0.95)) : "-";
-  auto pool_p99 = stats.pool_completed > 0 ? fmt::format("{}", hist_percentile(stats.pool_latency_hist, 0.99)) : "-";
+  auto pool_p95 = stats.pool_completed > 0 ? fmt::format("{}", hist_quantile(stats.pool_latency_hist, 0.95)) : "-";
+  auto pool_p99 = stats.pool_completed > 0 ? fmt::format("{}", hist_quantile(stats.pool_latency_hist, 0.99)) : "-";
   auto pool_demand_avg = ::print_ratio(stats.pool_demand_miss_latency_sum, stats.pool_demand_miss_count);
   lines.push_back(fmt::format("{} POOL ACCESS: {:10} COMPLETED: {:10} AVG_LAT: {} cycles P95: {} P99: {}", stats.name, stats.pool_accesses,
                               stats.pool_completed, pool_avg, pool_p95, pool_p99));
