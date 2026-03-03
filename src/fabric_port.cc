@@ -27,6 +27,13 @@ uint64_t event_bytes(csEvent* const& ev) {
     return ev ? msg_bytes(*ev) : kDefaultMsgBytes;
 }
 
+uint64_t credit_bytes(csEvent* const& ev) {
+    if (ev && ::SST::csimCore::is_control_event(*ev)) {
+        return 0;
+    }
+    return event_bytes(ev);
+}
+
 int64_t credit_capacity_bytes(int64_t queue_size_packets) {
     if (queue_size_packets > 0) {
         return queue_size_packets * static_cast<int64_t>(kDefaultMsgBytes);
@@ -90,23 +97,24 @@ void FabricPort::configure(SST::Link* link,
     if (bw_cycles < 0 || lat_cycles < 0 || queue_size_packets < 0) {
         throw std::runtime_error("FabricPort: negative configuration values are invalid.");
     }
+    if (!link) {
+        throw std::runtime_error("FabricPort: null link provided to configure.");
+    }
     link_ = link;
     self_id_ = self_id;
 
-    if (bw_cycles > 0 || lat_cycles > 0 || queue_size_packets > 0) {
-        const int64_t bw = std::max<int64_t>(bw_cycles, 1);
-        const int64_t lat = std::max<int64_t>(lat_cycles, 1);
-        const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw);
-        auto latency_fn = [lat](double) { return lat; };
-        auto bw_cost_fn = [](csEvent* const& item) {
-            return static_cast<double>(event_bytes(item));
-        };
-        const int64_t ingress_max_pending = queue_size_packets > 0 ? queue_size_packets : 0;
-        ingress_ = std::make_unique<::lat_bw_queue<csEvent*>>(peak_bw_per_cycle,
-                                                           latency_fn,
-                                                           bw_cost_fn,
-                                                           ingress_max_pending);
-    }
+    const int64_t bw = std::max<int64_t>(bw_cycles, 1);
+    const int64_t lat = std::max<int64_t>(lat_cycles, 1);
+    const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw);
+    auto latency_fn = [lat](double) { return lat; };
+    auto bw_cost_fn = [](csEvent* const& item) {
+        return static_cast<double>(event_bytes(item));
+    };
+    const int64_t ingress_max_pending = 0; // credits gate ingress; never drop on ingress full
+    ingress_ = std::make_unique<::lat_bw_queue<csEvent*>>(peak_bw_per_cycle,
+                                                       latency_fn,
+                                                       bw_cost_fn,
+                                                       ingress_max_pending);
     egress_credit_cap_ = credit_capacity_bytes(queue_size_packets);
     egress_credits_ = egress_credit_cap_;
     egress_queue_max_ = queue_size_packets > 0
@@ -122,13 +130,24 @@ bool FabricPort::send(csEvent* item) {
     return true;
 }
 
+void FabricPort::tick(uint64_t cycle) {
+    if (last_tick_cycle_ != cycle) {
+        last_tick_cycle_ = cycle;
+        tick_ingress();
+        drain_egress();
+    }
+}
+
 std::optional<csEvent*> FabricPort::receive(uint64_t cycle) {
     if (!can_receive(cycle)) {
         return std::nullopt;
     }
     csEvent* item = std::move(ready_.front());
+    const uint64_t credit_dst = event_credit_dst(item);
+    const uint64_t credit_len = credit_bytes(item);
     ready_.pop_front();
     last_deliver_cycle_ = cycle;
+    send_credit(credit_dst, credit_len);
     return item;
 }
 
@@ -138,11 +157,14 @@ bool FabricPort::try_receive(uint64_t cycle,
         return false;
     }
     csEvent* item = ready_.front();
+    const uint64_t credit_dst = event_credit_dst(item);
+    const uint64_t credit_len = credit_bytes(item);
     if (!handle(item)) {
         return false;
     }
     ready_.pop_front();
     last_deliver_cycle_ = cycle;
+    send_credit(credit_dst, credit_len);
     return true;
 }
 
@@ -163,53 +185,37 @@ void FabricPort::handle_event(SST::Event* ev) {
         }
         if (ctrl_code == kControlResetUtil) {
             reset_ingress_utilization();
+            // Let reset events propagate to downstream components.
         }
     }
 
-    if (ingress_) {
-        ingress_->add_packet(cevent);
-    } else {
-        ready_.push_back(cevent);
-        send_credit(cevent);
+    if (!ingress_->add_packet(cevent)) {
+        throw std::runtime_error("FabricPort: ingress queue full; credit accounting mismatch.");
     }
 }
 
 void FabricPort::reset_ingress_utilization() {
-    if (ingress_) {
-        ingress_->reset_utilization();
-    }
-}
-
-bool FabricPort::has_ingress() const {
-    return static_cast<bool>(ingress_);
-}
-
-bool FabricPort::has_link() const {
-    return link_ != nullptr;
+    ingress_->reset_utilization();
 }
 
 bool FabricPort::can_send() const {
-    return link_ != nullptr && !egress_queue_full();
+    return !egress_queue_full();
 }
 
 double FabricPort::ingress_avg_utilization() const {
-    return ingress_ ? ingress_->average_utilization() : 0.0;
+    return ingress_->average_utilization();
 }
 
 double FabricPort::ingress_utilization() const {
-    return ingress_ ? ingress_->utilization() : 0.0;
+    return ingress_->utilization();
 }
 
 std::size_t FabricPort::ingress_occupancy() const {
-    return ingress_ ? ingress_->occupancy() : 0;
+    return ingress_->occupancy();
 }
 
 bool FabricPort::can_receive(uint64_t cycle) {
-    if (last_tick_cycle_ != cycle) {
-        last_tick_cycle_ = cycle;
-        tick_ingress();
-        drain_egress();
-    }
+    tick(cycle);
     if (last_deliver_cycle_ == cycle) {
         return false;
     }
@@ -217,23 +223,16 @@ bool FabricPort::can_receive(uint64_t cycle) {
 }
 
 void FabricPort::tick_ingress() {
-    if (!ingress_) {
-        return;
-    }
     auto ready = ingress_->on_tick();
     for (auto& item : ready) {
         ready_.push_back(item);
-        send_credit(item);
     }
 }
 
 void FabricPort::drain_egress() {
-    if (!link_) {
-        return;
-    }
     while (!egress_queue_.empty()) {
         csEvent* ev = egress_queue_.front();
-        if (!try_consume_credit(egress_credits_, event_bytes(ev))) {
+        if (!try_consume_credit(egress_credits_, credit_bytes(ev))) {
             break;
         }
         link_->send(ev);
@@ -241,11 +240,11 @@ void FabricPort::drain_egress() {
     }
 }
 
-void FabricPort::send_credit(csEvent* const& item) {
-    if (!link_) {
+void FabricPort::send_credit(uint64_t dst, uint64_t bytes) {
+    if (bytes == 0) {
         return;
     }
-    auto* credit = make_credit_event(self_id_, event_credit_dst(item), event_bytes(item));
+    auto* credit = make_credit_event(self_id_, dst, bytes);
     link_->send(credit);
 }
 

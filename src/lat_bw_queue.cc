@@ -2,6 +2,7 @@
 
 #include "channel.h"
 #include "csEvent.h"
+#include "SST_CS_packets.h"
 
 template<typename T>
 lat_bw_queue<T>::lat_bw_queue(double peak_bw_per_cycle,
@@ -127,3 +128,4 @@ double lat_bw_queue<T>::get_utilization() const {
 
 template class lat_bw_queue<SST::csimCore::csEvent*>;
 template class lat_bw_queue<champsim::channel::request_type>;
+template class lat_bw_queue<sst_request>;

@@ -11,6 +11,7 @@
 
 #include "chrono.h"
 #include "champsim.h"
+#include "control_event.h"
 #include "convert_ev_packet.h"
 
 namespace SST {
@@ -18,8 +19,6 @@ namespace csimCore {
 
 namespace {
 constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
-constexpr uint64_t kControlResetUtil = 1;
-
 bool is_reset_event(const csEvent& ev) {
     return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == kControlResetUtil;
 }
@@ -73,11 +72,13 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
             &switch_port_,
             &FabricPort::handle_event));
     use_switch_port_ = (pool_link != nullptr);
-    switch_port_.configure(pool_link,
-                           static_cast<uint64_t>(pool_node_id_),
-                           link_bw_cycles_,
-                           link_latency_cycles_,
-                           link_queue_size_);
+    if (use_switch_port_) {
+        switch_port_.configure(pool_link,
+                               static_cast<uint64_t>(pool_node_id_),
+                               link_bw_cycles_,
+                               link_latency_cycles_,
+                               link_queue_size_);
+    }
 
     for (int i = 0; i < MAX_CXL_PORTS; ++i) {
         std::string port_name = "port_handler_nodes" + std::to_string(i);
@@ -86,12 +87,12 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
             new Event::Handler<FabricPort>(
                 &core_ports_[i],
                 &FabricPort::handle_event));
-        core_ports_[i].configure(core_link,
-                                 static_cast<uint64_t>(pool_node_id_),
-                                 link_bw_cycles_,
-                                 link_latency_cycles_,
-                                 link_queue_size_);
         if (core_link != nullptr) {
+            core_ports_[i].configure(core_link,
+                                     static_cast<uint64_t>(pool_node_id_),
+                                     link_bw_cycles_,
+                                     link_latency_cycles_,
+                                     link_queue_size_);
             core_port_connected_[static_cast<size_t>(i)] = true;
         }
     }
@@ -193,7 +194,10 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
         return true;
     };
 
-    for_each_port([&](FabricPort& port) { port.try_receive(cycle, handle_event); });
+    for_each_port([&](FabricPort& port) {
+        port.tick(cycle);
+        port.try_receive(cycle, handle_event);
+    });
 }
 
 CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
@@ -204,9 +208,6 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     std::size_t occ_total = 0;
 
     auto accumulate = [&](const FabricPort& port) {
-        if (!port.has_ingress()) {
-            return;
-        }
         util_sum += port.ingress_utilization();
         avg_sum += port.ingress_avg_utilization();
         occ_total += port.ingress_occupancy();

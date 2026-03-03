@@ -202,7 +202,6 @@ private:
     int64_t link_bw_cycles_ = 0;
     int64_t link_latency_cycles_ = 0;
     int64_t link_queue_size_ = 0;
-    bool use_link_model_ = false;
     struct PortState {
         FabricPort port;
     };

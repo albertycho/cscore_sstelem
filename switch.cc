@@ -7,6 +7,7 @@
 #include <string>
 
 #include "access_type.h"
+#include "control_event.h"
 
 namespace SST {
 namespace csimCore {
@@ -21,7 +22,7 @@ bool is_write_request(const csEvent& ev) {
 }
 
 bool is_reset_event(const csEvent& ev) {
-    return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == 1;
+    return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == kControlResetUtil;
 }
 
 csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
@@ -58,7 +59,6 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     link_bw_cycles_ = params.find<int64_t>("link_bw_cycles", 0);
     link_latency_cycles_ = params.find<int64_t>("link_latency_cycles", 0);
     link_queue_size_ = params.find<int64_t>("link_queue_size", 0);
-    use_link_model_ = (link_bw_cycles_ > 0 || link_latency_cycles_ > 0 || link_queue_size_ > 0);
 
     if (num_nodes_ <= 0) {
         throw std::runtime_error("Switch: num_nodes must be > 0.");
@@ -102,15 +102,16 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
                                       link_queue_size_);
     }
 
-    if (use_link_model_) {
-        registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));
-    }
+    registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
 {
     current_cycle_ = static_cast<uint64_t>(cycle);
-    for_each_port([&](PortState& port) { try_receive_and_route(port, current_cycle_); });
+    for_each_port([&](PortState& port) {
+        port.port.tick(current_cycle_);
+        try_receive_and_route(port, current_cycle_);
+    });
     return false;
 }
 
@@ -145,10 +146,6 @@ void Switch::handle_event(SST::Event* ev)
 
     port->port.handle_event(cevent);
 
-    if (!use_link_model_) {
-        current_cycle_++;
-        try_receive_and_route(*port, current_cycle_);
-    }
 }
 
 bool Switch::try_route_event(csEvent* ev)
@@ -169,7 +166,6 @@ bool Switch::try_route_event(csEvent* ev)
         delete ev;
         return true;
     }
-
     const uint64_t dst = ev->payload[1];
     if (dst < static_cast<uint64_t>(num_nodes_)) {
         const auto idx = static_cast<size_t>(dst);
@@ -295,16 +291,10 @@ void Switch::reset_stats_and_broadcast()
 void Switch::finish()
 {
     std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
-    if (!use_link_model_) {
-        return;
-    }
     auto avg_util = [](const std::vector<PortState>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            if (!port.port.has_ingress()) {
-                continue;
-            }
             sum += port.port.ingress_avg_utilization();
             count++;
         }

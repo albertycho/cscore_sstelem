@@ -71,3 +71,5 @@ private:
     double bw_sum = 0.0;
     double bw_used_this_cycle = 0.0;
 };
+
+// Explicit instantiations live in src/lat_bw_queue.cc.

@@ -15,8 +15,6 @@
 #include "csEvent.h"
 #include "lat_bw_queue.h"
 
-extern template class lat_bw_queue<SST::csimCore::csEvent*>;
-
 namespace SST {
 namespace csimCore {
 
@@ -47,8 +45,8 @@ public:
     //   self_id            Node id for credit/control messages.
     //   bw_cycles          Cycles per 64B for ingress bandwidth modeling (0 disables).
     //   lat_cycles         Base latency in cycles for ingress modeling (0 disables).
-    //   queue_size_packets Ingress queue capacity in packets (0 = unbounded).
-    //                     Egress uses this as credit capacity (0 = unbounded).
+    //   queue_size_packets Egress credit capacity in packets (0 = unbounded).
+    //                     Ingress is unbounded to avoid drops; credits gate senders.
     void configure(SST::Link* link,
                    uint64_t self_id,
                    int64_t bw_cycles,
@@ -58,6 +56,7 @@ public:
     [[nodiscard]] bool send(csEvent* item);
 
     // Returns at most one message per cycle for this port.
+    void tick(uint64_t cycle);
     std::optional<csEvent*> receive(uint64_t cycle);
     bool try_receive(uint64_t cycle,
                      const std::function<bool(csEvent*)>& handle);
@@ -65,8 +64,6 @@ public:
     void handle_event(SST::Event* ev);
 
     void reset_ingress_utilization();
-    bool has_ingress() const;
-    bool has_link() const;
     bool can_send() const;
     double ingress_avg_utilization() const;
     double ingress_utilization() const;
@@ -76,7 +73,7 @@ private:
     bool can_receive(uint64_t cycle);
     void tick_ingress();
     void drain_egress();
-    void send_credit(csEvent* const& item);
+    void send_credit(uint64_t dst, uint64_t bytes);
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
