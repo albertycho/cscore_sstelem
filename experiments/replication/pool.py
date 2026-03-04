@@ -80,9 +80,9 @@ for i in range(NUM_NODES):
         "clock": "2.4GHz",
         "warmup_insts": 2000000,
         "sim_insts": 5000000,
-        "remote_link_bw_cycles": BW_CXL_CYCLES,
-        "remote_link_latency_cycles": T_CXL,
-        "remote_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
+        "cxl_link_bw_cycles": BW_CXL_CYCLES,
+        "cxl_link_latency_cycles": T_CXL,
+        "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
         "lightweight_output": 1,
     })
 

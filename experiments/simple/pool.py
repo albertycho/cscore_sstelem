@@ -50,9 +50,9 @@ for i in range(NUM_NODES):
         "clock": "2.4GHz",
         "warmup_insts": 10000,
         "sim_insts": 50000,
-        "remote_link_bw_cycles": BW_CXL_CYCLES,
-        "remote_link_latency_cycles": T_CXL,
-        "remote_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
+        "cxl_link_bw_cycles": BW_CXL_CYCLES,
+        "cxl_link_latency_cycles": T_CXL,
+        "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     })
 
     link_node_to_pool = sst.Link(f"s{i}_to_pool")

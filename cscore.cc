@@ -98,22 +98,10 @@ namespace SST {
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
             util_heartbeat_period = params.find<uint64_t>("util_heartbeat_period", 0);
-            remote_link_bw_cycles = params.find<int64_t>("remote_link_bw_cycles", 0);
-            remote_link_latency_cycles = params.find<int64_t>("remote_link_latency_cycles", 0);
-            remote_link_queue_size = params.find<int64_t>("remote_link_queue_size", 0);
+            cxl_link_bw_cycles_ = params.find<int64_t>("cxl_link_bw_cycles", 0);
+            cxl_link_latency_cycles_ = params.find<int64_t>("cxl_link_latency_cycles", 0);
+            cxl_link_queue_size_ = params.find<int64_t>("cxl_link_queue_size", 0);
             lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
-
-            if (remote_link_bw_cycles > 0 || remote_link_latency_cycles > 0 || remote_link_queue_size > 0) {
-                const int64_t bw_cycles = std::max<int64_t>(remote_link_bw_cycles, 1);
-                const int64_t lat_cycles = std::max<int64_t>(remote_link_latency_cycles, 1);
-                auto latency_fn = [lat_cycles](double) { return lat_cycles; };
-                const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw_cycles);
-                auto bw_cost_fn = [](const sst_request& req) {
-                    const double bytes = (req.msg_bytes == 0) ? 64.0 : static_cast<double>(req.msg_bytes);
-                    return std::max<double>(bytes, 1.0);
-                };
-                remote_link_queue = std::make_unique<lat_bw_queue<sst_request>>(peak_bw_per_cycle, std::move(latency_fn), bw_cost_fn, remote_link_queue_size);
-            }
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -425,9 +413,9 @@ namespace SST {
             }
             remote_port_.configure(cxl_link,
                                    static_cast<uint64_t>(node_id),
-                                   remote_link_bw_cycles,
-                                   remote_link_latency_cycles,
-                                   remote_link_queue_size);
+                                   cxl_link_bw_cycles_,
+                                   cxl_link_latency_cycles_,
+                                   cxl_link_queue_size_);
             cxl_port_configured_ = true;
 
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
@@ -509,9 +497,6 @@ namespace SST {
                         cpu.begin_phase();
                     }
                     MYDRAM.reset_utilization();
-                    if (remote_link_queue) {
-                        remote_link_queue->reset_utilization();
-                    }
                     if (cxl_port_configured_) {
                         auto* ctrl = make_control_event(static_cast<uint64_t>(node_id), kControlBroadcast, kControlResetUtil);
                         if (!remote_port_.send(ctrl)) {
@@ -634,10 +619,6 @@ namespace SST {
 
             std::cout << (lightweight_output_ ? "Utilization" : "UTILIZATION SUMMARY") << '\n';
             std::cout << "  DRAM avg util: " << MYDRAM.queue_average_utilization(0) << '\n';
-            if (remote_link_queue) {
-                std::cout << "  Remote link avg util: " << remote_link_queue->average_utilization() << '\n';
-            }
-
             const auto now = std::chrono::steady_clock::now();
             const auto total_sec = std::chrono::duration<double>(now - wall_start_).count();
             std::cout << (lightweight_output_ ? "Walltime" : "WALLTIME SUMMARY") << '\n';
@@ -673,9 +654,6 @@ namespace SST {
 
 		bool csimCore::enqueue_remote_request(const sst_request& req)
 		{
-			if (remote_link_queue) {
-				return remote_link_queue->add_packet(sst_request{req});
-			}
 			remote_outbox.emplace_back(req);
 			return true;
 		}
@@ -684,12 +662,6 @@ namespace SST {
 		{
 			if (!cxl_port_configured_) {
 				return;
-			}
-			if (remote_link_queue) {
-				auto ready = remote_link_queue->on_tick();
-				for (auto& req : ready) {
-					remote_outbox.emplace_back(std::move(req));
-				}
 			}
 
 			while (!remote_outbox.empty()) {
