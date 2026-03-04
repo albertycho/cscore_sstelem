@@ -84,10 +84,10 @@ for i in range(NUM_NODES):
     })
 
     l0 = sst.Link(f"s{i}_to_switch")
-    l0.connect((sock, "port_handler_cxl", "0ns"),
-               (switch, switch_node_port(i), "0ns"))
+    l0.connect((sock, "port_handler_cxl", "1ns"),
+               (switch, switch_node_port(i), "1ns"))
 
 for j, pool in enumerate(pools):
     l1 = sst.Link(f"switch_to_pool{j}")
-    l1.connect((switch, switch_pool_port(j), "0ns"),
-               (pool, "port_handler_switch", "0ns"))
+    l1.connect((switch, switch_pool_port(j), "1ns"),
+               (pool, "port_handler_switch", "1ns"))
