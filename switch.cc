@@ -105,13 +105,15 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));
 }
 
+void Switch::setup() {
+    wall_start_ = std::chrono::steady_clock::now();
+    active_time_ = std::chrono::steady_clock::duration{};
+    active_calls_ = 0;
+}
+
 bool Switch::clock_tick(SST::Cycle_t cycle)
 {
     ScopedTimer timer(active_time_, active_calls_);
-    if (!wall_start_set_) {
-        wall_start_ = std::chrono::steady_clock::now();
-        wall_start_set_ = true;
-    }
     current_cycle_ = static_cast<uint64_t>(cycle);
     for_each_port([&](PortState& port) {
         port.port.tick(current_cycle_);
@@ -307,11 +309,9 @@ void Switch::finish()
     };
     std::cout << "Switch avg util node ingress: " << avg_util(node_ports_) << std::endl;
     std::cout << "Switch avg util pool ingress: " << avg_util(pool_ports_) << std::endl;
-    if (wall_start_set_) {
-        const auto now = std::chrono::steady_clock::now();
-        const auto sec = std::chrono::duration<double>(now - wall_start_).count();
-        std::cout << "Switch wall time (s): " << sec << std::endl;
-    }
+    const auto now = std::chrono::steady_clock::now();
+    const auto sec = std::chrono::duration<double>(now - wall_start_).count();
+    std::cout << "Switch wall time (s): " << sec << std::endl;
     if (active_calls_ > 0) {
         const auto active_sec = std::chrono::duration<double>(active_time_).count();
         std::cout << "Switch active time (s): " << active_sec << std::endl;

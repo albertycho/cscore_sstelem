@@ -122,12 +122,14 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
     }
 }
 
+void CXLMemoryPool::setup() {
+    wall_start_ = std::chrono::steady_clock::now();
+    active_time_ = std::chrono::steady_clock::duration{};
+    active_calls_ = 0;
+}
+
 bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
     ScopedTimer timer(active_time_, active_calls_);
-    if (!wall_start_set_) {
-        wall_start_ = std::chrono::steady_clock::now();
-        wall_start_set_ = true;
-    }
     ++tick_count_;
     poll_ports(tick_count_);
     mem_ctrl_.operate();
@@ -311,11 +313,9 @@ void CXLMemoryPool::finish() {
     if (stats.avg_util > 0.0) {
         std::cout << "  req link avg util: " << stats.avg_util << '\n';
     }
-    if (wall_start_set_) {
-        const auto now = std::chrono::steady_clock::now();
-        const auto sec = std::chrono::duration<double>(now - wall_start_).count();
-        std::cout << "  wall time (s): " << sec << '\n';
-    }
+    const auto now = std::chrono::steady_clock::now();
+    const auto sec = std::chrono::duration<double>(now - wall_start_).count();
+    std::cout << "  wall time (s): " << sec << '\n';
     if (active_calls_ > 0) {
         const auto active_sec = std::chrono::duration<double>(active_time_).count();
         std::cout << "  active time (s): " << active_sec << '\n';

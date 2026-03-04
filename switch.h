@@ -23,6 +23,7 @@ namespace csimCore {
 class Switch : public SST::Component {
 public:
     Switch(SST::ComponentId_t id, SST::Params& params);
+    void setup() override;
 
     SST_ELI_REGISTER_COMPONENT(
         Switch,
@@ -212,7 +213,6 @@ private:
     uint64_t replicated_count_ = 0;
     uint64_t current_cycle_ = 0;
     std::chrono::steady_clock::time_point wall_start_{};
-    bool wall_start_set_ = false;
     std::chrono::steady_clock::duration active_time_{};
     uint64_t active_calls_ = 0;
 };

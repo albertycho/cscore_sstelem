@@ -26,6 +26,7 @@ namespace csimCore {
 class CXLMemoryPool : public SST::Component {
 public:
     CXLMemoryPool(SST::ComponentId_t id, SST::Params& params);
+    void setup() override;
     void finish() override;
 
     SST_ELI_REGISTER_COMPONENT(
@@ -169,7 +170,6 @@ private:
     uint64_t total_completed_ = 0;
     uint64_t heartbeat_period_ = 1000;
     std::chrono::steady_clock::time_point wall_start_{};
-    bool wall_start_set_ = false;
     std::chrono::steady_clock::duration active_time_{};
     uint64_t active_calls_ = 0;
 };

@@ -86,6 +86,7 @@ libcscore_la_SOURCES = \
     inc/lat_bw_queue.h \
     inc/ptw_builder.h \
     inc/ptw.h \
+    inc/timing_utility.h \
     inc/register_allocator.h \
     inc/repeatable.h \
     inc/SST_CS_packets.h \
