@@ -13,9 +13,10 @@ NUM_NODES = 4
 NUM_POOLS = 2
 POOL_NODE_ID_BASE = 100
 
-# MPI configuration (must match mpirun -n)
-MPI_RANKS = 4
-MPI_THREADS = 1
+# MPI configuration (must match mpirun -n). Override via env:
+#   MPI_RANKS=<n> mpirun -n <n> sst pool_with_replication_mpi.py
+MPI_RANKS = int(os.environ.get("MPI_RANKS", "4"))
+MPI_THREAD = 0
 
 # Latency/bandwidth (cycles per 64B) for the CXL links.
 T_CXL = 120
@@ -52,7 +53,7 @@ switch.addParams({
     "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     "lightweight_output": 1,
 })
-switch.setRank(max(MPI_RANKS - 1, 0), MPI_THREADS - 1)
+switch.setRank(max(MPI_RANKS - 1, 0), MPI_THREAD)
 
 pools = []
 for j in range(NUM_POOLS):
@@ -68,7 +69,7 @@ for j in range(NUM_POOLS):
         "heartbeat_period": 0,
         "lightweight_output": 1,
     })
-    pool.setRank(max(MPI_RANKS - 1, 0), MPI_THREADS - 1)
+    pool.setRank(max(MPI_RANKS - 1, 0), MPI_THREAD)
     pools.append(pool)
 
 for i in range(NUM_NODES):
@@ -90,7 +91,7 @@ for i in range(NUM_NODES):
         "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
         "lightweight_output": 1,
     })
-    sock.setRank(i % max(MPI_RANKS, 1), MPI_THREADS - 1)
+    sock.setRank(i % max(MPI_RANKS, 1), MPI_THREAD)
 
     l0 = sst.Link(f"s{i}_to_switch")
     l0.connect((sock, "port_handler_cxl", "1ns"),
