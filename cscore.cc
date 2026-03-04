@@ -29,10 +29,6 @@
 #include "prefetcher/no/no.h"
 #include "control_event.h"
 
-const auto start_time = std::chrono::steady_clock::now();
-
-std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time); }
-
 namespace {
 constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
 int64_t cycles_per_request_from_bw_bytes(uint64_t bytes_per_cycle) {
@@ -439,6 +435,12 @@ namespace SST {
 			std::cout<<"Node "<<node_id<<": Done with cscore constructor"<<std::endl;
 			
 		}
+
+        void csimCore::setup() {
+            wall_start_ = std::chrono::steady_clock::now();
+            active_time_ = std::chrono::steady_clock::duration{};
+            active_calls_ = 0;
+        }
 		
 		bool csimCore::champsim_tick(Cycle_t cycle){
             ScopedTimer timer(active_time_, active_calls_);
@@ -627,6 +629,18 @@ namespace SST {
             std::cout << "  DRAM avg util: " << MYDRAM.queue_average_utilization(0) << '\n';
             if (remote_link_queue) {
                 std::cout << "  Remote link avg util: " << remote_link_queue->average_utilization() << '\n';
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+            const auto total_sec = std::chrono::duration<double>(now - wall_start_).count();
+            std::cout << "WALLTIME SUMMARY\n";
+            std::cout << "  sim wall time (s): " << total_sec << '\n';
+            if (active_calls_ > 0) {
+                const auto active_sec = std::chrono::duration<double>(active_time_).count();
+                std::cout << "COMPONENT TIME SUMMARY\n";
+                std::cout << "  csimCore active time (s): " << active_sec << '\n';
+                std::cout << "  csimCore avg per call (ms): "
+                          << (active_sec * 1000.0 / static_cast<double>(active_calls_)) << '\n';
             }
         }
 

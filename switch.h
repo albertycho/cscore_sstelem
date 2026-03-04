@@ -4,12 +4,14 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <chrono>
 
 #include <sst/core/component.h>
 #include <sst/core/link.h>
 
 #include "csEvent.h"
 #include "fabric_port.h"
+#include "timing_utility.h"
 
 namespace SST {
 namespace csimCore {
@@ -209,6 +211,10 @@ private:
     std::vector<PortState> pool_ports_;
     uint64_t replicated_count_ = 0;
     uint64_t current_cycle_ = 0;
+    std::chrono::steady_clock::time_point wall_start_{};
+    bool wall_start_set_ = false;
+    std::chrono::steady_clock::duration active_time_{};
+    uint64_t active_calls_ = 0;
 };
 
 } // namespace csimCore

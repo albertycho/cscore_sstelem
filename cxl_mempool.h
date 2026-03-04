@@ -8,6 +8,7 @@
 #include <string>
 #include <array>
 #include <unordered_map>
+#include <chrono>
 
 #include <sst/core/component.h>
 #include <sst/core/link.h>
@@ -16,6 +17,7 @@
 #include "fabric_port.h"
 #include "my_memory_controller.h"
 #include "SST_CS_packets.h"
+#include "timing_utility.h"
 
 
 namespace SST {
@@ -166,6 +168,10 @@ private:
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
     uint64_t heartbeat_period_ = 1000;
+    std::chrono::steady_clock::time_point wall_start_{};
+    bool wall_start_set_ = false;
+    std::chrono::steady_clock::duration active_time_{};
+    uint64_t active_calls_ = 0;
 };
 
 } // namespace csimCore

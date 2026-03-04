@@ -19,6 +19,7 @@
 #include <deque>
 #include <forward_list>
 #include <memory>
+#include <chrono>
 
 #include <trace_instruction.h>
 #include <channel.h>
@@ -53,6 +54,7 @@ namespace SST {
     {
     public:
         csimCore(SST::ComponentId_t id, SST::Params& params);		// Constructor
+        void setup() override;
     
         //void setup()  { }
         //void finish() { }
@@ -173,6 +175,9 @@ namespace SST {
         int64_t remote_link_queue_size = 0;
         std::unique_ptr<lat_bw_queue<sst_request>> remote_link_queue;
         bool final_stats_printed = false;
+        std::chrono::steady_clock::time_point wall_start_{};
+        std::chrono::steady_clock::duration active_time_{};
+        uint64_t active_calls_ = 0;
 
         // champsim::channel cpu0_STLB_to_cpu0_PTW_queues{16, 0, 0, champsim::data::bits{champsim::lg2(PAGE_SIZE)}, 0};
         // champsim::channel cpu0_DTLB_to_cpu0_STLB_queues{32, 0, 32, champsim::data::bits{champsim::lg2(4096)}, 0};
