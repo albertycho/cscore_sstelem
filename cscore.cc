@@ -419,11 +419,20 @@ namespace SST {
 				vmem.set_address_map(nullptr, static_cast<uint32_t>(node_id), pool_pa_base);
 			}
 
-			
-			linkHandler_cxl = configureLink("port_handler_cxl", new Event::Handler<csimCore>(this, &csimCore::handleEvent_CXL));
-			if (!linkHandler_cxl) {
-				std::cerr << "ERROR: linkHandler_cxl is NULL for node " << node_id << std::endl;
-			}
+
+            auto* cxl_link = configureLink(
+                "port_handler_cxl",
+                new Event::Handler<FabricPort>(&remote_port_, &FabricPort::handle_event));
+            if (!cxl_link) {
+                throw std::runtime_error("csimCore: missing link for port_handler_cxl on node " + std::to_string(node_id) + ".");
+            }
+            remote_port_.configure(cxl_link,
+                                   static_cast<uint64_t>(node_id),
+                                   remote_link_bw_cycles,
+                                   remote_link_latency_cycles,
+                                   remote_link_queue_size);
+            cxl_port_configured_ = true;
+
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
 				&csimCore::champsim_tick));	
 
@@ -431,10 +440,17 @@ namespace SST {
 			
 		}
 		
-		bool csimCore::champsim_tick(Cycle_t){
+		bool csimCore::champsim_tick(Cycle_t cycle){
+            ScopedTimer timer(active_time_, active_calls_);
 
 			global_clock.tick(time_quantum);
 			heartbeat_count++;
+
+            const auto cycle_u = static_cast<uint64_t>(cycle);
+            remote_port_.tick(cycle_u);
+            remote_port_.try_receive(cycle_u, [this](csEvent* ev) {
+                return handle_remote_event(ev);
+            });
 			
 
 			/* OPERABLES:  DRAM, ptws, caches, cores*/
@@ -493,9 +509,11 @@ namespace SST {
                     if (remote_link_queue) {
                         remote_link_queue->reset_utilization();
                     }
-                    if (linkHandler_cxl) {
+                    if (cxl_port_configured_) {
                         auto* ctrl = make_control_event(static_cast<uint64_t>(node_id), kControlBroadcast, kControlResetUtil);
-                        linkHandler_cxl->send(ctrl);
+                        if (!remote_port_.send(ctrl)) {
+                            delete ctrl;
+                        }
                     }
                     warmup_done = true;
                 }
@@ -612,23 +630,23 @@ namespace SST {
             }
         }
 
-		void csimCore::handleEvent_CXL(SST::Event *ev)
-		{
-			auto* cevent = static_cast<csEvent*>(ev);
+        bool csimCore::handle_remote_event(csEvent* ev)
+        {
             uint64_t ctrl_code = 0;
-            if (is_control_event(*cevent, &ctrl_code)) {
-                delete cevent;
-                return;
+            if (is_control_event(*ev, &ctrl_code)) {
+                delete ev;
+                return true;
             }
-			auto resp = convert_event_to_response(*cevent);
-			for (auto& cache : caches) {
-				if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {
-					delete cevent;
-					return;
-				}
-			}
-			delete cevent;
-		}
+            auto resp = convert_event_to_response(*ev);
+            for (auto& cache : caches) {
+                if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {
+                    delete ev;
+                    return true;
+                }
+            }
+            delete ev;
+            return true;
+        }
 
 		bool csimCore::enqueue_remote_request(const sst_request& req)
 		{
@@ -641,23 +659,24 @@ namespace SST {
 
 		void csimCore::advance_remote_requests()
 		{
-			if (!linkHandler_cxl) {
+			if (!cxl_port_configured_) {
 				return;
 			}
 			if (remote_link_queue) {
 				auto ready = remote_link_queue->on_tick();
 				for (auto& req : ready) {
-					auto* event = convert_request_to_event(req);
-					linkHandler_cxl->send(event);
+					remote_outbox.emplace_back(std::move(req));
 				}
-				return;
 			}
 
 			while (!remote_outbox.empty()) {
-				auto req = remote_outbox.front();
+				const auto& req = remote_outbox.front();
 				auto* event = convert_request_to_event(req);
 				// TODO: path selection/routing metadata if needed
-				linkHandler_cxl->send(event);
+				if (!remote_port_.send(event)) {
+					delete event;
+					break;
+				}
 				remote_outbox.pop_front();
 			}
 		}

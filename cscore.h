@@ -43,6 +43,8 @@
 
 #include "convert_ev_packet.h"
 #include "address_map.h"
+#include "timing_utility.h"
+#include "fabric_port.h"
 
 namespace SST {
     namespace csimCore {
@@ -106,7 +108,8 @@ namespace SST {
         std::string clock_frequency_str;
         std::string trace_name;
         int node_id;
-        SST::Link* linkHandler_cxl = nullptr;
+        FabricPort remote_port_;
+        bool cxl_port_configured_ = false;
         //champsim::csim_sst *csst;
         //champsim::csim_sst csst;
 
@@ -192,7 +195,7 @@ namespace SST {
         void advance_remote_requests();
         void print_final_stats();
     
-        void handleEvent_CXL(SST::Event *ev);
+        bool handle_remote_event(csEvent* ev);
     };
     
     } // namespace cscore
