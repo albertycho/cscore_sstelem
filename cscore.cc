@@ -101,6 +101,7 @@ namespace SST {
             remote_link_bw_cycles = params.find<int64_t>("remote_link_bw_cycles", 0);
             remote_link_latency_cycles = params.find<int64_t>("remote_link_latency_cycles", 0);
             remote_link_queue_size = params.find<int64_t>("remote_link_queue_size", 0);
+            lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
 
             if (remote_link_bw_cycles > 0 || remote_link_latency_cycles > 0 || remote_link_queue_size > 0) {
                 const int64_t bw_cycles = std::max<int64_t>(remote_link_bw_cycles, 1);
@@ -569,28 +570,32 @@ namespace SST {
             }
             final_stats_printed = true;
 
-            champsim::phase_stats stats;
-            stats.name = "Node " + std::to_string(node_id);
-            stats.trace_names.push_back(trace_name);
+            if (lightweight_output_) {
+                std::cout << "DRAM Statistics" << std::endl;
+            } else {
+                champsim::phase_stats stats;
+                stats.name = "Node " + std::to_string(node_id);
+                stats.trace_names.push_back(trace_name);
 
-            stats.sim_cpu_stats.reserve(cores.size());
-            stats.roi_cpu_stats.reserve(cores.size());
-            for (auto& cpu : cores) {
-                stats.sim_cpu_stats.push_back(cpu.sim_stats);
-                stats.roi_cpu_stats.push_back(cpu.roi_stats);
+                stats.sim_cpu_stats.reserve(cores.size());
+                stats.roi_cpu_stats.reserve(cores.size());
+                for (auto& cpu : cores) {
+                    stats.sim_cpu_stats.push_back(cpu.sim_stats);
+                    stats.roi_cpu_stats.push_back(cpu.roi_stats);
+                }
+
+                stats.sim_cache_stats.reserve(caches.size());
+                stats.roi_cache_stats.reserve(caches.size());
+                for (auto& cache : caches) {
+                    stats.sim_cache_stats.push_back(cache.sim_stats);
+                    stats.roi_cache_stats.push_back(cache.roi_stats);
+                }
+
+                // MY_MEMORY_CONTROLLER does not expose DRAM_CHANNEL stats; leave DRAM stats empty.
+
+                champsim::plain_printer printer{std::cout};
+                printer.print(stats);
             }
-
-            stats.sim_cache_stats.reserve(caches.size());
-            stats.roi_cache_stats.reserve(caches.size());
-            for (auto& cache : caches) {
-                stats.sim_cache_stats.push_back(cache.sim_stats);
-                stats.roi_cache_stats.push_back(cache.roi_stats);
-            }
-
-            // MY_MEMORY_CONTROLLER does not expose DRAM_CHANNEL stats; leave DRAM stats empty.
-
-            champsim::plain_printer printer{std::cout};
-            printer.print(stats);
 
             // StarNUMA-style LLC demand-miss summary (LOAD+RFO only), post-merge (MSHR return).
             const auto demand_return_count = [](const CACHE::stats_type& st) {
@@ -618,14 +623,16 @@ namespace SST {
                     : 0.0;
                 std::cout << cxl_demand_miss << " / " << total_demand_miss << " LLC misses are CXL" << std::endl;
                 std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl lat: " << avg_cxl_lat << std::endl;
-                std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
-                for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
-                    std::cout << (i * 10) << " : " << st.miss_latency_hist[i] << std::endl;
+                if (!lightweight_output_) {
+                    std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
+                    for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
+                        std::cout << (i * 10) << " : " << st.miss_latency_hist[i] << std::endl;
+                    }
                 }
                 break;
             }
 
-            std::cout << "UTILIZATION SUMMARY\n";
+            std::cout << (lightweight_output_ ? "Utilization" : "UTILIZATION SUMMARY") << '\n';
             std::cout << "  DRAM avg util: " << MYDRAM.queue_average_utilization(0) << '\n';
             if (remote_link_queue) {
                 std::cout << "  Remote link avg util: " << remote_link_queue->average_utilization() << '\n';
@@ -633,14 +640,16 @@ namespace SST {
 
             const auto now = std::chrono::steady_clock::now();
             const auto total_sec = std::chrono::duration<double>(now - wall_start_).count();
-            std::cout << "WALLTIME SUMMARY\n";
+            std::cout << (lightweight_output_ ? "Walltime" : "WALLTIME SUMMARY") << '\n';
             std::cout << "  sim wall time (s): " << total_sec << '\n';
             if (active_calls_ > 0) {
                 const auto active_sec = std::chrono::duration<double>(active_time_).count();
-                std::cout << "COMPONENT TIME SUMMARY\n";
-                std::cout << "  csimCore active time (s): " << active_sec << '\n';
-                std::cout << "  csimCore avg per call (ms): "
-                          << (active_sec * 1000.0 / static_cast<double>(active_calls_)) << '\n';
+                if (!lightweight_output_) {
+                    std::cout << "COMPONENT TIME SUMMARY\n";
+                    std::cout << "  csimCore active time (s): " << active_sec << '\n';
+                    std::cout << "  csimCore avg per call (ms): "
+                              << (active_sec * 1000.0 / static_cast<double>(active_calls_)) << '\n';
+                }
             }
         }
 

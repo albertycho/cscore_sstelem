@@ -59,6 +59,7 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     link_bw_cycles_ = params.find<int64_t>("link_bw_cycles", 0);
     link_latency_cycles_ = params.find<int64_t>("link_latency_cycles", 0);
     link_queue_size_ = params.find<int64_t>("link_queue_size", 0);
+    lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
 
     if (num_nodes_ <= 0) {
         throw std::runtime_error("Switch: num_nodes must be > 0.");
@@ -297,6 +298,10 @@ void Switch::reset_stats_and_broadcast()
 
 void Switch::finish()
 {
+    if (lightweight_output_) {
+        return;
+    }
+
     std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
     auto avg_util = [](const std::vector<PortState>& ports) {
         double sum = 0.0;

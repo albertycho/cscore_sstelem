@@ -87,7 +87,8 @@ namespace SST {
             { "remote_link_latency_cycles", "Remote link base latency in cycles (sender-side link queue)", "0" },
             { "remote_link_queue_size", "Remote link queue capacity in packets (0 = unbounded)", "0" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
-            { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" }
+            { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
+            { "lightweight_output", "If set, only print DRAM Statistics, LLC miss summary, Utilization, and Walltime", "0" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
@@ -175,6 +176,7 @@ namespace SST {
         int64_t remote_link_queue_size = 0;
         std::unique_ptr<lat_bw_queue<sst_request>> remote_link_queue;
         bool final_stats_printed = false;
+        bool lightweight_output_ = false;
         std::chrono::steady_clock::time_point wall_start_{};
         std::chrono::steady_clock::duration active_time_{};
         uint64_t active_calls_ = 0;

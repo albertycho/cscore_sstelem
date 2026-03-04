@@ -43,7 +43,8 @@ public:
         { "clock", "Clock frequency for queue timing", "2.4GHz" },
         { "link_bw_cycles", "Link bandwidth in cycles per 64B (enables ingress queues if nonzero)", "0" },
         { "link_latency_cycles", "Link base latency in cycles (ingress queues)", "0" },
-        { "link_queue_size", "Link ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" }
+        { "link_queue_size", "Link ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
+        { "lightweight_output", "If set, suppress switch summary output", "0" }
     )
 
     SST_ELI_DOCUMENT_PORTS(
@@ -205,6 +206,7 @@ private:
     int64_t link_bw_cycles_ = 0;
     int64_t link_latency_cycles_ = 0;
     int64_t link_queue_size_ = 0;
+    bool lightweight_output_ = false;
     struct PortState {
         FabricPort port;
     };

@@ -49,7 +49,8 @@ public:
         { "link_latency_cycles", "CXL ingress base latency in cycles", "0" },
         { "link_queue_size", "CXL ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
         { "pool_node_id", "Logical node id used in fabric headers", "100" },
-        { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" }
+        { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" },
+        { "lightweight_output", "If set, suppress pool summary output", "0" }
     )
 
     SST_ELI_DOCUMENT_PORTS(
@@ -169,6 +170,7 @@ private:
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
     uint64_t heartbeat_period_ = 1000;
+    bool lightweight_output_ = false;
     std::chrono::steady_clock::time_point wall_start_{};
     std::chrono::steady_clock::duration active_time_{};
     uint64_t active_calls_ = 0;

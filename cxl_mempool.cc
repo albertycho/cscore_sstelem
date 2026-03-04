@@ -62,7 +62,8 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
                 std::vector<champsim::channel*>{&mem_channel_},
                 resolve_mem_bw(memory_bandwidth_, device_bandwidth_, pool_bw_cycles_per_req_),
                 select_pool_latency_fn(params, latency_cycles_)),
-      heartbeat_period_(params.find<uint64_t>("heartbeat_period", 1000)) {
+      heartbeat_period_(params.find<uint64_t>("heartbeat_period", 1000)),
+      lightweight_output_(params.find<int>("lightweight_output", 0) != 0) {
 
     registerClock(clock_frequency_, new Clock::Handler<CXLMemoryPool>(this, &CXLMemoryPool::clock_tick));
 
@@ -307,6 +308,10 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
 }
 
 void CXLMemoryPool::finish() {
+    if (lightweight_output_) {
+        return;
+    }
+
     std::cout << "CXL pool " << pool_node_id_ << " utilization summary\n";
     std::cout << "  mem avg util: " << mem_ctrl_.queue_average_utilization(0) << '\n';
     const auto stats = request_link_stats();
