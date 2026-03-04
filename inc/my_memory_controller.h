@@ -10,6 +10,8 @@
 #include "channel.h"
 #include "lat_bw_queue.h"
 
+extern template class lat_bw_queue<champsim::channel::request_type>;
+
 // 64B request
 // 2.4 GHz: cycle = ~0.4167 ns
 // bw: 40 GB/s --> ~16.7 bytes per cycle
@@ -25,7 +27,7 @@
 
 // --> can define a lower BW to see if latency spikes
 
-inline int64_t estimate_latency_percentile(double util) {
+inline int64_t estimate_latency_utilization_based(double util) {
     if (util >= 0.70) return 480;  // 200 ns @ 2.4 GHz
     if (util >= 0.60) return 360;  // 150 ns
     if (util >= 0.50) return 240;  // 100 ns
@@ -39,7 +41,7 @@ inline int64_t estimate_latency_fixed(double) {
     return DEFAULT_FIXED_LATENCY_CYCLES;
 }
 
-const size_t DEFAULT_BW = 96; /* cycles per request @ 2.4 GHz (scaled from 2.0 GHz) */
+const size_t DEFAULT_BW = 96; /* cycles per request @ 2.4 GHz */
 constexpr uint64_t DEFAULT_DRAM_SIZE_BYTES = 1ULL << 30;
 
 class MY_MEMORY_CONTROLLER : public champsim::operable {
@@ -51,8 +53,8 @@ public:
     MY_MEMORY_CONTROLLER();
     MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
                          std::vector<channel_type*>&& queues, 
-                         int64_t bandwidth = DEFAULT_BW,
-                         latency_function_type&& latency_function = estimate_latency_percentile,
+                         int64_t bw_cycles_per_req = DEFAULT_BW,
+                         latency_function_type&& latency_function = estimate_latency_utilization_based,
                          champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES});
 
     void initialize() final;
@@ -70,6 +72,22 @@ private:
 public:
     champsim::data::bytes size() const { return size_; }
     //champsim::data::bytes size() const { return champsim::data::bytes{size_}; }
+
+    std::size_t queue_count() const { return lat_bw_queues.size(); }
+    std::size_t queue_occupancy(std::size_t idx) const {
+        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].occupancy() : 0;
+    }
+    double queue_utilization(std::size_t idx) const {
+        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].utilization() : 0.0;
+    }
+    double queue_average_utilization(std::size_t idx) const {
+        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].average_utilization() : 0.0;
+    }
+    void reset_utilization() {
+        for (auto& q : lat_bw_queues) {
+            q.reset_utilization();
+        }
+    }
 
 };
 // namespace champsim

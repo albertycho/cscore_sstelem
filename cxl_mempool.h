@@ -1,16 +1,19 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
+#include <vector>
 #include <string>
+#include <array>
 #include <unordered_map>
 
 #include <sst/core/component.h>
 #include <sst/core/link.h>
 
 #include "channel.h"
-#include "lat_bw_queue.h"
+#include "fabric_port.h"
 #include "my_memory_controller.h"
 #include "SST_CS_packets.h"
 
@@ -21,6 +24,7 @@ namespace csimCore {
 class CXLMemoryPool : public SST::Component {
 public:
     CXLMemoryPool(SST::ComponentId_t id, SST::Params& params);
+    void finish() override;
 
     SST_ELI_REGISTER_COMPONENT(
         CXLMemoryPool,
@@ -36,79 +40,81 @@ public:
         { "pool_bw_cycles_per_req", "Pool DRAM bandwidth in cycles per request (overrides memory/device bandwidth if nonzero)", "0" },
         { "device_bandwidth", "Device side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "memory_bandwidth", "Memory side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
-        { "latency_cycles", "Fixed latency (in cycles) for the CXL path", "0" },
-        { "link_bw_cycles", "CXL egress bandwidth in cycles per 64B response", "0" },
-        { "link_latency_cycles", "CXL egress base latency in cycles for responses", "0" },
-        { "link_queue_size", "CXL egress queue capacity in packets (0 = unbounded)", "0" },
+        { "pool_latency_model", "Pool memory latency model: fixed or utilization-based", "fixed" },
+        { "latency_cycles", "Fixed pool memory latency in cycles (used when pool_latency_model=fixed)", "300" },
+        { "link_bw_cycles", "CXL ingress bandwidth in cycles per 64B request", "0" },
+        { "link_latency_cycles", "CXL ingress base latency in cycles", "0" },
+        { "link_queue_size", "CXL ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
         { "pool_node_id", "Logical node id used in fabric headers", "100" },
         { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" }
     )
 
     SST_ELI_DOCUMENT_PORTS(
-        { "port_handler_cores0", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores1", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores2", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores3", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores4", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores5", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores6", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores7", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores8", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores9", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores10", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores11", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores12", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores13", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores14", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores15", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores16", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores17", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores18", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores19", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores20", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores21", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores22", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores23", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores24", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores25", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores26", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores27", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores28", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores29", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores30", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores31", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores32", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores33", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores34", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores35", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores36", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores37", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores38", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores39", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores40", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores41", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores42", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores43", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores44", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores45", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores46", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores47", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores48", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores49", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores50", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores51", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores52", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores53", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores54", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores55", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores56", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores57", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores58", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores59", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores60", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores61", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores62", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
-        { "port_handler_cores63", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } }
+        { "port_handler_switch", "Bidirectional CXL traffic (switch uplink)", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes0", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes1", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes2", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes3", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes4", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes5", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes6", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes7", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes8", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes9", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes10", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes11", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes12", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes13", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes14", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes15", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes16", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes17", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes18", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes19", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes20", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes21", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes22", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes23", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes24", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes25", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes26", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes27", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes28", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes29", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes30", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes31", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes32", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes33", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes34", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes35", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes36", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes37", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes38", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes39", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes40", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes41", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes42", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes43", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes44", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes45", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes46", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes47", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes48", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes49", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes50", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes51", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes52", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes53", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes54", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes55", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes56", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes57", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes58", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes59", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes60", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes61", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes62", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } },
+        { "port_handler_nodes63", "Bidirectional CXL traffic", { "cscore.CXLMemoryPool", "" } }
     )
 
 private:
@@ -120,9 +126,21 @@ private:
     };
 
     bool clock_tick(SST::Cycle_t current);
-    void handle_request(SST::Event* ev);
-    bool produce_placeholder_response(const champsim::channel::response_type& response);
-    void send_response_event(const sst_response& resp);
+    void enqueue_mem_request(const sst_request& request);
+    // Aggregated ingress stats across active CXL ports.
+    struct LinkStats {
+        double util = 0.0;
+        double avg_util = 0.0;
+        std::size_t occ = 0;
+    };
+    void poll_ports(uint64_t cycle);
+    // Average utilization plus total occupancy for request ingress links.
+    LinkStats request_link_stats() const;
+    void reset_stats();
+    void for_each_port(const std::function<void(FabricPort&)>& fn);
+    void for_each_port(const std::function<void(const FabricPort&)>& fn) const;
+    FabricPort* select_egress_port(uint32_t sst_cpu);
+    bool try_send_response(const champsim::channel::response_type& response);
 
     uint64_t device_bandwidth_;
     uint64_t memory_bandwidth_;
@@ -135,8 +153,11 @@ private:
 
     std::string clock_frequency_;
     static constexpr int MAX_CXL_PORTS = 64;
-    SST::Link* core_links_[MAX_CXL_PORTS] = {};
-
+    FabricPort switch_port_;
+    std::array<FabricPort, MAX_CXL_PORTS> core_ports_{};
+    std::array<bool, MAX_CXL_PORTS> core_port_connected_{};
+    std::vector<FabricPort*> active_ports_;
+    bool use_switch_port_ = false;
     champsim::channel mem_channel_{};
     MY_MEMORY_CONTROLLER mem_ctrl_;
     uint64_t next_tag_ = 1;
@@ -145,8 +166,6 @@ private:
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
     uint64_t heartbeat_period_ = 1000;
-
-    std::unique_ptr<lat_bw_queue<sst_response>> resp_link_queue_;
 };
 
 } // namespace csimCore

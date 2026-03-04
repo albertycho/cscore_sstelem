@@ -29,6 +29,8 @@ libcscore_la_SOURCES = \
     src/address_map.cc \
     cxl_mempool.h \
     cxl_mempool.cc \
+    switch.h \
+    switch.cc \
     vcpkg_installed/x64-linux/include/fmt/core.h \
     vcpkg_installed/x64-linux/include/lzma.h \
     branch/bimodal/bimodal.cc \
@@ -59,6 +61,7 @@ libcscore_la_SOURCES = \
     inc/champsim.h \
     inc/channel.h \
     inc/chrono.h \
+    inc/control_event.h \
     inc/core_builder.h \
     inc/core_stats.h \
     inc/cxl_request_buffer.h \
@@ -142,6 +145,8 @@ libcscore_la_SOURCES = \
     src/dram_controller.cc \
     src/dram_stats.cc \
     src/extent.cc \
+    src/fabric_port.cc \
+    src/lat_bw_queue.cc \
 	src/json_printer.cc \
     src/modules.cc \
     src/my_memory_controller.cc \

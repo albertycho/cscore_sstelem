@@ -5,7 +5,7 @@ import sst
 NUM_NODES = 4
 POOL_NODE_ID = 100
 
-# Latency/bandwidth targets from StarNUMA icn_sim
+# Latency/bandwidth targets from StarNUMA icn_sim (cycles per 64B)
 T_CXL = 120          # cycles (matches icn_sim.t_cxl in StarNUMA config)
 # Bandwidth here is cycles-per-packet (not MB/s). For 64B packets @ 2.4GHz:
 # cycles = ceil(64 / (MBps * 1e6) * 2.4e9). 6000 MB/s -> 25 cycles.
@@ -33,6 +33,8 @@ pool.addParams({
     "pool_node_id": POOL_NODE_ID,
     "clock": "2.4GHz",
     "pool_bw_cycles_per_req": DRAM_BW_CYCLES_PER_REQ,
+    "pool_latency_model": "fixed",
+    "latency_cycles": 300,
     "link_bw_cycles": BW_CXL_CYCLES,
     "link_latency_cycles": T_CXL,
     "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
@@ -48,16 +50,18 @@ for i in range(NUM_NODES):
         "address_map_config": CXL_CONFIG,
         "dram_size_bytes": DRAM_SIZE_BYTES,
         "dram_bw_cycles_per_req": DRAM_BW_CYCLES_PER_REQ,
+        "dram_latency_model": "fixed",
+        "dram_fixed_latency_cycles": 300,
         "pool_pa_base": POOL_PA_BASE,
         "cache_heartbeat_period": 100000,
         "clock": "2.4GHz",
-        "warmup_insts": 5000,
-        "sim_insts": 1000,
+        "warmup_insts": 1000,
+        "sim_insts": 5000,
         "remote_link_bw_cycles": BW_CXL_CYCLES,
         "remote_link_latency_cycles": T_CXL,
         "remote_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     })
 
     link_node_to_pool = sst.Link(f"s{i}_to_pool")
-    link_node_to_pool.connect((sock, "port_handler_cxl", "1ns"),
-                              (pool, f"port_handler_cores{i}", "1ns"))
+    link_node_to_pool.connect((sock, "port_handler_cxl", "0ns"),
+                              (pool, f"port_handler_nodes{i}", "0ns"))

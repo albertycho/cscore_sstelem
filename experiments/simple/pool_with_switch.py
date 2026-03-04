@@ -1,11 +1,12 @@
 import os
 import sst
 
-# Simple wiring (direct): node -> pool.
-# The pool port index must match the node_id (sst_cpu) used in responses.
+# Simple wiring with a switch:
+#   nodes -> switch -> pool
 
 NUM_NODES = 4
-POOL_NODE_ID = 100
+NUM_POOLS = 1
+POOL_NODE_ID_BASE = 100
 
 # Latency/bandwidth (cycles per 64B) for the CXL links.
 T_CXL = 120
@@ -26,7 +27,7 @@ CXL_CONFIG = os.path.join(TRACE_DIR, "cxl_config.csv")
 
 pool = sst.Component("cxl_pool", "cscore.CXLMemoryPool")
 pool.addParams({
-    "pool_node_id": POOL_NODE_ID,
+    "pool_node_id": POOL_NODE_ID_BASE,
     "clock": "2.4GHz",
     "pool_bw_cycles_per_req": DRAM_BW_CYCLES_PER_REQ,
     "pool_latency_model": "utilization-based",
@@ -34,6 +35,18 @@ pool.addParams({
     "link_latency_cycles": T_CXL,
     "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     "heartbeat_period": 0,
+})
+
+switch = sst.Component("switch0", "cscore.Switch")
+switch.addParams({
+    "num_nodes": NUM_NODES,
+    "num_pools": NUM_POOLS,
+    "pool_node_id_base": POOL_NODE_ID_BASE,
+    "replicate_writes": 0,
+    # Bypass switch cost for parity with direct wiring.
+    "link_bw_cycles": 0,
+    "link_latency_cycles": 0,
+    "link_queue_size": 0,
 })
 
 for i in range(NUM_NODES):
@@ -55,6 +68,10 @@ for i in range(NUM_NODES):
         "remote_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     })
 
-    link_node_to_pool = sst.Link(f"s{i}_to_pool")
-    link_node_to_pool.connect((sock, "port_handler_cxl", "0ns"),
-                               (pool, f"port_handler_nodes{i}", "0ns"))
+    link_node_to_switch = sst.Link(f"s{i}_to_switch")
+    link_node_to_switch.connect((sock, "port_handler_cxl", "0ns"),
+                                (switch, f"port_handler_nodes{i}", "0ns"))
+
+link_switch_to_pool = sst.Link("switch_to_pool")
+link_switch_to_pool.connect((switch, "port_handler_pools0", "0ns"),
+                            (pool, "port_handler_switch", "0ns"))

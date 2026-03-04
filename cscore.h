@@ -74,8 +74,11 @@ namespace SST {
             { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" },
             { "dram_bw_cycles_per_req", "Local DRAM bandwidth in cycles per request (overrides dram_bandwidth_bytes_per_cycle if nonzero)", "0" },
             { "dram_bandwidth_bytes_per_cycle", "Local DRAM bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE; 0 uses DEFAULT_BW)", "0" },
+            { "dram_latency_model", "Local DRAM latency model: fixed or utilization-based", "fixed" },
+            { "dram_fixed_latency_cycles", "Fixed local DRAM latency in cycles (used when dram_latency_model=fixed)", "300" },
             { "pool_pa_base", "Base PA for pool mapping in VMEM (0 means use dram_size_bytes)", "0" },
             { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
+            { "util_heartbeat_period", "Cycles between utilization logs (0 disables)", "0" },
             { "remote_link_bw_cycles", "Remote link bandwidth in cycles per 64B (enables sender-side link queue if nonzero)", "0" },
             { "remote_link_latency_cycles", "Remote link base latency in cycles (sender-side link queue)", "0" },
             { "remote_link_queue_size", "Remote link queue capacity in packets (0 = unbounded)", "0" },
@@ -154,6 +157,7 @@ namespace SST {
         uint64_t fetched_insts=0;
         uint64_t heartbeat_count=0;
         uint64_t cache_heartbeat_period=1000;
+        uint64_t util_heartbeat_period=0;
         uint64_t pool_pa_base=0;
         uint64_t warmup_insts=0;
         uint64_t sim_insts=0;

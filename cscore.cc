@@ -17,6 +17,7 @@
 #include <stats_printer.h>
 #include <stdexcept>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <memory>
@@ -26,6 +27,7 @@
 #include "trace_instruction.h"
 #include "bimodal/bimodal.h"
 #include "prefetcher/no/no.h"
+#include "control_event.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -46,6 +48,19 @@ int64_t resolve_dram_bw_cycles(uint64_t cycles_per_req, uint64_t bytes_per_cycle
     }
     return cycles_per_request_from_bw_bytes(bytes_per_cycle);
 }
+
+MY_MEMORY_CONTROLLER::latency_function_type select_latency_fn(SST::Params& params, const char* model_key, const char* fixed_key,
+                                                               int64_t default_fixed_cycles) {
+    auto model = params.find<std::string>(model_key, "fixed");
+    for (auto& ch : model) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    if (model == "utilization-based") {
+        return estimate_latency_utilization_based;
+    }
+    const auto fixed_cycles = static_cast<int64_t>(params.find<uint64_t>(fixed_key, static_cast<uint64_t>(default_fixed_cycles)));
+    return [fixed_cycles](double) { return fixed_cycles; };
+}
 } // namespace
 
 
@@ -59,8 +74,8 @@ namespace SST {
                resolve_dram_bw_cycles(
                    params.find<uint64_t>("dram_bw_cycles_per_req", 0),
                    params.find<uint64_t>("dram_bandwidth_bytes_per_cycle", 0)),
-               estimate_latency_fixed,
-               champsim::data::bytes{params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES)}),
+               select_latency_fn(params, "dram_latency_model", "dram_fixed_latency_cycles", DEFAULT_FIXED_LATENCY_CYCLES),
+               champsim::data::bytes{static_cast<long long>(params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES))}),
 			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{kClockPeriodPs * 200}, MYDRAM, 1)
 		{
 			/* This function sets up and builds core (and cache and bp and etc) */
@@ -86,6 +101,7 @@ namespace SST {
                 pool_pa_base = dram_size_bytes;
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
+            util_heartbeat_period = params.find<uint64_t>("util_heartbeat_period", 0);
             remote_link_bw_cycles = params.find<int64_t>("remote_link_bw_cycles", 0);
             remote_link_latency_cycles = params.find<int64_t>("remote_link_latency_cycles", 0);
             remote_link_queue_size = params.find<int64_t>("remote_link_queue_size", 0);
@@ -94,12 +110,12 @@ namespace SST {
                 const int64_t bw_cycles = std::max<int64_t>(remote_link_bw_cycles, 1);
                 const int64_t lat_cycles = std::max<int64_t>(remote_link_latency_cycles, 1);
                 auto latency_fn = [lat_cycles](double) { return lat_cycles; };
-                auto bw_cost_fn = [bw_cycles](const sst_request& req) {
-                    const uint64_t bytes = (req.msg_bytes == 0) ? 64 : req.msg_bytes;
-                    const uint64_t cost = (bw_cycles * bytes) / 64;
-                    return static_cast<int64_t>(std::max<uint64_t>(cost, 1));
+                const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw_cycles);
+                auto bw_cost_fn = [](const sst_request& req) {
+                    const double bytes = (req.msg_bytes == 0) ? 64.0 : static_cast<double>(req.msg_bytes);
+                    return std::max<double>(bytes, 1.0);
                 };
-                remote_link_queue = std::make_unique<lat_bw_queue<sst_request>>(bw_cycles, std::move(latency_fn), bw_cost_fn, remote_link_queue_size);
+                remote_link_queue = std::make_unique<lat_bw_queue<sst_request>>(peak_bw_per_cycle, std::move(latency_fn), bw_cost_fn, remote_link_queue_size);
             }
 
 			// Older version registered this as primary component
@@ -473,6 +489,14 @@ namespace SST {
                     for (auto& cpu : cores) {
                         cpu.begin_phase();
                     }
+                    MYDRAM.reset_utilization();
+                    if (remote_link_queue) {
+                        remote_link_queue->reset_utilization();
+                    }
+                    if (linkHandler_cxl) {
+                        auto* ctrl = make_control_event(static_cast<uint64_t>(node_id), kControlBroadcast, kControlResetUtil);
+                        linkHandler_cxl->send(ctrl);
+                    }
                     warmup_done = true;
                 }
 
@@ -580,11 +604,22 @@ namespace SST {
                 }
                 break;
             }
+
+            std::cout << "UTILIZATION SUMMARY\n";
+            std::cout << "  DRAM avg util: " << MYDRAM.queue_average_utilization(0) << '\n';
+            if (remote_link_queue) {
+                std::cout << "  Remote link avg util: " << remote_link_queue->average_utilization() << '\n';
+            }
         }
 
 		void csimCore::handleEvent_CXL(SST::Event *ev)
 		{
 			auto* cevent = static_cast<csEvent*>(ev);
+            uint64_t ctrl_code = 0;
+            if (is_control_event(*cevent, &ctrl_code)) {
+                delete cevent;
+                return;
+            }
 			auto resp = convert_event_to_response(*cevent);
 			for (auto& cache : caches) {
 				if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {
