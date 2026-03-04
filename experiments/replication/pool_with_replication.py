@@ -47,6 +47,7 @@ switch.addParams({
     "link_bw_cycles": BW_CXL_CYCLES,
     "link_latency_cycles": T_CXL,
     "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
+    "lightweight_output": 1,
 })
 
 pools = []
@@ -61,6 +62,7 @@ for j in range(NUM_POOLS):
         "link_latency_cycles": T_CXL,
         "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
         "heartbeat_period": 0,
+        "lightweight_output": 1,
     })
     pools.append(pool)
 
@@ -81,6 +83,7 @@ for i in range(NUM_NODES):
         "remote_link_bw_cycles": BW_CXL_CYCLES,
         "remote_link_latency_cycles": T_CXL,
         "remote_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
+        "lightweight_output": 1,
     })
 
     l0 = sst.Link(f"s{i}_to_switch")
