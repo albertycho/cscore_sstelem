@@ -308,10 +308,6 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
 }
 
 void CXLMemoryPool::finish() {
-    if (lightweight_output_) {
-        return;
-    }
-
     std::cout << "CXL pool " << pool_node_id_ << " utilization summary\n";
     std::cout << "  mem avg util: " << mem_ctrl_.queue_average_utilization(0) << '\n';
     const auto stats = request_link_stats();
@@ -323,9 +319,8 @@ void CXLMemoryPool::finish() {
     std::cout << "  wall time (s): " << sec << '\n';
     if (active_calls_ > 0) {
         const auto active_sec = std::chrono::duration<double>(active_time_).count();
-        std::cout << "  active time (s): " << active_sec << '\n';
-        std::cout << "  avg per call (ms): "
-                  << (active_sec * 1000.0 / static_cast<double>(active_calls_)) << '\n';
+        std::cout << "Component Time Summary\n";
+        std::cout << "  CXL pool active time (s): " << active_sec << '\n';
     }
     std::cout << std::flush;
 }

@@ -298,10 +298,6 @@ void Switch::reset_stats_and_broadcast()
 
 void Switch::finish()
 {
-    if (lightweight_output_) {
-        return;
-    }
-
     std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
     auto avg_util = [](const std::vector<PortState>& ports) {
         double sum = 0.0;
@@ -319,9 +315,8 @@ void Switch::finish()
     std::cout << "Switch wall time (s): " << sec << std::endl;
     if (active_calls_ > 0) {
         const auto active_sec = std::chrono::duration<double>(active_time_).count();
-        std::cout << "Switch active time (s): " << active_sec << std::endl;
-        std::cout << "Switch avg per call (ms): "
-                  << (active_sec * 1000.0 / static_cast<double>(active_calls_)) << std::endl;
+        std::cout << "Component Time Summary\n";
+        std::cout << "  Switch active time (s): " << active_sec << std::endl;
     }
 }
 
