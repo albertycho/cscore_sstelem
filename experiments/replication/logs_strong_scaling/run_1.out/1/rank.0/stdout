@@ -1,0 +1,410 @@
+MY_MEMORY_CONTROLLER constructed
+MY_MEMORY_CONTROLLER constructed
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 0: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 1: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 2: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 3: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 4: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 5: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 6: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 7: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 8: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 9: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 10: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 11: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 12: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 13: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 14: Done with cscore constructor
+MY_MEMORY_CONTROLLER constructed
+vmem constructor
+[VMEM] WARNING: physical memory size is smaller than virtual memory size.
+call for dram.size()
+dram.size(): 68719476736 bytes
+ppage_free_list.resize(): 16776960
+returned dram.size()
+returning from populate_pages()
+returning from vmem constructor
+Starting cscore constructor
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
+traces.size(): 1
+Done instantiating caches
+core heartbeat true? 1
+Node 15: Done with cscore constructor
+TRACE_DBG[0] ip=0x560f3a0b2733 is_branch=0 branch_taken=0 smem=1 dmem=1
+TRACE_DBG[1] ip=0x560f3a0b2737 is_branch=1 branch_taken=1 smem=0 dmem=0
+TRACE_DBG[2] ip=0x560f3a0b260a is_branch=0 branch_taken=0 smem=1 dmem=0
+TRACE_DBG[3] ip=0x560f3a0b260d is_branch=0 branch_taken=0 smem=1 dmem=0
+TRACE_DBG[4] ip=0x560f3a0b2610 is_branch=1 branch_taken=1 smem=0 dmem=0
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 232.376, cxl lat: 642.55
+Utilization
+  DRAM avg util: 0.0199434
+Walltime
+  sim wall time (s): 1622.73
+Component Time Summary
+  csimCore active time (s): 102.943
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 232.376, cxl lat: 642.55
+Utilization
+  DRAM avg util: 0.0199434
+Walltime
+  sim wall time (s): 1622.73
+Component Time Summary
+  csimCore active time (s): 96.6367
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 232.717, cxl lat: 643.798
+Utilization
+  DRAM avg util: 0.0199393
+Walltime
+  sim wall time (s): 1622.95
+Component Time Summary
+  csimCore active time (s): 100.665
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 232.717, cxl lat: 643.798
+Utilization
+  DRAM avg util: 0.0199393
+Walltime
+  sim wall time (s): 1622.95
+Component Time Summary
+  csimCore active time (s): 96.3142
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.105, cxl lat: 645.218
+Utilization
+  DRAM avg util: 0.0199395
+Walltime
+  sim wall time (s): 1622.95
+Component Time Summary
+  csimCore active time (s): 100.121
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.105, cxl lat: 645.218
+Utilization
+  DRAM avg util: 0.0199395
+Walltime
+  sim wall time (s): 1622.95
+Component Time Summary
+  csimCore active time (s): 96.2613
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.51, cxl lat: 646.698
+Utilization
+  DRAM avg util: 0.0199398
+Walltime
+  sim wall time (s): 1622.95
+Component Time Summary
+  csimCore active time (s): 99.9168
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.51, cxl lat: 646.698
+Utilization
+  DRAM avg util: 0.0199398
+Walltime
+  sim wall time (s): 1622.95
+Component Time Summary
+  csimCore active time (s): 96.46
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.359, cxl lat: 646.143
+Utilization
+  DRAM avg util: 0.0199359
+Walltime
+  sim wall time (s): 1623.06
+Component Time Summary
+  csimCore active time (s): 102.069
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.359, cxl lat: 646.143
+Utilization
+  DRAM avg util: 0.0199359
+Walltime
+  sim wall time (s): 1623.06
+Component Time Summary
+  csimCore active time (s): 95.8879
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.506, cxl lat: 646.683
+Utilization
+  DRAM avg util: 0.0199361
+Walltime
+  sim wall time (s): 1623.06
+Component Time Summary
+  csimCore active time (s): 100.077
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.506, cxl lat: 646.683
+Utilization
+  DRAM avg util: 0.0199361
+Walltime
+  sim wall time (s): 1623.06
+Component Time Summary
+  csimCore active time (s): 95.8728
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.244, cxl lat: 645.723
+Utilization
+  DRAM avg util: 0.0199309
+Walltime
+  sim wall time (s): 1623.13
+Component Time Summary
+  csimCore active time (s): 102.132
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.244, cxl lat: 645.723
+Utilization
+  DRAM avg util: 0.0199309
+Walltime
+  sim wall time (s): 1623.13
+Component Time Summary
+  csimCore active time (s): 99.3206
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.636, cxl lat: 647.158
+Utilization
+  DRAM avg util: 0.0199308
+Walltime
+  sim wall time (s): 1623.13
+Component Time Summary
+  csimCore active time (s): 101.607
+DRAM Statistics
+15484 / 56627 LLC misses are CXL
+LLC miss lat: 233.636, cxl lat: 647.158
+Utilization
+  DRAM avg util: 0.0199308
+Walltime
+  sim wall time (s): 1623.13
+Component Time Summary
+  csimCore active time (s): 96.4477
+Switch replicated messages: 212064
+Switch avg util node ingress: 0.0177027
+Switch avg util pool ingress: 0.259678
+Switch wall time (s): 1623.13
+Component Time Summary
+  Switch active time (s): 11.7282
+CXL pool 100 utilization summary
+  mem avg util: 0.0764813
+  req link avg util: 0.250789
+  wall time (s): 1623.13
+Component Time Summary
+  CXL pool active time (s): 3.61823
+CXL pool 101 utilization summary
+  mem avg util: 0.0764813
+  req link avg util: 0.250789
+  wall time (s): 1623.13
+Component Time Summary
+  CXL pool active time (s): 2.81117
+Simulation is complete, simulated time: 7.27823 ms
