@@ -81,6 +81,7 @@ namespace SST {
             { "dram_fixed_latency_cycles", "Fixed local DRAM latency in cycles (used when dram_latency_model=fixed)", "300" },
             { "pool_pa_base", "Base PA for pool mapping in VMEM (0 means use dram_size_bytes)", "0" },
             { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
+            { "cpu_heartbeat_period", "Cycles between CPU retired-instruction prints (0 disables)", "0" },
             { "util_heartbeat_period", "Cycles between utilization logs (0 disables)", "0" },
             { "cxl_link_bw_cycles", "CXL link bandwidth in cycles per 64B (core-side FabricPort)", "0" },
             { "cxl_link_latency_cycles", "CXL link base latency in cycles (core-side FabricPort)", "0" },
@@ -162,6 +163,7 @@ namespace SST {
         uint64_t fetched_insts=0;
         uint64_t heartbeat_count=0;
         uint64_t cache_heartbeat_period=1000;
+        uint64_t cpu_heartbeat_period=0;
         uint64_t util_heartbeat_period=0;
         uint64_t pool_pa_base=0;
         uint64_t warmup_insts=0;

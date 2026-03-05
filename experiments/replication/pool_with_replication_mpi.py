@@ -84,6 +84,7 @@ for i in range(NUM_NODES):
         "dram_latency_model": "utilization-based",
         "pool_pa_base": POOL_PA_BASE,
         "cache_heartbeat_period": 0,
+        "cpu_heartbeat_period": 0,
         "clock": "2.4GHz",
         "warmup_insts": 2000000,
         "sim_insts": 5000000,

@@ -97,6 +97,7 @@ namespace SST {
                 pool_pa_base = dram_size_bytes;
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
+            cpu_heartbeat_period = params.find<uint64_t>("cpu_heartbeat_period", 0);
             util_heartbeat_period = params.find<uint64_t>("util_heartbeat_period", 0);
             cxl_link_bw_cycles_ = params.find<int64_t>("cxl_link_bw_cycles", 0);
             cxl_link_latency_cycles_ = params.find<int64_t>("cxl_link_latency_cycles", 0);
@@ -475,13 +476,20 @@ namespace SST {
 				//std::cout<<"core retired_insts: "<<cpu.num_retired<<std::endl;
 
 				auto& trace = traces.at(0); // TODO change if multiple cores
-				for (auto pkt_count = cpu.IN_QUEUE_SIZE - static_cast<long>(std::size(cpu.input_queue)); !trace.eof() && pkt_count > 0; --pkt_count) {
-					cpu.input_queue.push_back(trace());
-					fetched_insts++;
-					//std::cout<<"input queue size: "<<cpu.input_queue.size()<<std::endl;
-				}
+                for (auto pkt_count = cpu.IN_QUEUE_SIZE - static_cast<long>(std::size(cpu.input_queue)); !trace.eof() && pkt_count > 0; --pkt_count) {
+                    cpu.input_queue.push_back(trace());
+                    fetched_insts++;
+                    //std::cout<<"input queue size: "<<cpu.input_queue.size()<<std::endl;
+                }
 				if(trace.eof()){
 					std::cout<<"CSCORE_tick: trace.eof() returned true! Reached end of trace in core tick function: "<< trace_name <<std::endl;
+				}
+
+				if (cpu_heartbeat_period > 0 && (heartbeat_count % cpu_heartbeat_period == 0)) {
+					std::cout << "CSCORE Heartbeat CPU " << curr_core_id
+					          << " retired: " << cpu.num_retired
+					          << " cycles: " << (current_time.time_since_epoch() / clock_period)
+					          << std::endl;
 				}
 
 				curr_core_id++;
