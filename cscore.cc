@@ -486,7 +486,7 @@ namespace SST {
 				}
 
 				if (cpu_heartbeat_period > 0 && (heartbeat_count % cpu_heartbeat_period == 0)) {
-					std::cout << "CSCORE Heartbeat CPU " << curr_core_id
+					std::cout << "CSCORE Heartbeat CPU " << static_cast<unsigned>(curr_core_id)
 					          << " retired: " << cpu.num_retired
 					          << " cycles: " << heartbeat_count
 					          << std::endl;
