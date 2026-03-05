@@ -9,7 +9,7 @@ import sst
 #   - Place each core on its own rank when possible.
 #   - Pack switch + all pools on the last rank to minimize interference.
 
-NUM_NODES = 4
+NUM_NODES = 16
 NUM_POOLS = 2
 POOL_NODE_ID_BASE = 100
 
