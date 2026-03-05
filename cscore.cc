@@ -103,6 +103,7 @@ namespace SST {
             cxl_link_latency_cycles_ = params.find<int64_t>("cxl_link_latency_cycles", 0);
             cxl_link_queue_size_ = params.find<int64_t>("cxl_link_queue_size", 0);
             lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
+            print_latency_hist_ = params.find<int>("print_latency_hist", 1) != 0;
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -616,7 +617,7 @@ namespace SST {
                     : 0.0;
                 std::cout << cxl_demand_miss << " / " << total_demand_miss << " LLC misses are CXL" << std::endl;
                 std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl lat: " << avg_cxl_lat << std::endl;
-                if (!lightweight_output_) {
+                if (print_latency_hist_) {
                     std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
                     for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
                         std::cout << (i * 10) << " : " << st.miss_latency_hist[i] << std::endl;

@@ -88,7 +88,8 @@ namespace SST {
             { "cxl_link_queue_size", "CXL link queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
-            { "lightweight_output", "If set, only print DRAM Statistics, LLC miss summary, Utilization, and Walltime", "0" }
+            { "lightweight_output", "If set, only print DRAM Statistics, LLC miss summary, Utilization, and Walltime", "0" },
+            { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
@@ -177,6 +178,7 @@ namespace SST {
         int64_t cxl_link_queue_size_ = 0;
         bool final_stats_printed = false;
         bool lightweight_output_ = false;
+        bool print_latency_hist_ = true;
         std::chrono::steady_clock::time_point wall_start_{};
         std::chrono::steady_clock::duration active_time_{};
         uint64_t active_calls_ = 0;

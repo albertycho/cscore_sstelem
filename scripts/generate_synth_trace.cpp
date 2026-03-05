@@ -14,11 +14,16 @@ constexpr const char* out_dir = "/nethome/kshan9/scratch/src/sst-elements/src/ss
 constexpr const char* out_name = "synth_rw.champsim.trace";
 
 constexpr uint64_t num_instrs = 20'000'000;
+constexpr int mem_pct = 100;     // percent of instructions that are memory ops
 constexpr int load_pct = 50;     // percent of mem ops that are loads
 constexpr int cxl_pct = 100;     // percent of mem ops that target CXL
 
 constexpr uint64_t line_size = 64;
 constexpr uint64_t seed = 0x12345678ull;
+
+// Projection assumptions (for bandwidth printout)
+constexpr double clock_ghz = 2.4;
+constexpr double ipc_assumed = 1.0;
 
 // Address regions (bytes)
 constexpr uint64_t local_base = 0;
@@ -59,6 +64,7 @@ static uint64_t pick_addr(bool is_cxl, std::mt19937_64& rng) {
 }
 
 int main() {
+    const int mem_pct_clamped = clamp_pct(mem_pct);
     const int load_pct_clamped = clamp_pct(load_pct);
     const int cxl_pct_clamped = clamp_pct(cxl_pct);
 
@@ -77,19 +83,41 @@ int main() {
 
     std::mt19937_64 rng(seed);
 
+    uint64_t load_count = 0;
+    uint64_t store_count = 0;
+    uint64_t load_cxl_count = 0;
+    uint64_t load_local_count = 0;
+    uint64_t store_cxl_count = 0;
+    uint64_t store_local_count = 0;
+
     for (uint64_t i = 0; i < num_instrs; ++i) {
         input_instr instr{};
         instr.ip = 0x1000ull + (i * 4ull);
         instr.is_branch = 0;
         instr.branch_taken = 0;
 
-        const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
-        const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
-        uint64_t addr = pick_addr(is_cxl, rng);
-        if (do_load) {
-            instr.source_memory[0] = addr;
-        } else {
-            instr.destination_memory[0] = addr;
+        const bool do_mem = (static_cast<int>(rng() % 100) < mem_pct_clamped);
+        if (do_mem) {
+            const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
+            const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
+            uint64_t addr = pick_addr(is_cxl, rng);
+            if (do_load) {
+                instr.source_memory[0] = addr;
+                load_count++;
+                if (is_cxl) {
+                    load_cxl_count++;
+                } else {
+                    load_local_count++;
+                }
+            } else {
+                instr.destination_memory[0] = addr;
+                store_count++;
+                if (is_cxl) {
+                    store_cxl_count++;
+                } else {
+                    store_local_count++;
+                }
+            }
         }
 
         out.write(reinterpret_cast<const char*>(&instr), sizeof(instr));
@@ -100,10 +128,33 @@ int main() {
     }
 
     std::cout << "Wrote " << num_instrs << " instructions to " << out_path << "\n";
-    std::cout << "load_pct=" << load_pct_clamped << " cxl_pct=" << cxl_pct_clamped
+    std::cout << "mem_pct=" << mem_pct_clamped
+              << " load_pct=" << load_pct_clamped
+              << " cxl_pct=" << cxl_pct_clamped
               << " ops_per_instr=1 (single load or store)\n";
     std::cout << "local_base=0x" << std::hex << local_base
               << " cxl_base=0x" << cxl_base << std::dec << "\n";
     std::cout << "use_permutation=false line_size=" << line_size << "\n";
+
+    const double instrs = static_cast<double>(num_instrs);
+    const double bytes_per_op = static_cast<double>(line_size);
+    const double load_local_bpi = (instrs > 0) ? (static_cast<double>(load_local_count) / instrs) * bytes_per_op : 0.0;
+    const double load_cxl_bpi = (instrs > 0) ? (static_cast<double>(load_cxl_count) / instrs) * bytes_per_op : 0.0;
+    const double store_local_bpi = (instrs > 0) ? (static_cast<double>(store_local_count) / instrs) * bytes_per_op : 0.0;
+    const double store_cxl_bpi = (instrs > 0) ? (static_cast<double>(store_cxl_count) / instrs) * bytes_per_op : 0.0;
+
+    const double load_local_gbps = load_local_bpi * ipc_assumed * clock_ghz;
+    const double load_cxl_gbps = load_cxl_bpi * ipc_assumed * clock_ghz;
+    const double store_local_gbps = store_local_bpi * ipc_assumed * clock_ghz;
+    const double store_cxl_gbps = store_cxl_bpi * ipc_assumed * clock_ghz;
+    const double total_gbps = load_local_gbps + load_cxl_gbps + store_local_gbps + store_cxl_gbps;
+
+    std::cout << "Projected BW (GB/s) assuming IPC=" << ipc_assumed
+              << " @ " << clock_ghz << "GHz\n";
+    std::cout << "  load_local: " << load_local_gbps
+              << " load_cxl: " << load_cxl_gbps
+              << " store_local: " << store_local_gbps
+              << " store_cxl: " << store_cxl_gbps
+              << " total: " << total_gbps << "\n";
     return 0;
 }
