@@ -32,7 +32,8 @@ DRAM_BW_CYCLES_PER_REQ = 4
 
 # Inputs
 TRACE_DIR = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication"
-TRACE_NAME = "champsim.trace"
+TRACE_NAME = "synth_rw.champsim.trace"
+# TRACE_NAME = "champsim.trace"
 CXL_CONFIG = os.path.join(TRACE_DIR, "cxl_config.csv")
 
 # Switch policy
