@@ -8,54 +8,54 @@ returned dram.size()
 returning from populate_pages()
 returning from vmem constructor
 Starting cscore constructor
-trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/synth_rw.champsim.trace
+trace_name: /nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication/champsim.trace
 traces.size(): 1
 Done instantiating caches
 core heartbeat true? 1
 Node 4: Done with cscore constructor
-TRACE_DBG[0] ip=0x1000 is_branch=0 branch_taken=0 smem=1 dmem=0
-TRACE_DBG[1] ip=0x1004 is_branch=0 branch_taken=0 smem=1 dmem=0
-TRACE_DBG[2] ip=0x1008 is_branch=0 branch_taken=0 smem=0 dmem=1
-TRACE_DBG[3] ip=0x100c is_branch=0 branch_taken=0 smem=1 dmem=0
-TRACE_DBG[4] ip=0x1010 is_branch=0 branch_taken=0 smem=1 dmem=0
+TRACE_DBG[0] ip=0x560f3a0b2733 is_branch=0 branch_taken=0 smem=1 dmem=1
+TRACE_DBG[1] ip=0x560f3a0b2737 is_branch=1 branch_taken=1 smem=0 dmem=0
+TRACE_DBG[2] ip=0x560f3a0b260a is_branch=0 branch_taken=0 smem=1 dmem=0
+TRACE_DBG[3] ip=0x560f3a0b260d is_branch=0 branch_taken=0 smem=1 dmem=0
+TRACE_DBG[4] ip=0x560f3a0b2610 is_branch=1 branch_taken=1 smem=0 dmem=0
 DRAM Statistics
-0 / 829172 LLC misses are CXL
-LLC miss lat: 199.906, cxl lat: 0
+3080 / 11499 LLC misses are CXL
+LLC miss lat: 225.931, cxl lat: 630.275
 LLC_MISS_LAT_HIST (in ns):
 0 : 0
 10 : 0
 20 : 0
-30 : 105013
-40 : 41
-50 : 360439
-60 : 4707
-70 : 4
+30 : 8419
+40 : 0
+50 : 0
+60 : 0
+70 : 0
 80 : 0
 90 : 0
-100 : 195686
-110 : 4376
-120 : 6
+100 : 0
+110 : 0
+120 : 0
 130 : 0
 140 : 0
-150 : 140992
-160 : 1993
-170 : 4
+150 : 0
+160 : 0
+170 : 0
 180 : 0
 190 : 0
-200 : 15633
-210 : 278
+200 : 0
+210 : 0
 220 : 0
 230 : 0
 240 : 0
 250 : 0
-260 : 0
-270 : 0
-280 : 0
-290 : 0
-300 : 0
-310 : 0
+260 : 2778
+270 : 206
+280 : 64
+290 : 15
+300 : 12
+310 : 3
 320 : 0
-330 : 0
+330 : 2
 340 : 0
 350 : 0
 360 : 0
@@ -123,8 +123,8 @@ LLC_MISS_LAT_HIST (in ns):
 980 : 0
 990 : 0
 Utilization
-  DRAM avg util: 0.43665
+  DRAM avg util: 0.0172366
 Walltime
-  sim wall time (s): 449.375
+  sim wall time (s): 77.4948
 Component Time Summary
-  csimCore active time (s): 308.365
+  csimCore active time (s): 38.1697
