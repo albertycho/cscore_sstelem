@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import concurrent.futures
+import csv
 import itertools
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -11,7 +13,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
-OUT_ROOT = Path("/shared/CXL_tests")
+OUT_ROOT = Path("/shared/kshan/CXL_sst_traces")
 SST_BIN = "sst"
 GEN_BIN = REPO_ROOT / "scripts" / "gen"
 GEN_SRC = REPO_ROOT / "scripts" / "generate_synth_trace.cpp"
@@ -88,8 +90,31 @@ def generate_trace(case_dir: Path, load_pct: int, mem_pct: int) -> Path:
         "--cxl-pct", str(CXL_PCT),
         "--seed", hex(SEED),
     ]
-    subprocess.check_call(cmd)
-    return trace_path
+    result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True)
+    return trace_path, result.stdout
+
+
+BW_LINE_RE = re.compile(
+    r"load_local:\\s*([0-9.eE+-]+)\\s*"
+    r"load_cxl:\\s*([0-9.eE+-]+)\\s*"
+    r"store_local:\\s*([0-9.eE+-]+)\\s*"
+    r"store_cxl:\\s*([0-9.eE+-]+)\\s*"
+    r"total:\\s*([0-9.eE+-]+)"
+)
+
+
+def parse_bw(output: str) -> dict:
+    for line in output.splitlines():
+        match = BW_LINE_RE.search(line)
+        if match:
+            return {
+                "load_local_gbps": float(match.group(1)),
+                "load_cxl_gbps": float(match.group(2)),
+                "store_local_gbps": float(match.group(3)),
+                "store_cxl_gbps": float(match.group(4)),
+                "total_gbps": float(match.group(5)),
+            }
+    return {}
 
 
 def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, run_dir: Path) -> int:
@@ -116,15 +141,36 @@ def main() -> int:
 
     cases = list(itertools.product(LOAD_PCTS, MEM_PCTS))
     tasks = []
+    bw_rows = []
 
     for load_pct, mem_pct in cases:
         case_dir = OUT_ROOT / f"load{load_pct:03d}_mem{mem_pct:03d}"
-        trace_path = generate_trace(case_dir, load_pct, mem_pct)
+        trace_path, gen_out = generate_trace(case_dir, load_pct, mem_pct)
         cxl_config = case_dir / "cxl_config.csv"
         write_cxl_config(cxl_config)
 
+        bw = parse_bw(gen_out)
+        if bw:
+            bw_row = {
+                "load_pct": load_pct,
+                "mem_pct": mem_pct,
+                "cxl_pct": CXL_PCT,
+                "num_instrs": NUM_INSTRS,
+                "warmup_mem_instrs": WARMUP_MEM_INSTRS,
+            }
+            bw_row.update(bw)
+            bw_rows.append(bw_row)
+
         tasks.append((SIM_NO_REP, trace_path, cxl_config, case_dir / "no_rep"))
         tasks.append((SIM_REP, trace_path, cxl_config, case_dir / "rep"))
+
+    if bw_rows:
+        bw_rows.sort(key=lambda r: (r["load_pct"], r["mem_pct"]))
+        out_csv = OUT_ROOT / "expected_bandwidths.csv"
+        with out_csv.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(bw_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(bw_rows)
 
     failures = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as executor:
