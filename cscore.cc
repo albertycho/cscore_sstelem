@@ -495,7 +495,14 @@ namespace SST {
             if (!cores.empty() && sim_insts > 0) {
                 auto retired = static_cast<uint64_t>(cores.front().num_retired);
                 if (!warmup_done && warmup_insts > 0 && retired >= warmup_insts) {
-                    // Warmup boundary is a phase marker only; stats remain continuous.
+                    // Start ROI stats at warmup boundary. This excludes warm-cache bypass traffic
+                    // from reported LLC miss/cxl-lat metrics while preserving functional state.
+                    for (auto& cache : caches) {
+                        cache.begin_phase();
+                    }
+                    for (auto& cpu : cores) {
+                        cpu.begin_phase();
+                    }
                     warmup_done = true;
                 }
 
@@ -588,7 +595,7 @@ namespace SST {
                 if (cache.NAME != "LLC") {
                     continue;
                 }
-                const auto& st = cache.sim_stats;
+                const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
                 const uint64_t total_demand_miss = demand_return_count(st);
                 const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
                 const double avg_miss_lat = (total_demand_miss > 0)
