@@ -15,7 +15,7 @@ struct Config {
 
     uint64_t num_instrs = 20'000'000;
     uint64_t warmup_mem_instrs = 200'000;
-    int mem_pct = 100;   // percent of instructions that are memory ops (after warmup)
+    int mem_pct = 100;   // target aggregate CXL request-link utilization percent (0-100)
     int load_pct = 50;  // percent of mem ops that are loads
     int cxl_pct = 100;  // percent of mem ops that target CXL
     uint64_t seed = 0x12345678ull;
@@ -195,6 +195,8 @@ int main(int argc, char** argv) {
     uint64_t load_local_count = 0;
     uint64_t store_cxl_count = 0;
     uint64_t store_local_count = 0;
+    uint64_t main_loop_load_count = 0;
+    uint64_t main_loop_store_count = 0;
 
     const double util_target = static_cast<double>(mem_pct_clamped) / 100.0;
     const double load_frac = static_cast<double>(load_pct_clamped) / 100.0;
@@ -212,6 +214,8 @@ int main(int argc, char** argv) {
     if (mem_prob < 0.0) mem_prob = 0.0;
     if (mem_prob > 1.0) mem_prob = 1.0;
     const uint64_t mem_threshold = static_cast<uint64_t>(mem_prob * static_cast<double>(kProbScale) + 0.5);
+    const double modeled_util =
+        mem_prob * kIpcAssumed * static_cast<double>(kNumNodes) * cxl_frac * pool_factor * static_cast<double>(kBwCxlCycles);
 
     uint64_t instr_idx = 0;
 
@@ -279,6 +283,7 @@ int main(int argc, char** argv) {
             if (do_load) {
                 instr.source_memory[0] = addr;
                 load_count++;
+                main_loop_load_count++;
                 if (is_cxl) {
                     load_cxl_count++;
                 } else {
@@ -287,6 +292,7 @@ int main(int argc, char** argv) {
             } else {
                 instr.destination_memory[0] = addr;
                 store_count++;
+                main_loop_store_count++;
                 if (is_cxl) {
                     store_cxl_count++;
                 } else {
@@ -310,12 +316,15 @@ int main(int argc, char** argv) {
               << " load_pct=" << load_pct_clamped
               << " cxl_pct=" << cxl_pct_clamped
               << " ops_per_instr=1 (single load or store)\n";
+    std::cout << "main_loop_loads=" << main_loop_load_count
+              << " main_loop_stores=" << main_loop_store_count << "\n";
     std::cout << "util_formula ipc=" << kIpcAssumed
               << " nodes=" << kNumNodes
               << " pools=" << kNumPools
               << " replicate_writes=" << (kReplicateWrites ? 1 : 0)
               << " cxl_frac=" << cxl_frac
               << " pool_factor=" << pool_factor
+              << " modeled_util=" << modeled_util
               << "\n";
     std::cout << "local_base=0x" << std::hex << kLocalBase
               << " cxl_base=0x" << kCxlBase << std::dec << "\n";

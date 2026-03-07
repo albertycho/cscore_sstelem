@@ -29,7 +29,7 @@ LOAD_PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 MEM_PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
 # Trace generation parameters
-NUM_INSTRS = 1_000_000
+NUM_INSTRS = 4_000_000
 WARMUP_MEM_INSTRS = 200_000
 SEED = 0x12345678
 CXL_PCT = 100
@@ -99,12 +99,13 @@ def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) 
 
 
 BW_LINE_RE = re.compile(
-    r"load_local:\\s*([0-9.eE+-]+)\\s*"
-    r"load_cxl:\\s*([0-9.eE+-]+)\\s*"
-    r"store_local:\\s*([0-9.eE+-]+)\\s*"
-    r"store_cxl:\\s*([0-9.eE+-]+)\\s*"
-    r"total:\\s*([0-9.eE+-]+)"
+    r"load_local:\s*([0-9.eE+-]+)\s*"
+    r"load_cxl:\s*([0-9.eE+-]+)\s*"
+    r"store_local:\s*([0-9.eE+-]+)\s*"
+    r"store_cxl:\s*([0-9.eE+-]+)\s*"
+    r"total:\s*([0-9.eE+-]+)"
 )
+MAIN_LOOP_COUNTS_RE = re.compile(r"main_loop_loads=(\d+)\s+main_loop_stores=(\d+)")
 
 
 def parse_bw(output: str) -> dict:
@@ -117,6 +118,17 @@ def parse_bw(output: str) -> dict:
                 "store_local_gbps": float(match.group(3)),
                 "store_cxl_gbps": float(match.group(4)),
                 "total_gbps": float(match.group(5)),
+            }
+    return {}
+
+
+def parse_main_loop_counts(output: str) -> dict:
+    for line in output.splitlines():
+        match = MAIN_LOOP_COUNTS_RE.search(line)
+        if match:
+            return {
+                "main_loop_loads": int(match.group(1)),
+                "main_loop_stores": int(match.group(2)),
             }
     return {}
 
@@ -162,6 +174,13 @@ def main() -> int:
         trace_path, gen_out = generate_trace(TRACE_ROOT, trace_name, load_pct, mem_pct)
 
         bw = parse_bw(gen_out)
+        main_counts = parse_main_loop_counts(gen_out)
+        if main_counts:
+            print(
+                "[STATUS] Trace mix "
+                f"{trace_name}: main_loop_loads={main_counts['main_loop_loads']} "
+                f"main_loop_stores={main_counts['main_loop_stores']}"
+            )
         if bw:
             bw_row = {
                 "load_pct": load_pct,
@@ -170,6 +189,7 @@ def main() -> int:
                 "num_instrs": NUM_INSTRS,
                 "warmup_mem_instrs": WARMUP_MEM_INSTRS,
             }
+            bw_row.update(main_counts)
             bw_row.update(bw)
             bw_rows.append(bw_row)
 
