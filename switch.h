@@ -44,7 +44,7 @@ public:
         { "link_bw_cycles", "Link bandwidth in cycles per 64B (enables ingress queues if nonzero)", "0" },
         { "link_latency_cycles", "Link base latency in cycles (ingress queues)", "0" },
         { "link_queue_size", "Link ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
-        { "lightweight_output", "If set, suppress switch summary output", "0" }
+        { "lightweight_output", "If set, emit stat.* switch summaries", "0" }
     )
 
     SST_ELI_DOCUMENT_PORTS(

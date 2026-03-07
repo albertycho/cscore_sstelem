@@ -75,10 +75,6 @@ namespace SST {
 			vmem(champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{kClockPeriodPs * 200}, MYDRAM, 1)
 		{
 			/* This function sets up and builds core (and cache and bp and etc) */
-			std::cout<<"Starting cscore constructor"<<std::endl;
-			//std::cout<<"MYDRAM size:"<<MYDRAM.size()<<std::endl;
-
-			// SST variable initialization
 
 			clock_frequency_str = params.find<std::string>("clock", "2.4GHz");
 
@@ -87,13 +83,17 @@ namespace SST {
             node_id = params.find<int64_t>("node_id", 0);
             warmup_insts = params.find<int64_t>("warmup_insts", 0);
             sim_insts = params.find<int64_t>("sim_insts", 0);
+            lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
+            print_latency_hist_ = params.find<int>("print_latency_hist", 1) != 0;
             auto dram_size_bytes = params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES);
             pool_pa_base = params.find<uint64_t>("pool_pa_base", 0);
             if (pool_pa_base == 0) {
                 pool_pa_base = dram_size_bytes;
             }
             if (pool_pa_base < dram_size_bytes) {
-                std::cerr << "WARNING: pool_pa_base overlaps DRAM range. Forcing pool_pa_base = dram_size_bytes." << std::endl;
+                if (!lightweight_output_) {
+                    std::cerr << "WARNING: pool_pa_base overlaps DRAM range. Forcing pool_pa_base = dram_size_bytes." << std::endl;
+                }
                 pool_pa_base = dram_size_bytes;
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
@@ -102,8 +102,6 @@ namespace SST {
             cxl_link_bw_cycles_ = params.find<int64_t>("cxl_link_bw_cycles", 0);
             cxl_link_latency_cycles_ = params.find<int64_t>("cxl_link_latency_cycles", 0);
             cxl_link_queue_size_ = params.find<int64_t>("cxl_link_queue_size", 0);
-            lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
-            print_latency_hist_ = params.find<int>("print_latency_hist", 1) != 0;
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -112,14 +110,10 @@ namespace SST {
 
 			// tmp_instr.msgSize=0;
 
-			std::cout<<"trace_name: "<<trace_name<<std::endl;
 			std::vector<std::string> trace_names;
 			trace_names.push_back(trace_name);
 			traces.push_back(get_tracereader(trace_name, 0, false, false));
 
-			
-			std::cout<<"traces.size(): "<<traces.size()<<std::endl;
-			
 			/* Component initialization */ 
 
 			//DRAM(champsim::chrono::picoseconds{500}, champsim::chrono::picoseconds{1000}, std::size_t{24}, std::size_t{24}, std::size_t{24}, std::size_t{52}, champsim::chrono::microseconds{32000}, {&channels.at(1)}, 64, 64, 1, champsim::data::bytes{8}, 65536, 1024, 1, 8, 4, 8192);
@@ -305,8 +299,6 @@ namespace SST {
 				.reset_virtual_prefetch();
 			caches.push_back(CACHE(stlb_builder));
 			
-			std::cout<<"Done instantiating caches"<<std::endl;
-
 			/* DONE Populating CACHES */
 
 			/* Populating CORES */
@@ -384,7 +376,6 @@ namespace SST {
 			for (O3_CPU& core : cores){
 				core.initialize();
 				core.warmup=false;
-				std::cout<<"core heartbeat true? "<<core.show_heartbeat<<std::endl;
 				// what if multiple cores? still want them to write to the same file.
 				//core.heartbeat_file.open("heartbeat_cpu" + std::to_string(node_id) + ".log");
 				core.heartbeat_file=heartbeat_file;
@@ -397,7 +388,9 @@ namespace SST {
 
 			if (!address_map_path.empty()) {
 				if (!address_map.load(address_map_path)) {
-					std::cerr << "WARNING: failed to load address_map_config from " << address_map_path << std::endl;
+					if (!lightweight_output_) {
+						std::cerr << "WARNING: failed to load address_map_config from " << address_map_path << std::endl;
+					}
 					vmem.set_address_map(nullptr, static_cast<uint32_t>(node_id), pool_pa_base);
 				} else {
 					vmem.set_address_map(&address_map, static_cast<uint32_t>(node_id), pool_pa_base);
@@ -423,8 +416,6 @@ namespace SST {
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
 				&csimCore::champsim_tick));	
 
-			std::cout<<"Node "<<node_id<<": Done with cscore constructor"<<std::endl;
-			
 		}
 
         void csimCore::setup() {
@@ -482,15 +473,11 @@ namespace SST {
                     fetched_insts++;
                     //std::cout<<"input queue size: "<<cpu.input_queue.size()<<std::endl;
                 }
-				if(trace.eof()){
-					std::cout<<"CSCORE_tick: trace.eof() returned true! Reached end of trace in core tick function: "<< trace_name <<std::endl;
-				}
-
 				if (cpu_heartbeat_period > 0 && (heartbeat_count % cpu_heartbeat_period == 0)) {
-					std::cout << "CSCORE Heartbeat CPU " << static_cast<unsigned>(curr_core_id)
-					          << " retired: " << cpu.num_retired
-					          << " cycles: " << heartbeat_count
-					          << std::endl;
+					const auto node_prefix = std::string("stat.node.") + std::to_string(node_id) + ".cpu.";
+					const auto core_prefix = node_prefix + std::to_string(static_cast<unsigned>(curr_core_id)) + ".";
+					std::cout << core_prefix << "retired = " << cpu.num_retired << '\n';
+					std::cout << core_prefix << "cycles = " << heartbeat_count << '\n';
 				}
 
 				curr_core_id++;
@@ -564,9 +551,7 @@ namespace SST {
             }
             final_stats_printed = true;
 
-            if (lightweight_output_) {
-                std::cout << "DRAM Statistics" << std::endl;
-            } else {
+            if (!lightweight_output_) {
                 champsim::phase_stats stats;
                 stats.name = "Node " + std::to_string(node_id);
                 stats.trace_names.push_back(trace_name);
@@ -615,27 +600,57 @@ namespace SST {
                 const double avg_cxl_lat = (cxl_demand_miss > 0)
                     ? static_cast<double>(st.pool_demand_miss_latency_sum) / static_cast<double>(cxl_demand_miss)
                     : 0.0;
-                std::cout << cxl_demand_miss << " / " << total_demand_miss << " LLC misses are CXL" << std::endl;
-                std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl lat: " << avg_cxl_lat << std::endl;
-                if (print_latency_hist_) {
-                    std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
-                    for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
-                        std::cout << (i * 10) << " : " << st.miss_latency_hist[i] << std::endl;
+                if (lightweight_output_) {
+                    const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".llc.";
+                    std::cout << prefix << "cxl_miss = " << cxl_demand_miss << '\n';
+                    std::cout << prefix << "total_miss = " << total_demand_miss << '\n';
+                    std::cout << prefix << "avg_miss_lat = " << avg_miss_lat << '\n';
+                    std::cout << prefix << "avg_cxl_lat = " << avg_cxl_lat << '\n';
+                    if (print_latency_hist_) {
+                        std::cout << prefix << "miss_lat_hist_bin_ns = 10\n";
+                        std::cout << prefix << "miss_lat_hist = [";
+                        for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
+                            if (i != 0) {
+                                std::cout << ",";
+                            }
+                            std::cout << st.miss_latency_hist[i];
+                        }
+                        std::cout << "]\n";
+                    }
+                } else {
+                    std::cout << cxl_demand_miss << " / " << total_demand_miss << " LLC misses are CXL" << std::endl;
+                    std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl lat: " << avg_cxl_lat << std::endl;
+                    if (print_latency_hist_) {
+                        std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
+                        for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
+                            std::cout << (i * 10) << " : " << st.miss_latency_hist[i] << std::endl;
+                        }
                     }
                 }
                 break;
             }
 
-            std::cout << (lightweight_output_ ? "Utilization" : "UTILIZATION SUMMARY") << '\n';
-            std::cout << "  DRAM avg util: " << MYDRAM.queue_average_utilization(0) << '\n';
             const auto now = std::chrono::steady_clock::now();
             const auto total_sec = std::chrono::duration<double>(now - wall_start_).count();
-            std::cout << (lightweight_output_ ? "Walltime" : "WALLTIME SUMMARY") << '\n';
-            std::cout << "  sim wall time (s): " << total_sec << '\n';
-            if (active_calls_ > 0) {
-                const auto active_sec = std::chrono::duration<double>(active_time_).count();
-                std::cout << "Component Time Summary\n";
-                std::cout << "  csimCore active time (s): " << active_sec << '\n';
+
+            if (lightweight_output_) {
+                const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".";
+                std::cout << prefix << "util.dram_avg = " << MYDRAM.queue_average_utilization(0) << '\n';
+                std::cout << prefix << "walltime_s = " << total_sec << '\n';
+                if (active_calls_ > 0) {
+                    const auto active_sec = std::chrono::duration<double>(active_time_).count();
+                    std::cout << prefix << "active_time_s = " << active_sec << '\n';
+                }
+            } else {
+                std::cout << "UTILIZATION SUMMARY" << '\n';
+                std::cout << "  DRAM avg util: " << MYDRAM.queue_average_utilization(0) << '\n';
+                std::cout << "WALLTIME SUMMARY" << '\n';
+                std::cout << "  sim wall time (s): " << total_sec << '\n';
+                if (active_calls_ > 0) {
+                    const auto active_sec = std::chrono::duration<double>(active_time_).count();
+                    std::cout << "Component Time Summary\n";
+                    std::cout << "  csimCore active time (s): " << active_sec << '\n';
+                }
             }
         }
 

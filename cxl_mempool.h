@@ -50,7 +50,7 @@ public:
         { "link_queue_size", "CXL ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
         { "pool_node_id", "Logical node id used in fabric headers", "100" },
         { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" },
-        { "lightweight_output", "If set, suppress pool summary output", "0" }
+        { "lightweight_output", "If set, emit stat.* pool summaries", "0" }
     )
 
     SST_ELI_DOCUMENT_PORTS(

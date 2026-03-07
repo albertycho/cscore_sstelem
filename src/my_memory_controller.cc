@@ -1,9 +1,6 @@
 #include "my_memory_controller.h"
 
 #include <algorithm>
-#include <iostream>
-#include <unistd.h>
-#include <random>
 
 MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER() {}
 
@@ -23,9 +20,6 @@ MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_peri
             /*bw_cost_fn=*/[](const channel_type::request_type&) { return 64.0; }))
     , size_(size)
 {
-    auto sleepcnt = rand() % 10;
-    sleep(sleepcnt);
-    std::cout << "MY_MEMORY_CONTROLLER constructed" << std::endl;
 }
 
 void MY_MEMORY_CONTROLLER::initialize()
@@ -85,6 +79,5 @@ void MY_MEMORY_CONTROLLER::end_phase(unsigned cpu)
 
 void MY_MEMORY_CONTROLLER::print_deadlock()
 {
-    std::cerr << "MY_MEMORY_CONTROLLER deadlock check" << std::endl;
 }
 // namespace champsim

@@ -88,7 +88,7 @@ namespace SST {
             { "cxl_link_queue_size", "CXL link queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
-            { "lightweight_output", "If set, only print DRAM Statistics, LLC miss summary, Utilization, and Walltime", "0" },
+            { "lightweight_output", "If set, emit stat.* summaries only", "0" },
             { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" }
             
         )

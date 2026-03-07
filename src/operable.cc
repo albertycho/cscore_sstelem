@@ -15,7 +15,6 @@
  */
 
 #include "operable.h"
-#include <iostream>
 
 champsim::operable::operable() : operable(champsim::chrono::picoseconds{1}) {}
 

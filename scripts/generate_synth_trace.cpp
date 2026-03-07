@@ -9,32 +9,32 @@
 
 #include "trace_instruction.h"
 
-// Config
-constexpr const char* out_dir = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication";
-constexpr const char* out_name = "synth_rw.champsim.trace";
+struct Config {
+    std::string out_dir = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication";
+    std::string out_name = "synth_rw.champsim.trace";
 
-constexpr uint64_t num_instrs = 20'000'000;
-constexpr int mem_pct = 100;     // percent of instructions that are memory ops
-constexpr int load_pct = 50;     // percent of mem ops that are loads
-constexpr int cxl_pct = 100;     // percent of mem ops that target CXL
+    uint64_t num_instrs = 20'000'000;
+    uint64_t warmup_mem_instrs = 200'000;
+    int mem_pct = 100;   // percent of instructions that are memory ops (after warmup)
+    int load_pct = 50;  // percent of mem ops that are loads
+    int cxl_pct = 100;  // percent of mem ops that target CXL
+    uint64_t seed = 0x12345678ull;
+};
 
-constexpr uint64_t line_size = 64;
-constexpr uint64_t seed = 0x12345678ull;
-
-// Projection assumptions (for bandwidth printout)
-constexpr double clock_ghz = 2.4;
-constexpr double ipc_assumed = 1.0;
+// Fixed parameters (not configurable via CLI)
+constexpr uint64_t kLineSize = 64;
+constexpr double kClockGhz = 2.4;
+constexpr double kIpcAssumed = 1.0;
 
 // Address regions (bytes)
-constexpr uint64_t local_base = 0;
-constexpr uint64_t local_size = 64ull * 1024 * 1024 * 1024;
-constexpr uint64_t cxl_base = 64ull * 1024 * 1024 * 1024;
-constexpr uint64_t cxl_size = 64ull * 1024 * 1024 * 1024;
+constexpr uint64_t kLocalBase = 0;
+constexpr uint64_t kLocalSize = 64ull * 1024 * 1024 * 1024;
+constexpr uint64_t kCxlBase = 64ull * 1024 * 1024 * 1024;
+constexpr uint64_t kCxlSize = 64ull * 1024 * 1024 * 1024;
 
 // Working set sizes (bytes). If 0, use full region size.
-// Target ~8 MiB total footprint to mirror rw.cpp behavior.
-constexpr uint64_t local_ws_bytes = 8ull * 1024 * 1024;
-constexpr uint64_t cxl_ws_bytes = 8ull * 1024 * 1024;
+constexpr uint64_t kLocalWsBytes = 8ull * 1024 * 1024;
+constexpr uint64_t kCxlWsBytes = 8ull * 1024 * 1024;
 
 static_assert(std::is_trivial<input_instr>::value, "input_instr must be trivial");
 static_assert(std::is_standard_layout<input_instr>::value, "input_instr must be standard layout");
@@ -46,42 +46,141 @@ static int clamp_pct(int x) {
     return x;
 }
 
-static uint64_t pick_addr(bool is_cxl, std::mt19937_64& rng) {
-    uint64_t base = is_cxl ? cxl_base : local_base;
-    uint64_t size = is_cxl ? cxl_size : local_size;
-    uint64_t ws = is_cxl ? cxl_ws_bytes : local_ws_bytes;
-    if (ws == 0 || ws > size) ws = size;
-    if (ws < line_size) ws = line_size;
+static bool parse_u64(const std::string& s, uint64_t* out) {
+    try {
+        std::size_t idx = 0;
+        const auto val = std::stoull(s, &idx, 0);
+        if (idx != s.size()) return false;
+        *out = val;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
 
-    uint64_t elems = ws / line_size;
+static bool parse_i32(const std::string& s, int* out) {
+    try {
+        std::size_t idx = 0;
+        const auto val = std::stol(s, &idx, 0);
+        if (idx != s.size()) return false;
+        *out = static_cast<int>(val);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static void print_usage(const char* argv0) {
+    std::cerr
+        << "Usage: " << argv0 << " [options]\n"
+        << "Options:\n"
+        << "  --out-dir <path>\n"
+        << "  --out-name <file>\n"
+        << "  --num-instrs <N>\n"
+        << "  --warmup-mem-instrs <N>\n"
+        << "  --mem-pct <0-100>\n"
+        << "  --load-pct <0-100>\n"
+        << "  --cxl-pct <0-100>\n"
+        << "  --seed <u64>\n";
+}
+
+static bool parse_args(int argc, char** argv, Config& cfg) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--help" || arg == "-h") {
+            print_usage(argv[0]);
+            return false;
+        }
+        if (arg.rfind("--", 0) != 0) {
+            std::cerr << "error: unexpected arg: " << arg << "\n";
+            print_usage(argv[0]);
+            return false;
+        }
+
+        std::string key;
+        std::string value;
+        auto eq = arg.find('=');
+        if (eq != std::string::npos) {
+            key = arg.substr(2, eq - 2);
+            value = arg.substr(eq + 1);
+        } else {
+            key = arg.substr(2);
+            if (i + 1 >= argc) {
+                std::cerr << "error: missing value for --" << key << "\n";
+                print_usage(argv[0]);
+                return false;
+            }
+            value = argv[++i];
+        }
+
+        if (key == "out-dir") {
+            cfg.out_dir = value;
+        } else if (key == "out-name") {
+            cfg.out_name = value;
+        } else if (key == "num-instrs") {
+            if (!parse_u64(value, &cfg.num_instrs)) return false;
+        } else if (key == "warmup-mem-instrs") {
+            if (!parse_u64(value, &cfg.warmup_mem_instrs)) return false;
+        } else if (key == "mem-pct") {
+            if (!parse_i32(value, &cfg.mem_pct)) return false;
+        } else if (key == "load-pct") {
+            if (!parse_i32(value, &cfg.load_pct)) return false;
+        } else if (key == "cxl-pct") {
+            if (!parse_i32(value, &cfg.cxl_pct)) return false;
+        } else if (key == "seed") {
+            if (!parse_u64(value, &cfg.seed)) return false;
+        } else {
+            std::cerr << "error: unknown option --" << key << "\n";
+            print_usage(argv[0]);
+            return false;
+        }
+    }
+    return true;
+}
+
+static uint64_t pick_addr(bool is_cxl, std::mt19937_64& rng, const Config& cfg) {
+    uint64_t base = is_cxl ? kCxlBase : kLocalBase;
+    uint64_t size = is_cxl ? kCxlSize : kLocalSize;
+    uint64_t ws = is_cxl ? kCxlWsBytes : kLocalWsBytes;
+    if (ws == 0 || ws > size) ws = size;
+    if (ws < kLineSize) ws = kLineSize;
+
+    uint64_t elems = ws / kLineSize;
     if (elems == 0) elems = 1;
 
     uint64_t idx = static_cast<uint64_t>(rng() % elems);
 
-    uint64_t addr = base + idx * line_size;
-    if (addr == 0) addr = line_size;
+    uint64_t addr = base + idx * kLineSize;
+    if (addr == 0) addr = kLineSize;
     return addr;
 }
 
-int main() {
-    const int mem_pct_clamped = clamp_pct(mem_pct);
-    const int load_pct_clamped = clamp_pct(load_pct);
-    const int cxl_pct_clamped = clamp_pct(cxl_pct);
+int main(int argc, char** argv) {
+    Config cfg{};
+    if (!parse_args(argc, argv, cfg)) {
+        return 2;
+    }
 
-    const std::string out_path = std::string(out_dir) + "/" + out_name;
+    const int mem_pct_clamped = clamp_pct(cfg.mem_pct);
+    const int load_pct_clamped = clamp_pct(cfg.load_pct);
+    const int cxl_pct_clamped = clamp_pct(cfg.cxl_pct);
+
+    const uint64_t warmup_mem_instrs = std::min(cfg.warmup_mem_instrs, cfg.num_instrs);
+
+    const std::string out_path = cfg.out_dir + "/" + cfg.out_name;
 
     std::ofstream out(out_path, std::ios::binary);
     if (!out) {
         std::cerr << "error: failed to open output: " << out_path << "\n";
         if (errno == ENOENT) {
-            std::cerr << "note: output directory does not exist: " << out_dir << "\n";
+            std::cerr << "note: output directory does not exist: " << cfg.out_dir << "\n";
         } else if (errno != 0) {
             std::cerr << "note: errno=" << errno << " (" << std::strerror(errno) << ")\n";
         }
         return 2;
     }
 
-    std::mt19937_64 rng(seed);
+    std::mt19937_64 rng(cfg.seed);
 
     uint64_t load_count = 0;
     uint64_t store_count = 0;
@@ -90,17 +189,19 @@ int main() {
     uint64_t store_cxl_count = 0;
     uint64_t store_local_count = 0;
 
-    for (uint64_t i = 0; i < num_instrs; ++i) {
+    for (uint64_t i = 0; i < cfg.num_instrs; ++i) {
         input_instr instr{};
         instr.ip = 0x1000ull + (i * 4ull);
         instr.is_branch = 0;
         instr.branch_taken = 0;
 
-        const bool do_mem = (static_cast<int>(rng() % 100) < mem_pct_clamped);
+        const bool force_mem = (i < warmup_mem_instrs);
+        const int effective_mem_pct = force_mem ? 100 : mem_pct_clamped;
+        const bool do_mem = (static_cast<int>(rng() % 100) < effective_mem_pct);
         if (do_mem) {
             const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
             const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
-            uint64_t addr = pick_addr(is_cxl, rng);
+            uint64_t addr = pick_addr(is_cxl, rng, cfg);
             if (do_load) {
                 instr.source_memory[0] = addr;
                 load_count++;
@@ -127,30 +228,31 @@ int main() {
         }
     }
 
-    std::cout << "Wrote " << num_instrs << " instructions to " << out_path << "\n";
-    std::cout << "mem_pct=" << mem_pct_clamped
+    std::cout << "Wrote " << cfg.num_instrs << " instructions to " << out_path << "\n";
+    std::cout << "warmup_mem_instrs=" << warmup_mem_instrs
+              << " mem_pct=" << mem_pct_clamped
               << " load_pct=" << load_pct_clamped
               << " cxl_pct=" << cxl_pct_clamped
               << " ops_per_instr=1 (single load or store)\n";
-    std::cout << "local_base=0x" << std::hex << local_base
-              << " cxl_base=0x" << cxl_base << std::dec << "\n";
-    std::cout << "use_permutation=false line_size=" << line_size << "\n";
+    std::cout << "local_base=0x" << std::hex << kLocalBase
+              << " cxl_base=0x" << kCxlBase << std::dec << "\n";
+    std::cout << "line_size=" << kLineSize << "\n";
 
-    const double instrs = static_cast<double>(num_instrs);
-    const double bytes_per_op = static_cast<double>(line_size);
+    const double instrs = static_cast<double>(cfg.num_instrs);
+    const double bytes_per_op = static_cast<double>(kLineSize);
     const double load_local_bpi = (instrs > 0) ? (static_cast<double>(load_local_count) / instrs) * bytes_per_op : 0.0;
     const double load_cxl_bpi = (instrs > 0) ? (static_cast<double>(load_cxl_count) / instrs) * bytes_per_op : 0.0;
     const double store_local_bpi = (instrs > 0) ? (static_cast<double>(store_local_count) / instrs) * bytes_per_op : 0.0;
     const double store_cxl_bpi = (instrs > 0) ? (static_cast<double>(store_cxl_count) / instrs) * bytes_per_op : 0.0;
 
-    const double load_local_gbps = load_local_bpi * ipc_assumed * clock_ghz;
-    const double load_cxl_gbps = load_cxl_bpi * ipc_assumed * clock_ghz;
-    const double store_local_gbps = store_local_bpi * ipc_assumed * clock_ghz;
-    const double store_cxl_gbps = store_cxl_bpi * ipc_assumed * clock_ghz;
+    const double load_local_gbps = load_local_bpi * kIpcAssumed * kClockGhz;
+    const double load_cxl_gbps = load_cxl_bpi * kIpcAssumed * kClockGhz;
+    const double store_local_gbps = store_local_bpi * kIpcAssumed * kClockGhz;
+    const double store_cxl_gbps = store_cxl_bpi * kIpcAssumed * kClockGhz;
     const double total_gbps = load_local_gbps + load_cxl_gbps + store_local_gbps + store_cxl_gbps;
 
-    std::cout << "Projected BW (GB/s) assuming IPC=" << ipc_assumed
-              << " @ " << clock_ghz << "GHz\n";
+    std::cout << "Projected BW (GB/s) assuming IPC=" << kIpcAssumed
+              << " @ " << kClockGhz << "GHz\n";
     std::cout << "  load_local: " << load_local_gbps
               << " load_cxl: " << load_cxl_gbps
               << " store_local: " << store_local_gbps

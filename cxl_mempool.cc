@@ -143,16 +143,17 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
         ++total_completed_;
     }
     if (heartbeat_period_ > 0 && (tick_count_ % heartbeat_period_ == 0)) {
-        std::cout << "CXL heartbeat cycle " << tick_count_ << '\n';
-        std::cout << "  total_enqueued:     " << total_enqueued_ << '\n';
-        std::cout << "  total_completed:    " << total_completed_ << '\n';
-        std::cout << "  pending_responses:  " << pending_.size() << '\n';
-        std::cout << "  mem queue occ:      " << mem_ctrl_.queue_occupancy(0)
-                  << " util: " << mem_ctrl_.queue_utilization(0) << '\n';
+        const auto prefix = std::string("stat.pool.") + std::to_string(pool_node_id_) + ".heartbeat.";
+        std::cout << prefix << "cycle = " << tick_count_ << '\n';
+        std::cout << prefix << "total_enqueued = " << total_enqueued_ << '\n';
+        std::cout << prefix << "total_completed = " << total_completed_ << '\n';
+        std::cout << prefix << "pending_responses = " << pending_.size() << '\n';
+        std::cout << prefix << "mem_queue_occ = " << mem_ctrl_.queue_occupancy(0) << '\n';
+        std::cout << prefix << "mem_queue_util = " << mem_ctrl_.queue_utilization(0) << '\n';
         const auto stats = request_link_stats();
         if (stats.occ > 0) {
-            std::cout << "  req link occ:       " << stats.occ
-                      << " util: " << stats.util << '\n';
+            std::cout << prefix << "req_link_occ = " << stats.occ << '\n';
+            std::cout << prefix << "req_link_util = " << stats.util << '\n';
         }
         std::cout << std::flush;
     }
@@ -308,19 +309,33 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
 }
 
 void CXLMemoryPool::finish() {
-    std::cout << "CXL pool " << pool_node_id_ << " utilization summary\n";
-    std::cout << "  mem avg util: " << mem_ctrl_.queue_average_utilization(0) << '\n';
-    const auto stats = request_link_stats();
-    if (stats.avg_util > 0.0) {
-        std::cout << "  req link avg util: " << stats.avg_util << '\n';
-    }
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
-    std::cout << "  wall time (s): " << sec << '\n';
-    if (active_calls_ > 0) {
-        const auto active_sec = std::chrono::duration<double>(active_time_).count();
-        std::cout << "Component Time Summary\n";
-        std::cout << "  CXL pool active time (s): " << active_sec << '\n';
+    const auto stats = request_link_stats();
+
+    if (lightweight_output_) {
+        const auto prefix = std::string("stat.pool.") + std::to_string(pool_node_id_) + ".";
+        std::cout << prefix << "util.mem_avg = " << mem_ctrl_.queue_average_utilization(0) << '\n';
+        if (stats.avg_util > 0.0) {
+            std::cout << prefix << "util.req_link_avg = " << stats.avg_util << '\n';
+        }
+        std::cout << prefix << "walltime_s = " << sec << '\n';
+        if (active_calls_ > 0) {
+            const auto active_sec = std::chrono::duration<double>(active_time_).count();
+            std::cout << prefix << "active_time_s = " << active_sec << '\n';
+        }
+    } else {
+        std::cout << "CXL pool " << pool_node_id_ << " utilization summary\n";
+        std::cout << "  mem avg util: " << mem_ctrl_.queue_average_utilization(0) << '\n';
+        if (stats.avg_util > 0.0) {
+            std::cout << "  req link avg util: " << stats.avg_util << '\n';
+        }
+        std::cout << "  wall time (s): " << sec << '\n';
+        if (active_calls_ > 0) {
+            const auto active_sec = std::chrono::duration<double>(active_time_).count();
+            std::cout << "Component Time Summary\n";
+            std::cout << "  CXL pool active time (s): " << active_sec << '\n';
+        }
     }
     std::cout << std::flush;
 }

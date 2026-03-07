@@ -1,22 +1,10 @@
 import os
 import sst
 
-# Replication topology (MPI-friendly):
-#   nodes -> switch -> pools
-#
-# Rank strategy:
-#   - Cores are the heaviest components.
-#   - Place each core on its own rank when possible.
-#   - Pack switch + all pools on the last rank to minimize interference.
-
-NUM_NODES = int(os.environ.get("NUM_NODES", "16"))
-NUM_POOLS = int(os.environ.get("NUM_POOLS", "2"))
-POOL_NODE_ID_BASE = int(os.environ.get("POOL_NODE_ID_BASE", "100"))
-
-# MPI configuration (must match mpirun -n). Override via env:
-#   MPI_RANKS=<n> mpirun -n <n> sst pool_with_replication_mpi.py
-MPI_RANKS = int(os.environ.get("MPI_RANKS", "4"))
-MPI_THREAD = 0
+# Topology: nodes -> switch -> pools
+NUM_NODES = 8
+NUM_POOLS = 2
+POOL_NODE_ID_BASE = 100
 
 # Latency/bandwidth (cycles per 64B) for the CXL links.
 T_CXL = 120
@@ -30,17 +18,17 @@ POOL_PA_BASE = 68719476736     # pool PA starts at 64 GiB
 # Local DRAM bandwidth as cycles per 64B request
 DRAM_BW_CYCLES_PER_REQ = 4
 
-# Inputs
-TRACE_DIR = "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replication"
-TRACE_NAME = "synth_rw.champsim.trace"
-# TRACE_NAME = "champsim.trace"
-CXL_CONFIG = os.path.join(TRACE_DIR, "cxl_config.csv")
+# Inputs (must be set by the sweep runner)
+TRACE_PATH = os.environ["TRACE_PATH"]
+CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 
-# Switch policy
-REPLICATE_WRITES = 1
+# Output
+LIGHTWEIGHT_OUTPUT = 1
+PRINT_LAT_HIST = 1
 
+# Switch policy (no replication)
+REPLICATE_WRITES = 0
 
-sst.setProgramOption("partitioner", "sst.self")
 
 switch = sst.Component("switch0", "cscore.Switch")
 switch.addParams({
@@ -52,9 +40,8 @@ switch.addParams({
     "link_bw_cycles": BW_CXL_CYCLES,
     "link_latency_cycles": T_CXL,
     "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
-    "lightweight_output": 1,
+    "lightweight_output": LIGHTWEIGHT_OUTPUT,
 })
-switch.setRank(max(MPI_RANKS - 1, 0), MPI_THREAD)
 
 pools = []
 for j in range(NUM_POOLS):
@@ -68,17 +55,16 @@ for j in range(NUM_POOLS):
         "link_latency_cycles": T_CXL,
         "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
         "heartbeat_period": 0,
-        "lightweight_output": 1,
+        "lightweight_output": LIGHTWEIGHT_OUTPUT,
     })
-    pool.setRank(max(MPI_RANKS - 1, 0), MPI_THREAD)
     pools.append(pool)
 
 for i in range(NUM_NODES):
     sock = sst.Component(f"s{i}", "cscore.csimCore")
     sock.addParams({
         "node_id": i,
-        "trace_name": os.path.join(TRACE_DIR, TRACE_NAME),
-        "address_map_config": CXL_CONFIG,
+        "trace_name": TRACE_PATH,
+        "address_map_config": CXL_CONFIG_PATH,
         "dram_size_bytes": DRAM_SIZE_BYTES,
         "dram_bw_cycles_per_req": DRAM_BW_CYCLES_PER_REQ,
         "dram_latency_model": "utilization-based",
@@ -86,14 +72,14 @@ for i in range(NUM_NODES):
         "cache_heartbeat_period": 0,
         "cpu_heartbeat_period": 0,
         "clock": "2.4GHz",
-        "warmup_insts": 2000000,
-        "sim_insts": 5000000,
+        "warmup_insts": 210_000,
+        "sim_insts": 50_000,
         "cxl_link_bw_cycles": BW_CXL_CYCLES,
         "cxl_link_latency_cycles": T_CXL,
         "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
-        "lightweight_output": 1,
+        "lightweight_output": LIGHTWEIGHT_OUTPUT,
+        "print_latency_hist": PRINT_LAT_HIST,
     })
-    sock.setRank(i % max(MPI_RANKS, 1), MPI_THREAD)
 
     l0 = sst.Link(f"s{i}_to_switch")
     l0.connect((sock, "port_handler_cxl", "1ns"),

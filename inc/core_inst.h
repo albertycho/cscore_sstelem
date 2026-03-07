@@ -242,10 +242,6 @@ champsim::data::bytes{4096}, 5, champsim::chrono::picoseconds{500*200}, DRAM, 1
 //       .dib_window(16)
 // )
 // }
-{
-  std::cout<<"generated_env created (220)"<<std::endl;
-}
-
 // auto champsim::configured::generated_environment<0x05899e0703813be6>::cpu_view() -> std::vector<std::reference_wrapper<O3_CPU>>
 // {
 //   std::vector<std::reference_wrapper<O3_CPU>> retval{};

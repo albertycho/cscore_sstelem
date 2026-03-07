@@ -26,7 +26,6 @@
 #include "util/bits.h" // for lg2, bitmask
 #include "util/span.h"
 #include "util/units.h"
-#include <iostream>
 
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd,
                                      std::size_t t_cas, std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::vector<channel_type*>&& ul,
@@ -39,7 +38,6 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, 
     channels.emplace_back(dbus_period, mc_period, t_rp, t_rcd, t_cas, t_ras, refresh_period, refreshes_per_period, chan_width, rq_size, wq_size,
                           address_mapping);
   }
-  std::cout<<"dram constructor returns"<<std::endl;
 }
 
 DRAM_CHANNEL::DRAM_CHANNEL(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd,
@@ -327,8 +325,6 @@ DRAM_CHANNEL::queue_type::iterator DRAM_CHANNEL::schedule_packet()
     if (!(lhs.has_value() && !lhs.value().scheduled)) {
       return false;
     }
-    std::cout<<"something happens in schedule_packet()"<<std::endl;
-
     auto lop_idx = this->bank_request_index(lhs.value().address);
     auto rop_idx = this->bank_request_index(rhs.value().address);
     auto rready = !this->bank_request[rop_idx].valid;
@@ -363,7 +359,6 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
       pkt->value().ready_time = champsim::chrono::clock::time_point::max();
 
       ++progress;
-      std::cout<<"service_packet(): progress happens"<<std::endl;
     }
   }
 
@@ -393,10 +388,7 @@ void MEMORY_CONTROLLER::initialize()
 
   // fmt::print(" Channels: {} Width: {}-bit Data Rate: {} MT/s\n", std::size(channels), champsim::data::bits_per_byte * channel_width.count(),
   //            1us / (data_bus_period));
-  std::cout << " Channels: " << std::size(channels)
-            << " Width: " << champsim::data::bits_per_byte * channel_width.count()
-            << "-bit Data Rate: " << (1us / (data_bus_period))
-            << " MT/s" <<std::endl;
+  (void)sz;
 }
 
 void DRAM_CHANNEL::initialize() {}

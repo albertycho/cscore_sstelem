@@ -298,7 +298,6 @@ void Switch::reset_stats_and_broadcast()
 
 void Switch::finish()
 {
-    std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
     auto avg_util = [](const std::vector<PortState>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
@@ -308,15 +307,27 @@ void Switch::finish()
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    std::cout << "Switch avg util node ingress: " << avg_util(node_ports_) << std::endl;
-    std::cout << "Switch avg util pool ingress: " << avg_util(pool_ports_) << std::endl;
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
-    std::cout << "Switch wall time (s): " << sec << std::endl;
-    if (active_calls_ > 0) {
-        const auto active_sec = std::chrono::duration<double>(active_time_).count();
-        std::cout << "Component Time Summary\n";
-        std::cout << "  Switch active time (s): " << active_sec << std::endl;
+    if (lightweight_output_) {
+        std::cout << "stat.switch.replicated_messages = " << replicated_count_ << '\n';
+        std::cout << "stat.switch.util.node_ingress_avg = " << avg_util(node_ports_) << '\n';
+        std::cout << "stat.switch.util.pool_ingress_avg = " << avg_util(pool_ports_) << '\n';
+        std::cout << "stat.switch.walltime_s = " << sec << '\n';
+        if (active_calls_ > 0) {
+            const auto active_sec = std::chrono::duration<double>(active_time_).count();
+            std::cout << "stat.switch.active_time_s = " << active_sec << '\n';
+        }
+    } else {
+        std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
+        std::cout << "Switch avg util node ingress: " << avg_util(node_ports_) << std::endl;
+        std::cout << "Switch avg util pool ingress: " << avg_util(pool_ports_) << std::endl;
+        std::cout << "Switch wall time (s): " << sec << std::endl;
+        if (active_calls_ > 0) {
+            const auto active_sec = std::chrono::duration<double>(active_time_).count();
+            std::cout << "Component Time Summary\n";
+            std::cout << "  Switch active time (s): " << active_sec << std::endl;
+        }
     }
 }
 
