@@ -13,7 +13,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
-OUT_ROOT = Path("/shared/kshan/CXL_sst_traces")
+OUT_ROOT = SCRIPT_DIR
 SST_BIN = "sst"
 GEN_BIN = REPO_ROOT / "scripts" / "gen"
 GEN_SRC = REPO_ROOT / "scripts" / "generate_synth_trace.cpp"
@@ -67,21 +67,18 @@ def build_generator() -> None:
 
 
 def write_cxl_config(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         f.write("# node_id,start,size,type,target\n")
         for node in range(NUM_NODES):
             f.write(f"{node},0x{CXL_BASE:x},0x{CXL_WS_BYTES:x},pool,{POOL_NODE_ID_BASE}\n")
 
 
-def generate_trace(case_dir: Path, load_pct: int, mem_pct: int) -> Path:
-    case_dir.mkdir(parents=True, exist_ok=True)
-    trace_name = "synth.champsim.trace"
-    trace_path = case_dir / trace_name
+def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) -> Path:
+    trace_path = out_dir / trace_name
 
     cmd = [
         str(GEN_BIN),
-        "--out-dir", str(case_dir),
+        "--out-dir", str(out_dir),
         "--out-name", trace_name,
         "--num-instrs", str(NUM_INSTRS),
         "--warmup-mem-instrs", str(WARMUP_MEM_INSTRS),
@@ -117,8 +114,7 @@ def parse_bw(output: str) -> dict:
     return {}
 
 
-def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, run_dir: Path) -> int:
-    run_dir.mkdir(parents=True, exist_ok=True)
+def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, out_path: Path, err_path: Path) -> int:
 
     env = os.environ.copy()
     env["TRACE_PATH"] = str(trace_path)
@@ -126,11 +122,14 @@ def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, run_dir: Path)
     env["LIGHTWEIGHT_OUTPUT"] = LIGHTWEIGHT_OUTPUT
     env["PRINT_LAT_HIST"] = PRINT_LAT_HIST
 
-    proc = subprocess.run(
-        ["mpirun", "-n", str(MPI_RANKS), "--output-filename", str(run_dir / "out"), SST_BIN, str(sim_script)],
-        cwd=str(SCRIPT_DIR),
-        env=env,
-    )
+    with out_path.open("w") as out_f, err_path.open("w") as err_f:
+        proc = subprocess.run(
+            ["mpirun", "-n", str(MPI_RANKS), SST_BIN, str(sim_script)],
+            cwd=str(SCRIPT_DIR),
+            env=env,
+            stdout=out_f,
+            stderr=err_f,
+        )
     return proc.returncode
 
 
@@ -144,9 +143,9 @@ def main() -> int:
     bw_rows = []
 
     for load_pct, mem_pct in cases:
-        case_dir = OUT_ROOT / f"load{load_pct:03d}_mem{mem_pct:03d}"
-        trace_path, gen_out = generate_trace(case_dir, load_pct, mem_pct)
-        cxl_config = case_dir / "cxl_config.csv"
+        trace_name = f"synth_load{load_pct:03d}_mem{mem_pct:03d}.champsim.trace"
+        trace_path, gen_out = generate_trace(OUT_ROOT, trace_name, load_pct, mem_pct)
+        cxl_config = OUT_ROOT / f"cxl_config_load{load_pct:03d}_mem{mem_pct:03d}.csv"
         write_cxl_config(cxl_config)
 
         bw = parse_bw(gen_out)
@@ -161,8 +160,13 @@ def main() -> int:
             bw_row.update(bw)
             bw_rows.append(bw_row)
 
-        tasks.append((SIM_NO_REP, trace_path, cxl_config, case_dir / "no_rep"))
-        tasks.append((SIM_REP, trace_path, cxl_config, case_dir / "rep"))
+        no_rep_out = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.out"
+        no_rep_err = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.err"
+        rep_out = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_rep.out"
+        rep_err = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_rep.err"
+
+        tasks.append((SIM_NO_REP, trace_path, cxl_config, no_rep_out, no_rep_err))
+        tasks.append((SIM_REP, trace_path, cxl_config, rep_out, rep_err))
 
     if bw_rows:
         bw_rows.sort(key=lambda r: (r["load_pct"], r["mem_pct"]))
@@ -174,19 +178,17 @@ def main() -> int:
 
     failures = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as executor:
-        future_to_task = {
-            executor.submit(run_sst, *task): task for task in tasks
-        }
+        future_to_task = {executor.submit(run_sst, *task): task for task in tasks}
         for future in concurrent.futures.as_completed(future_to_task):
-            sim_script, _, _, run_dir = future_to_task[future]
+            sim_script, _, _, out_path, _ = future_to_task[future]
             try:
                 rc = future.result()
             except Exception as exc:
-                print(f"[FAIL] {sim_script.name} -> {run_dir}: {exc}")
+                print(f"[FAIL] {sim_script.name} -> {out_path}: {exc}")
                 failures += 1
                 continue
             if rc != 0:
-                print(f"[FAIL] {sim_script.name} -> {run_dir} (rc={rc})")
+                print(f"[FAIL] {sim_script.name} -> {out_path} (rc={rc})")
                 failures += 1
 
     if failures:
