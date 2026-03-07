@@ -25,6 +25,8 @@ struct Config {
 constexpr uint64_t kLineSize = 64;
 constexpr double kClockGhz = 2.4;
 constexpr double kIpcAssumed = 1.0;
+constexpr uint64_t kCooldownInstrs = 500'000;
+constexpr uint64_t kMainWarmupInstrs = 50'000;
 
 // Address regions (bytes)
 constexpr uint64_t kLocalBase = 0;
@@ -165,7 +167,9 @@ int main(int argc, char** argv) {
     const int load_pct_clamped = clamp_pct(cfg.load_pct);
     const int cxl_pct_clamped = clamp_pct(cfg.cxl_pct);
 
-    const uint64_t warmup_mem_instrs = std::min(cfg.warmup_mem_instrs, cfg.num_instrs);
+    const uint64_t fill_mem_instrs = std::min(cfg.warmup_mem_instrs, cfg.num_instrs);
+    const uint64_t cooldown_instrs = std::min(kCooldownInstrs, cfg.num_instrs);
+    const uint64_t main_warmup_instrs = std::min(kMainWarmupInstrs, cfg.num_instrs);
 
     const std::string out_path = cfg.out_dir + "/" + cfg.out_name;
 
@@ -189,13 +193,66 @@ int main(int argc, char** argv) {
     uint64_t store_cxl_count = 0;
     uint64_t store_local_count = 0;
 
-    for (uint64_t i = 0; i < cfg.num_instrs; ++i) {
+    uint64_t instr_idx = 0;
+
+    // Loop 1: fill cache (all mem ops)
+    for (uint64_t i = 0; i < fill_mem_instrs && instr_idx < cfg.num_instrs; ++i, ++instr_idx) {
         input_instr instr{};
-        instr.ip = 0x1000ull + (i * 4ull);
+        instr.ip = 0x1000ull + (instr_idx * 4ull);
         instr.is_branch = 0;
         instr.branch_taken = 0;
 
-        const bool force_mem = (i < warmup_mem_instrs);
+        const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
+        const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
+        uint64_t addr = pick_addr(is_cxl, rng, cfg);
+        if (do_load) {
+            instr.source_memory[0] = addr;
+            load_count++;
+            if (is_cxl) {
+                load_cxl_count++;
+            } else {
+                load_local_count++;
+            }
+        } else {
+            instr.destination_memory[0] = addr;
+            store_count++;
+            if (is_cxl) {
+                store_cxl_count++;
+            } else {
+                store_local_count++;
+            }
+        }
+
+        out.write(reinterpret_cast<const char*>(&instr), sizeof(instr));
+        if (!out) {
+            std::cerr << "error: write failed at instruction " << instr_idx << "\n";
+            return 2;
+        }
+    }
+
+    // Loop 2: cooldown (non-mem ops only)
+    for (uint64_t i = 0; i < cooldown_instrs && instr_idx < cfg.num_instrs; ++i, ++instr_idx) {
+        input_instr instr{};
+        instr.ip = 0x1000ull + (instr_idx * 4ull);
+        instr.is_branch = 0;
+        instr.branch_taken = 0;
+
+        out.write(reinterpret_cast<const char*>(&instr), sizeof(instr));
+        if (!out) {
+            std::cerr << "error: write failed at instruction " << instr_idx << "\n";
+            return 2;
+        }
+    }
+
+    // Loop 3: main traffic (first kMainWarmupInstrs are mem ops, then mem_pct)
+    uint64_t main_idx = 0;
+    for (; instr_idx < cfg.num_instrs; ++instr_idx, ++main_idx) {
+        input_instr instr{};
+        instr.ip = 0x1000ull + (instr_idx * 4ull);
+        instr.is_branch = 0;
+        instr.branch_taken = 0;
+
+        const bool force_mem = (main_idx < main_warmup_instrs);
         const int effective_mem_pct = force_mem ? 100 : mem_pct_clamped;
         const bool do_mem = (static_cast<int>(rng() % 100) < effective_mem_pct);
         if (do_mem) {
@@ -223,13 +280,15 @@ int main(int argc, char** argv) {
 
         out.write(reinterpret_cast<const char*>(&instr), sizeof(instr));
         if (!out) {
-            std::cerr << "error: write failed at instruction " << i << "\n";
+            std::cerr << "error: write failed at instruction " << instr_idx << "\n";
             return 2;
         }
     }
 
     std::cout << "Wrote " << cfg.num_instrs << " instructions to " << out_path << "\n";
-    std::cout << "warmup_mem_instrs=" << warmup_mem_instrs
+    std::cout << "fill_mem_instrs=" << fill_mem_instrs
+              << " cooldown_instrs=" << cooldown_instrs
+              << " main_warmup_instrs=" << main_warmup_instrs
               << " mem_pct=" << mem_pct_clamped
               << " load_pct=" << load_pct_clamped
               << " cxl_pct=" << cxl_pct_clamped

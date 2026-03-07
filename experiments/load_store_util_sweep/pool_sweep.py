@@ -3,7 +3,7 @@ import sst
 
 # Topology: nodes -> switch -> pools
 NUM_NODES = 8
-NUM_POOLS = 2
+NUM_POOLS = 1
 POOL_NODE_ID_BASE = 100
 
 # Latency/bandwidth (cycles per 64B) for the CXL links.
@@ -72,8 +72,8 @@ for i in range(NUM_NODES):
         "cache_heartbeat_period": 0,
         "cpu_heartbeat_period": 0,
         "clock": "2.4GHz",
-        "warmup_insts": 210_000,
-        "sim_insts": 50_000,
+        "warmup_insts": 750_000,
+        "sim_insts": 200_000,
         "cxl_link_bw_cycles": BW_CXL_CYCLES,
         "cxl_link_latency_cycles": T_CXL,
         "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
