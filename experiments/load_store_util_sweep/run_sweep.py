@@ -14,8 +14,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 TRACE_ROOT = Path("/shared/kshan/CXL_sst_traces")
-OUTPUT_ROOT = SCRIPT_DIR
-CONFIG_PATH = OUTPUT_ROOT / "cxl_config.csv"
+OUTPUT_ROOT = SCRIPT_DIR.parent / "replication" / "load_store_util_sweep" / "logs"
+CONFIG_PATH = SCRIPT_DIR / "cxl_config.csv"
 SST_BIN = "sst"
 GEN_BIN = REPO_ROOT / "scripts" / "gen"
 GEN_SRC = REPO_ROOT / "scripts" / "generate_synth_trace.cpp"
