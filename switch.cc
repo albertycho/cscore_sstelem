@@ -165,11 +165,6 @@ bool Switch::try_route_event(csEvent* ev)
         throw std::runtime_error("Switch: received malformed csEvent (payload size < 2).");
     }
     if (is_reset_event(*ev)) {
-        for (const auto& pool : pool_ports_) {
-            if (!pool.port.can_send()) {
-                return false;
-            }
-        }
         reset_stats_and_broadcast();
         delete ev;
         return true;
@@ -290,7 +285,7 @@ void Switch::reset_stats_and_broadcast()
     for (int p = 0; p < num_pools_; ++p) {
         const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
         auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
-        if (!pool_ports_[p].port.send(clone)) {
+        if (!pool_ports_[static_cast<std::size_t>(p)].port.send(clone)) {
             delete clone;
         }
     }

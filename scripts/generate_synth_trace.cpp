@@ -24,10 +24,9 @@ struct Config {
 // Fixed parameters (not configurable via CLI)
 constexpr uint64_t kLineSize = 64;
 constexpr double kClockGhz = 2.4;
-// Use a safe upper bound for IPC so target utilization is not exceeded.
-constexpr double kIpcAssumed = 8.0;
+// Utilization->probability mapping depends on this assumption.
+constexpr double kIpcAssumed = 0.5;
 constexpr uint64_t kCooldownInstrs = 500'000;
-constexpr uint64_t kMainWarmupInstrs = 50'000;
 constexpr int kNumNodes = 8;
 constexpr int kNumPools = 1;
 constexpr bool kReplicateWrites = false;
@@ -175,8 +174,6 @@ int main(int argc, char** argv) {
 
     const uint64_t fill_mem_instrs = std::min(cfg.warmup_mem_instrs, cfg.num_instrs);
     const uint64_t cooldown_instrs = std::min(kCooldownInstrs, cfg.num_instrs);
-    const uint64_t main_warmup_instrs = std::min(kMainWarmupInstrs, cfg.num_instrs);
-
     const std::string out_path = cfg.out_dir + "/" + cfg.out_name;
 
     std::ofstream out(out_path, std::ios::binary);
@@ -267,16 +264,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Loop 3: main traffic (first kMainWarmupInstrs are mem ops, then mem_pct)
-    uint64_t main_idx = 0;
-    for (; instr_idx < cfg.num_instrs; ++instr_idx, ++main_idx) {
+    // Loop 3: main traffic (mem_pct after cooldown)
+    for (; instr_idx < cfg.num_instrs; ++instr_idx) {
         input_instr instr{};
         instr.ip = 0x1000ull + (instr_idx * 4ull);
         instr.is_branch = 0;
         instr.branch_taken = 0;
 
-        const bool force_mem = (main_idx < main_warmup_instrs);
-        const bool do_mem = force_mem ? true : ((rng() % kProbScale) < mem_threshold);
+        const bool do_mem = ((rng() % kProbScale) < mem_threshold);
         if (do_mem) {
             const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
             const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
@@ -310,7 +305,6 @@ int main(int argc, char** argv) {
     std::cout << "Wrote " << cfg.num_instrs << " instructions to " << out_path << "\n";
     std::cout << "fill_mem_instrs=" << fill_mem_instrs
               << " cooldown_instrs=" << cooldown_instrs
-              << " main_warmup_instrs=" << main_warmup_instrs
               << " util_target_pct=" << mem_pct_clamped
               << " effective_mem_prob=" << mem_prob
               << " load_pct=" << load_pct_clamped

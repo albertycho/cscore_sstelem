@@ -1019,6 +1019,13 @@ void CACHE::begin_phase()
     ul->roi_stats = ul_new_roi_stats;
     ul->sim_stats = ul_new_sim_stats;
   }
+
+  // Requests issued before phase reset can complete after reset; avoid
+  // attributing their latency to the new phase.
+  for (auto& mshr_entry : MSHR) {
+    mshr_entry.remote_issue_time = champsim::chrono::clock::time_point::max();
+    mshr_entry.remote_is_pool = false;
+  }
 }
 
 void CACHE::end_phase(unsigned finished_cpu)

@@ -13,6 +13,10 @@ constexpr uint64_t kDefaultMsgBytes = 64;
 constexpr int64_t kInfiniteCredits = std::numeric_limits<int64_t>::max() / 4;
 constexpr uint64_t kControlCredit = 2;
 
+bool is_reset_control_event(csEvent* const& ev) {
+    return ev && ev->payload.size() >= 3 && ev->payload[2] == kControlResetUtil;
+}
+
 uint64_t msg_bytes(const csEvent& ev) {
     if (ev.payload.size() > 16) {
         return std::max<uint64_t>(ev.payload[16], 1);
@@ -123,6 +127,11 @@ void FabricPort::configure(SST::Link* link,
 }
 
 bool FabricPort::send(csEvent* item) {
+    if (is_reset_control_event(item)) {
+        // Reset control events must never be backpressured.
+        link_->send(item);
+        return true;
+    }
     if (!can_send()) {
         return false;
     }
