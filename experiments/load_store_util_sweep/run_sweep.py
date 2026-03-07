@@ -14,7 +14,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 TRACE_ROOT = Path("/shared/kshan/CXL_sst_traces")
-OUTPUT_ROOT = SCRIPT_DIR.parent / "replication" / "load_store_util_sweep" / "logs"
+OUTPUT_ROOT = SCRIPT_DIR / "logs"
 CONFIG_PATH = SCRIPT_DIR / "cxl_config.csv"
 SST_BIN = "sst"
 GEN_BIN = REPO_ROOT / "scripts" / "gen"
@@ -129,6 +129,11 @@ def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, out_path: Path
     env["LIGHTWEIGHT_OUTPUT"] = LIGHTWEIGHT_OUTPUT
     env["PRINT_LAT_HIST"] = PRINT_LAT_HIST
 
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Create files immediately so they show up even before MPI starts writing.
+    out_path.touch(exist_ok=True)
+    err_path.touch(exist_ok=True)
+    print(f"[STATUS] Launching {sim_script.name} -> {out_path.name}")
     with out_path.open("w") as out_f, err_path.open("w") as err_f:
         proc = subprocess.run(
             ["mpirun", "-n", str(MPI_RANKS), SST_BIN, str(sim_script)],
