@@ -24,9 +24,15 @@ struct Config {
 // Fixed parameters (not configurable via CLI)
 constexpr uint64_t kLineSize = 64;
 constexpr double kClockGhz = 2.4;
-constexpr double kIpcAssumed = 1.0;
+// Use a safe upper bound for IPC so target utilization is not exceeded.
+constexpr double kIpcAssumed = 8.0;
 constexpr uint64_t kCooldownInstrs = 500'000;
 constexpr uint64_t kMainWarmupInstrs = 50'000;
+constexpr int kNumNodes = 8;
+constexpr int kNumPools = 1;
+constexpr bool kReplicateWrites = false;
+constexpr int kBwCxlCycles = 25;
+constexpr uint64_t kProbScale = 1'000'000;
 
 // Address regions (bytes)
 constexpr uint64_t kLocalBase = 0;
@@ -193,6 +199,23 @@ int main(int argc, char** argv) {
     uint64_t store_cxl_count = 0;
     uint64_t store_local_count = 0;
 
+    const double util_target = static_cast<double>(mem_pct_clamped) / 100.0;
+    const double load_frac = static_cast<double>(load_pct_clamped) / 100.0;
+    const double store_frac = 1.0 - load_frac;
+    const double cxl_frac = static_cast<double>(cxl_pct_clamped) / 100.0;
+    const double pool_factor = kReplicateWrites
+        ? (load_frac / static_cast<double>(kNumPools)) + store_frac
+        : 1.0 / static_cast<double>(kNumPools);
+    const double denom = kIpcAssumed
+        * static_cast<double>(kNumNodes)
+        * static_cast<double>(kBwCxlCycles)
+        * cxl_frac
+        * pool_factor;
+    double mem_prob = (denom > 0.0) ? (util_target / denom) : 0.0;
+    if (mem_prob < 0.0) mem_prob = 0.0;
+    if (mem_prob > 1.0) mem_prob = 1.0;
+    const uint64_t mem_threshold = static_cast<uint64_t>(mem_prob * static_cast<double>(kProbScale) + 0.5);
+
     uint64_t instr_idx = 0;
 
     // Loop 1: fill cache (all mem ops)
@@ -253,8 +276,7 @@ int main(int argc, char** argv) {
         instr.branch_taken = 0;
 
         const bool force_mem = (main_idx < main_warmup_instrs);
-        const int effective_mem_pct = force_mem ? 100 : mem_pct_clamped;
-        const bool do_mem = (static_cast<int>(rng() % 100) < effective_mem_pct);
+        const bool do_mem = force_mem ? true : ((rng() % kProbScale) < mem_threshold);
         if (do_mem) {
             const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
             const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
@@ -289,10 +311,18 @@ int main(int argc, char** argv) {
     std::cout << "fill_mem_instrs=" << fill_mem_instrs
               << " cooldown_instrs=" << cooldown_instrs
               << " main_warmup_instrs=" << main_warmup_instrs
-              << " mem_pct=" << mem_pct_clamped
+              << " util_target_pct=" << mem_pct_clamped
+              << " effective_mem_prob=" << mem_prob
               << " load_pct=" << load_pct_clamped
               << " cxl_pct=" << cxl_pct_clamped
               << " ops_per_instr=1 (single load or store)\n";
+    std::cout << "util_formula ipc=" << kIpcAssumed
+              << " nodes=" << kNumNodes
+              << " pools=" << kNumPools
+              << " replicate_writes=" << (kReplicateWrites ? 1 : 0)
+              << " cxl_frac=" << cxl_frac
+              << " pool_factor=" << pool_factor
+              << "\n";
     std::cout << "local_base=0x" << std::hex << kLocalBase
               << " cxl_base=0x" << kCxlBase << std::dec << "\n";
     std::cout << "line_size=" << kLineSize << "\n";
