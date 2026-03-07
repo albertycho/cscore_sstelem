@@ -88,6 +88,7 @@ namespace SST {
             { "cxl_link_queue_size", "CXL link queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
+            { "warm_cache_insts", "Initial instructions where remote requests are satisfied locally (cache warm only, no fabric traffic). Clamped to warmup_insts.", "0 (defaults to warmup_insts)" },
             { "lightweight_output", "If set, emit stat.* summaries only", "0" },
             { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" }
             
@@ -170,9 +171,10 @@ namespace SST {
         uint64_t warmup_insts=0;
         uint64_t sim_insts=0;
         bool warmup_done=false;
+        uint64_t warm_cache_insts_ = 0;
         AddressMap address_map;
         std::string address_map_path;
-        std::deque<sst_request> remote_outbox;
+        std::deque<sst_response> warmup_bypass_responses_;
         int64_t cxl_link_bw_cycles_ = 0;
         int64_t cxl_link_latency_cycles_ = 0;
         int64_t cxl_link_queue_size_ = 0;
@@ -201,10 +203,10 @@ namespace SST {
     
         public:
         bool enqueue_remote_request(const sst_request& req);
-        void advance_remote_requests();
         void print_final_stats();
     
         bool handle_remote_event(csEvent* ev);
+        bool deliver_remote_response(const sst_response& resp);
     };
     
     } // namespace cscore

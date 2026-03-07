@@ -30,9 +30,13 @@ MEM_PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
 # Trace generation parameters
 NUM_INSTRS = 4_000_000
-WARMUP_MEM_INSTRS = 200_000
+WARM_CACHE_INSTS = 200_000
 SEED = 0x12345678
 CXL_PCT = 100
+
+# Must match pool_sweep*.py
+WARMUP_MAIN_INSTS = 100_000
+SST_WARMUP_INSTS = WARM_CACHE_INSTS + WARMUP_MAIN_INSTS
 
 # Fixed address/WS parameters (must match generator defaults)
 CXL_BASE = 64 << 30
@@ -52,8 +56,6 @@ SIM_REP = SCRIPT_DIR / "pool_sweep_replication.py"
 
 
 def build_generator() -> None:
-    if GEN_BIN.exists():
-        return
     print("[STATUS] Building trace generator...")
     GEN_BIN.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -88,7 +90,7 @@ def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) 
         "--out-dir", str(out_dir),
         "--out-name", trace_name,
         "--num-instrs", str(NUM_INSTRS),
-        "--warmup-mem-instrs", str(WARMUP_MEM_INSTRS),
+        "--warm-cache-instrs", str(WARM_CACHE_INSTS),
         "--mem-pct", str(mem_pct),
         "--load-pct", str(load_pct),
         "--cxl-pct", str(CXL_PCT),
@@ -159,6 +161,12 @@ def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, out_path: Path
 
 def main() -> int:
     print("[STATUS] Starting load/store/util sweep")
+    print(
+        "[STATUS] Warmup split: "
+        f"warm_cache={WARM_CACHE_INSTS}, "
+        f"main_loop_warmup={WARMUP_MAIN_INSTS}, "
+        f"total_warmup={SST_WARMUP_INSTS}"
+    )
     build_generator()
 
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -187,7 +195,7 @@ def main() -> int:
                 "mem_pct": mem_pct,
                 "cxl_pct": CXL_PCT,
                 "num_instrs": NUM_INSTRS,
-                "warmup_mem_instrs": WARMUP_MEM_INSTRS,
+                "warm_cache_insts": WARM_CACHE_INSTS,
             }
             bw_row.update(main_counts)
             bw_row.update(bw)

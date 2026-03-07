@@ -14,7 +14,7 @@ struct Config {
     std::string out_name = "synth_rw.champsim.trace";
 
     uint64_t num_instrs = 20'000'000;
-    uint64_t warmup_mem_instrs = 200'000;
+    uint64_t warm_cache_instrs = 200'000;
     int mem_pct = 100;   // target aggregate CXL request-link utilization percent (0-100)
     int load_pct = 50;  // percent of mem ops that are loads
     int cxl_pct = 100;  // percent of mem ops that target CXL
@@ -26,7 +26,6 @@ constexpr uint64_t kLineSize = 64;
 constexpr double kClockGhz = 2.4;
 // Utilization->probability mapping depends on this assumption.
 constexpr double kIpcAssumed = 0.5;
-constexpr uint64_t kCooldownInstrs = 500'000;
 constexpr int kNumNodes = 8;
 constexpr int kNumPools = 1;
 constexpr bool kReplicateWrites = false;
@@ -84,7 +83,7 @@ static void print_usage(const char* argv0) {
         << "  --out-dir <path>\n"
         << "  --out-name <file>\n"
         << "  --num-instrs <N>\n"
-        << "  --warmup-mem-instrs <N>\n"
+        << "  --warm-cache-instrs <N>\n"
         << "  --mem-pct <0-100>\n"
         << "  --load-pct <0-100>\n"
         << "  --cxl-pct <0-100>\n"
@@ -126,8 +125,8 @@ static bool parse_args(int argc, char** argv, Config& cfg) {
             cfg.out_name = value;
         } else if (key == "num-instrs") {
             if (!parse_u64(value, &cfg.num_instrs)) return false;
-        } else if (key == "warmup-mem-instrs") {
-            if (!parse_u64(value, &cfg.warmup_mem_instrs)) return false;
+        } else if (key == "warm-cache-instrs") {
+            if (!parse_u64(value, &cfg.warm_cache_instrs)) return false;
         } else if (key == "mem-pct") {
             if (!parse_i32(value, &cfg.mem_pct)) return false;
         } else if (key == "load-pct") {
@@ -172,8 +171,7 @@ int main(int argc, char** argv) {
     const int load_pct_clamped = clamp_pct(cfg.load_pct);
     const int cxl_pct_clamped = clamp_pct(cfg.cxl_pct);
 
-    const uint64_t fill_mem_instrs = std::min(cfg.warmup_mem_instrs, cfg.num_instrs);
-    const uint64_t cooldown_instrs = std::min(kCooldownInstrs, cfg.num_instrs);
+    const uint64_t warm_cache_instrs = std::min(cfg.warm_cache_instrs, cfg.num_instrs);
     const std::string out_path = cfg.out_dir + "/" + cfg.out_name;
 
     std::ofstream out(out_path, std::ios::binary);
@@ -189,14 +187,12 @@ int main(int argc, char** argv) {
 
     std::mt19937_64 rng(cfg.seed);
 
-    uint64_t load_count = 0;
-    uint64_t store_count = 0;
-    uint64_t load_cxl_count = 0;
-    uint64_t load_local_count = 0;
-    uint64_t store_cxl_count = 0;
-    uint64_t store_local_count = 0;
     uint64_t main_loop_load_count = 0;
     uint64_t main_loop_store_count = 0;
+    uint64_t main_loop_load_cxl_count = 0;
+    uint64_t main_loop_load_local_count = 0;
+    uint64_t main_loop_store_cxl_count = 0;
+    uint64_t main_loop_store_local_count = 0;
 
     const double util_target = static_cast<double>(mem_pct_clamped) / 100.0;
     const double load_frac = static_cast<double>(load_pct_clamped) / 100.0;
@@ -219,8 +215,8 @@ int main(int argc, char** argv) {
 
     uint64_t instr_idx = 0;
 
-    // Loop 1: fill cache (all mem ops)
-    for (uint64_t i = 0; i < fill_mem_instrs && instr_idx < cfg.num_instrs; ++i, ++instr_idx) {
+    // Loop 1: warm-cache phase (all mem ops, load/store ratio preserved).
+    for (uint64_t i = 0; i < warm_cache_instrs && instr_idx < cfg.num_instrs; ++i, ++instr_idx) {
         input_instr instr{};
         instr.ip = 0x1000ull + (instr_idx * 4ull);
         instr.is_branch = 0;
@@ -231,20 +227,8 @@ int main(int argc, char** argv) {
         uint64_t addr = pick_addr(is_cxl, rng, cfg);
         if (do_load) {
             instr.source_memory[0] = addr;
-            load_count++;
-            if (is_cxl) {
-                load_cxl_count++;
-            } else {
-                load_local_count++;
-            }
         } else {
             instr.destination_memory[0] = addr;
-            store_count++;
-            if (is_cxl) {
-                store_cxl_count++;
-            } else {
-                store_local_count++;
-            }
         }
 
         out.write(reinterpret_cast<const char*>(&instr), sizeof(instr));
@@ -254,21 +238,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Loop 2: cooldown (non-mem ops only)
-    for (uint64_t i = 0; i < cooldown_instrs && instr_idx < cfg.num_instrs; ++i, ++instr_idx) {
-        input_instr instr{};
-        instr.ip = 0x1000ull + (instr_idx * 4ull);
-        instr.is_branch = 0;
-        instr.branch_taken = 0;
-
-        out.write(reinterpret_cast<const char*>(&instr), sizeof(instr));
-        if (!out) {
-            std::cerr << "error: write failed at instruction " << instr_idx << "\n";
-            return 2;
-        }
-    }
-
-    // Loop 3: main traffic (mem_pct after cooldown)
+    // Loop 2: main traffic phase (mem_pct-controlled mix)
     for (; instr_idx < cfg.num_instrs; ++instr_idx) {
         input_instr instr{};
         instr.ip = 0x1000ull + (instr_idx * 4ull);
@@ -282,21 +252,19 @@ int main(int argc, char** argv) {
             uint64_t addr = pick_addr(is_cxl, rng, cfg);
             if (do_load) {
                 instr.source_memory[0] = addr;
-                load_count++;
                 main_loop_load_count++;
                 if (is_cxl) {
-                    load_cxl_count++;
+                    main_loop_load_cxl_count++;
                 } else {
-                    load_local_count++;
+                    main_loop_load_local_count++;
                 }
             } else {
                 instr.destination_memory[0] = addr;
-                store_count++;
                 main_loop_store_count++;
                 if (is_cxl) {
-                    store_cxl_count++;
+                    main_loop_store_cxl_count++;
                 } else {
-                    store_local_count++;
+                    main_loop_store_local_count++;
                 }
             }
         }
@@ -309,8 +277,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "Wrote " << cfg.num_instrs << " instructions to " << out_path << "\n";
-    std::cout << "fill_mem_instrs=" << fill_mem_instrs
-              << " cooldown_instrs=" << cooldown_instrs
+    std::cout << "warm_cache_instrs=" << warm_cache_instrs
               << " util_target_pct=" << mem_pct_clamped
               << " effective_mem_prob=" << mem_prob
               << " load_pct=" << load_pct_clamped
@@ -330,12 +297,15 @@ int main(int argc, char** argv) {
               << " cxl_base=0x" << kCxlBase << std::dec << "\n";
     std::cout << "line_size=" << kLineSize << "\n";
 
-    const double instrs = static_cast<double>(cfg.num_instrs);
+    const uint64_t main_loop_instrs_u64 = (cfg.num_instrs > warm_cache_instrs)
+        ? (cfg.num_instrs - warm_cache_instrs)
+        : 0;
+    const double instrs = static_cast<double>(main_loop_instrs_u64);
     const double bytes_per_op = static_cast<double>(kLineSize);
-    const double load_local_bpi = (instrs > 0) ? (static_cast<double>(load_local_count) / instrs) * bytes_per_op : 0.0;
-    const double load_cxl_bpi = (instrs > 0) ? (static_cast<double>(load_cxl_count) / instrs) * bytes_per_op : 0.0;
-    const double store_local_bpi = (instrs > 0) ? (static_cast<double>(store_local_count) / instrs) * bytes_per_op : 0.0;
-    const double store_cxl_bpi = (instrs > 0) ? (static_cast<double>(store_cxl_count) / instrs) * bytes_per_op : 0.0;
+    const double load_local_bpi = (instrs > 0) ? (static_cast<double>(main_loop_load_local_count) / instrs) * bytes_per_op : 0.0;
+    const double load_cxl_bpi = (instrs > 0) ? (static_cast<double>(main_loop_load_cxl_count) / instrs) * bytes_per_op : 0.0;
+    const double store_local_bpi = (instrs > 0) ? (static_cast<double>(main_loop_store_local_count) / instrs) * bytes_per_op : 0.0;
+    const double store_cxl_bpi = (instrs > 0) ? (static_cast<double>(main_loop_store_cxl_count) / instrs) * bytes_per_op : 0.0;
 
     const double load_local_gbps = load_local_bpi * kIpcAssumed * kClockGhz;
     const double load_cxl_gbps = load_cxl_bpi * kIpcAssumed * kClockGhz;
@@ -343,7 +313,7 @@ int main(int argc, char** argv) {
     const double store_cxl_gbps = store_cxl_bpi * kIpcAssumed * kClockGhz;
     const double total_gbps = load_local_gbps + load_cxl_gbps + store_local_gbps + store_cxl_gbps;
 
-    std::cout << "Projected BW (GB/s) assuming IPC=" << kIpcAssumed
+    std::cout << "Projected BW (GB/s, main-loop only) assuming IPC=" << kIpcAssumed
               << " @ " << kClockGhz << "GHz\n";
     std::cout << "  load_local: " << load_local_gbps
               << " load_cxl: " << load_cxl_gbps

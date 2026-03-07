@@ -25,6 +25,10 @@ CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 # Output
 LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
+WARM_CACHE_INSTS = 200_000
+WARMUP_MAIN_INSTS = 100_000
+WARMUP_INSTS = WARM_CACHE_INSTS + WARMUP_MAIN_INSTS
+SIM_INSTS = 2_000_000
 
 # Switch policy (no replication)
 REPLICATE_WRITES = 0
@@ -72,8 +76,9 @@ for i in range(NUM_NODES):
         "cache_heartbeat_period": 0,
         "cpu_heartbeat_period": 0,
         "clock": "2.4GHz",
-        "warmup_insts": 750_000,
-        "sim_insts": 200_000,
+        "warmup_insts": WARMUP_INSTS,
+        "warm_cache_insts": WARM_CACHE_INSTS,
+        "sim_insts": SIM_INSTS,
         "cxl_link_bw_cycles": BW_CXL_CYCLES,
         "cxl_link_latency_cycles": T_CXL,
         "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,

@@ -194,7 +194,9 @@ void FabricPort::handle_event(SST::Event* ev) {
         }
         if (ctrl_code == kControlResetUtil) {
             reset_ingress_utilization();
-            // Let reset events propagate to downstream components.
+            // Reset controls are out-of-band: do not let data backlog delay phase reset propagation.
+            ready_.push_front(cevent);
+            return;
         }
     }
 

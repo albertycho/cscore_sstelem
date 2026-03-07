@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iomanip>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <sstream>
 
@@ -83,6 +84,10 @@ namespace SST {
             node_id = params.find<int64_t>("node_id", 0);
             warmup_insts = params.find<int64_t>("warmup_insts", 0);
             sim_insts = params.find<int64_t>("sim_insts", 0);
+            warm_cache_insts_ = params.find<uint64_t>("warm_cache_insts", warmup_insts);
+            if (warm_cache_insts_ > warmup_insts) {
+                warm_cache_insts_ = warmup_insts;
+            }
             lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
             print_latency_hist_ = params.find<int>("print_latency_hist", 1) != 0;
             auto dram_size_bytes = params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES);
@@ -431,6 +436,12 @@ namespace SST {
 			heartbeat_count++;
 
             const auto cycle_u = static_cast<uint64_t>(cycle);
+            while (!warmup_bypass_responses_.empty()) {
+                if (!deliver_remote_response(warmup_bypass_responses_.front())) {
+                    break;
+                }
+                warmup_bypass_responses_.pop_front();
+            }
             remote_port_.tick(cycle_u);
             remote_port_.try_receive(cycle_u, [this](csEvent* ev) {
                 return handle_remote_event(ev);
@@ -459,8 +470,6 @@ namespace SST {
 					
 			}
 
-			advance_remote_requests();
-
 			uint8_t curr_core_id=0;
 			for (O3_CPU& cpu : cores){
 				//cpu.operate();
@@ -486,19 +495,7 @@ namespace SST {
             if (!cores.empty() && sim_insts > 0) {
                 auto retired = static_cast<uint64_t>(cores.front().num_retired);
                 if (!warmup_done && warmup_insts > 0 && retired >= warmup_insts) {
-                    for (auto& cache : caches) {
-                        cache.begin_phase();
-                    }
-                    for (auto& cpu : cores) {
-                        cpu.begin_phase();
-                    }
-                    MYDRAM.reset_utilization();
-                    if (cxl_port_configured_) {
-                        auto* ctrl = make_control_event(static_cast<uint64_t>(node_id), kControlBroadcast, kControlResetUtil);
-                        if (!remote_port_.send(ctrl)) {
-                            delete ctrl;
-                        }
-                    }
+                    // Warmup boundary is a phase marker only; stats remain continuous.
                     warmup_done = true;
                 }
 
@@ -591,7 +588,7 @@ namespace SST {
                 if (cache.NAME != "LLC") {
                     continue;
                 }
-                const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
+                const auto& st = cache.sim_stats;
                 const uint64_t total_demand_miss = demand_return_count(st);
                 const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
                 const double avg_miss_lat = (total_demand_miss > 0)
@@ -662,38 +659,49 @@ namespace SST {
                 return true;
             }
             auto resp = convert_event_to_response(*ev);
-            for (auto& cache : caches) {
-                if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {
-                    delete ev;
-                    return true;
-                }
+            if (!deliver_remote_response(resp)) {
+                return false;
             }
             delete ev;
             return true;
         }
 
+        bool csimCore::deliver_remote_response(const sst_response& resp)
+        {
+            for (auto& cache : caches) {
+                if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
 		bool csimCore::enqueue_remote_request(const sst_request& req)
 		{
-			remote_outbox.emplace_back(req);
-			return true;
-		}
-
-		void csimCore::advance_remote_requests()
-		{
-			if (!cxl_port_configured_) {
-				return;
-			}
-
-			while (!remote_outbox.empty()) {
-				const auto& req = remote_outbox.front();
-				auto* event = convert_request_to_event(req);
-				// TODO: path selection/routing metadata if needed
-				if (!remote_port_.send(event)) {
-					delete event;
-					break;
+			const uint64_t retired = (!cores.empty()) ? static_cast<uint64_t>(cores.front().num_retired) : 0;
+			const bool bypass_phase =
+				(warmup_insts > 0) &&
+				!warmup_done &&
+				(retired < warm_cache_insts_);
+			if (bypass_phase) {
+				if (req.response_requested) {
+					sst_response resp(req);
+					resp.src_node = (req.dst_node == std::numeric_limits<uint32_t>::max()) ? req.sst_cpu : req.dst_node;
+					resp.dst_node = (req.src_node == std::numeric_limits<uint32_t>::max()) ? req.cpu : req.src_node;
+					resp.msg_bytes = 64;
+					warmup_bypass_responses_.push_back(resp);
 				}
-				remote_outbox.pop_front();
+				return true;
 			}
+			if (!cxl_port_configured_) {
+				return false;
+			}
+			auto* event = convert_request_to_event(req);
+			if (!remote_port_.send(event)) {
+				delete event;
+				return false;
+			}
+			return true;
 		}
 
 	} // namespace csimCore
