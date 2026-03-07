@@ -13,7 +13,9 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
-OUT_ROOT = SCRIPT_DIR
+TRACE_ROOT = Path("/shared/kshan/CXL_sst_traces")
+OUTPUT_ROOT = SCRIPT_DIR
+CONFIG_PATH = OUTPUT_ROOT / "cxl_config.csv"
 SST_BIN = "sst"
 GEN_BIN = REPO_ROOT / "scripts" / "gen"
 GEN_SRC = REPO_ROOT / "scripts" / "generate_synth_trace.cpp"
@@ -67,6 +69,7 @@ def build_generator() -> None:
 
 
 def write_cxl_config(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         f.write("# node_id,start,size,type,target\n")
         for node in range(NUM_NODES):
@@ -74,6 +77,7 @@ def write_cxl_config(path: Path) -> None:
 
 
 def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
     trace_path = out_dir / trace_name
 
     cmd = [
@@ -136,7 +140,9 @@ def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, out_path: Path
 def main() -> int:
     build_generator()
 
-    OUT_ROOT.mkdir(parents=True, exist_ok=True)
+    TRACE_ROOT.mkdir(parents=True, exist_ok=True)
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    write_cxl_config(CONFIG_PATH)
 
     cases = list(itertools.product(LOAD_PCTS, MEM_PCTS))
     tasks = []
@@ -144,9 +150,7 @@ def main() -> int:
 
     for load_pct, mem_pct in cases:
         trace_name = f"synth_load{load_pct:03d}_mem{mem_pct:03d}.champsim.trace"
-        trace_path, gen_out = generate_trace(OUT_ROOT, trace_name, load_pct, mem_pct)
-        cxl_config = OUT_ROOT / f"cxl_config_load{load_pct:03d}_mem{mem_pct:03d}.csv"
-        write_cxl_config(cxl_config)
+        trace_path, gen_out = generate_trace(TRACE_ROOT, trace_name, load_pct, mem_pct)
 
         bw = parse_bw(gen_out)
         if bw:
@@ -160,17 +164,17 @@ def main() -> int:
             bw_row.update(bw)
             bw_rows.append(bw_row)
 
-        no_rep_out = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.out"
-        no_rep_err = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.err"
-        rep_out = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_rep.out"
-        rep_err = OUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_rep.err"
+        no_rep_out = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.out"
+        no_rep_err = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.err"
+        rep_out = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_rep.out"
+        rep_err = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_rep.err"
 
-        tasks.append((SIM_NO_REP, trace_path, cxl_config, no_rep_out, no_rep_err))
-        tasks.append((SIM_REP, trace_path, cxl_config, rep_out, rep_err))
+        tasks.append((SIM_NO_REP, trace_path, CONFIG_PATH, no_rep_out, no_rep_err))
+        tasks.append((SIM_REP, trace_path, CONFIG_PATH, rep_out, rep_err))
 
     if bw_rows:
         bw_rows.sort(key=lambda r: (r["load_pct"], r["mem_pct"]))
-        out_csv = OUT_ROOT / "expected_bandwidths.csv"
+        out_csv = OUTPUT_ROOT / "expected_bandwidths.csv"
         with out_csv.open("w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(bw_rows[0].keys()))
             writer.writeheader()
