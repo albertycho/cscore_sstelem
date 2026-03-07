@@ -54,6 +54,7 @@ SIM_REP = SCRIPT_DIR / "pool_sweep_replication.py"
 def build_generator() -> None:
     if GEN_BIN.exists():
         return
+    print("[STATUS] Building trace generator...")
     GEN_BIN.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "g++",
@@ -70,6 +71,7 @@ def build_generator() -> None:
 
 def write_cxl_config(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[STATUS] Writing CXL config: {path}")
     with path.open("w") as f:
         f.write("# node_id,start,size,type,target\n")
         for node in range(NUM_NODES):
@@ -79,6 +81,7 @@ def write_cxl_config(path: Path) -> None:
 def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     trace_path = out_dir / trace_name
+    print(f"[STATUS] Generating trace {trace_name} (load={load_pct} mem={mem_pct})")
 
     cmd = [
         str(GEN_BIN),
@@ -138,6 +141,7 @@ def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, out_path: Path
 
 
 def main() -> int:
+    print("[STATUS] Starting load/store/util sweep")
     build_generator()
 
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -180,7 +184,10 @@ def main() -> int:
             writer.writeheader()
             writer.writerows(bw_rows)
 
+    total_tasks = len(tasks)
+    print(f"[STATUS] Launching {total_tasks} runs with up to {MAX_PARALLEL} in parallel")
     failures = 0
+    completed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as executor:
         future_to_task = {executor.submit(run_sst, *task): task for task in tasks}
         for future in concurrent.futures.as_completed(future_to_task):
@@ -194,6 +201,9 @@ def main() -> int:
             if rc != 0:
                 print(f"[FAIL] {sim_script.name} -> {out_path} (rc={rc})")
                 failures += 1
+            completed += 1
+            if completed % 10 == 0 or completed == total_tasks:
+                print(f"[STATUS] Completed {completed}/{total_tasks}")
 
     if failures:
         print(f"Completed with {failures} failures.")
