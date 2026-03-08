@@ -90,7 +90,8 @@ namespace SST {
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
             { "warm_cache_insts", "Initial instructions where remote requests are satisfied locally (cache warm only, no fabric traffic). Clamped to warmup_insts.", "0 (defaults to warmup_insts)" },
             { "lightweight_output", "If set, emit stat.* summaries only", "0" },
-            { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" }
+            { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" },
+            { "fabric_diag_output", "If set, emit FabricPort queue-wait diagnostics", "0" }
             
         )
         SST_ELI_DOCUMENT_PORTS(
@@ -181,6 +182,7 @@ namespace SST {
         bool final_stats_printed = false;
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
+        bool fabric_diag_output_ = false;
         std::chrono::steady_clock::time_point wall_start_{};
         std::chrono::steady_clock::duration active_time_{};
         uint64_t active_calls_ = 0;

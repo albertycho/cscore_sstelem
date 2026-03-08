@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 #include <sst/core/link.h>
 
@@ -68,6 +69,12 @@ public:
     double ingress_avg_utilization() const;
     double ingress_utilization() const;
     std::size_t ingress_occupancy() const;
+    double ingress_avg_wait_cycles() const;
+    double egress_avg_wait_cycles() const;
+    uint64_t ingress_max_wait_cycles() const;
+    uint64_t egress_max_wait_cycles() const;
+    uint64_t ingress_samples() const;
+    uint64_t egress_samples() const;
 
 private:
     bool can_receive(uint64_t cycle);
@@ -85,6 +92,14 @@ private:
     std::deque<csEvent*> ready_;
     uint64_t last_tick_cycle_ = std::numeric_limits<uint64_t>::max();
     uint64_t last_deliver_cycle_ = std::numeric_limits<uint64_t>::max();
+    std::unordered_map<csEvent*, uint64_t> ingress_enq_cycle_;
+    std::unordered_map<csEvent*, uint64_t> egress_enq_cycle_;
+    uint64_t ingress_wait_sum_cycles_ = 0;
+    uint64_t ingress_wait_samples_ = 0;
+    uint64_t ingress_wait_max_cycles_ = 0;
+    uint64_t egress_wait_sum_cycles_ = 0;
+    uint64_t egress_wait_samples_ = 0;
+    uint64_t egress_wait_max_cycles_ = 0;
 
     bool egress_queue_full() const;
 };

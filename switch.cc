@@ -60,6 +60,7 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     link_latency_cycles_ = params.find<int64_t>("link_latency_cycles", 0);
     link_queue_size_ = params.find<int64_t>("link_queue_size", 0);
     lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
+    fabric_diag_output_ = params.find<int>("fabric_diag_output", 0) != 0;
 
     if (num_nodes_ <= 0) {
         throw std::runtime_error("Switch: num_nodes must be > 0.");
@@ -302,12 +303,72 @@ void Switch::finish()
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
+    auto avg_ingress_wait = [](const std::vector<PortState>& ports) {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for (const auto& port : ports) {
+            sum += port.port.ingress_avg_wait_cycles();
+            count++;
+        }
+        return count > 0 ? sum / static_cast<double>(count) : 0.0;
+    };
+    auto avg_egress_wait = [](const std::vector<PortState>& ports) {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for (const auto& port : ports) {
+            sum += port.port.egress_avg_wait_cycles();
+            count++;
+        }
+        return count > 0 ? sum / static_cast<double>(count) : 0.0;
+    };
+    auto max_ingress_wait = [](const std::vector<PortState>& ports) {
+        uint64_t max_wait = 0;
+        for (const auto& port : ports) {
+            max_wait = std::max(max_wait, port.port.ingress_max_wait_cycles());
+        }
+        return max_wait;
+    };
+    auto max_egress_wait = [](const std::vector<PortState>& ports) {
+        uint64_t max_wait = 0;
+        for (const auto& port : ports) {
+            max_wait = std::max(max_wait, port.port.egress_max_wait_cycles());
+        }
+        return max_wait;
+    };
+    auto sum_ingress_samples = [](const std::vector<PortState>& ports) {
+        uint64_t samples = 0;
+        for (const auto& port : ports) {
+            samples += port.port.ingress_samples();
+        }
+        return samples;
+    };
+    auto sum_egress_samples = [](const std::vector<PortState>& ports) {
+        uint64_t samples = 0;
+        for (const auto& port : ports) {
+            samples += port.port.egress_samples();
+        }
+        return samples;
+    };
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
     if (lightweight_output_) {
         std::cout << "stat.switch.replicated_messages = " << replicated_count_ << '\n';
         std::cout << "stat.switch.util.node_ingress_avg = " << avg_util(node_ports_) << '\n';
         std::cout << "stat.switch.util.pool_ingress_avg = " << avg_util(pool_ports_) << '\n';
+        if (fabric_diag_output_) {
+            std::cout << "stat.switch.fabric.node_ingress_wait_avg_cycles = " << avg_ingress_wait(node_ports_) << '\n';
+            std::cout << "stat.switch.fabric.node_egress_wait_avg_cycles = " << avg_egress_wait(node_ports_) << '\n';
+            std::cout << "stat.switch.fabric.pool_ingress_wait_avg_cycles = " << avg_ingress_wait(pool_ports_) << '\n';
+            std::cout << "stat.switch.fabric.pool_egress_wait_avg_cycles = " << avg_egress_wait(pool_ports_) << '\n';
+            std::cout << "stat.switch.fabric.node_ingress_wait_max_cycles = " << max_ingress_wait(node_ports_) << '\n';
+            std::cout << "stat.switch.fabric.node_egress_wait_max_cycles = " << max_egress_wait(node_ports_) << '\n';
+            std::cout << "stat.switch.fabric.pool_ingress_wait_max_cycles = " << max_ingress_wait(pool_ports_) << '\n';
+            std::cout << "stat.switch.fabric.pool_egress_wait_max_cycles = " << max_egress_wait(pool_ports_) << '\n';
+            std::cout << "stat.switch.fabric.node_ingress_samples = " << sum_ingress_samples(node_ports_) << '\n';
+            std::cout << "stat.switch.fabric.node_egress_samples = " << sum_egress_samples(node_ports_) << '\n';
+            std::cout << "stat.switch.fabric.pool_ingress_samples = " << sum_ingress_samples(pool_ports_) << '\n';
+            std::cout << "stat.switch.fabric.pool_egress_samples = " << sum_egress_samples(pool_ports_) << '\n';
+        }
         std::cout << "stat.switch.walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();

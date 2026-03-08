@@ -1,6 +1,7 @@
 #include "fabric_port.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -73,6 +74,20 @@ uint64_t event_credit_dst(csEvent* const& ev) {
     return kControlBroadcast;
 }
 
+uint64_t cycle_tag(uint64_t tick_cycle) {
+    return (tick_cycle == std::numeric_limits<uint64_t>::max()) ? 0 : tick_cycle;
+}
+
+void accumulate_wait(uint64_t now, uint64_t then, uint64_t& sum, uint64_t& samples, uint64_t& max_wait) {
+    if (now < then) {
+        return;
+    }
+    const uint64_t delta = now - then;
+    sum += delta;
+    samples += 1;
+    max_wait = std::max(max_wait, delta);
+}
+
 csEvent* make_credit_event(uint64_t src, uint64_t dst, uint64_t bytes) {
     auto* ev = new csEvent();
     ev->payload.reserve(4);
@@ -135,6 +150,7 @@ bool FabricPort::send(csEvent* item) {
     if (!can_send()) {
         return false;
     }
+    egress_enq_cycle_[item] = cycle_tag(last_tick_cycle_);
     egress_queue_.push_back(item);
     return true;
 }
@@ -152,6 +168,11 @@ std::optional<csEvent*> FabricPort::receive(uint64_t cycle) {
         return std::nullopt;
     }
     csEvent* item = std::move(ready_.front());
+    auto it = ingress_enq_cycle_.find(item);
+    if (it != ingress_enq_cycle_.end()) {
+        accumulate_wait(cycle, it->second, ingress_wait_sum_cycles_, ingress_wait_samples_, ingress_wait_max_cycles_);
+        ingress_enq_cycle_.erase(it);
+    }
     const uint64_t credit_dst = event_credit_dst(item);
     const uint64_t credit_len = credit_bytes(item);
     ready_.pop_front();
@@ -170,6 +191,11 @@ bool FabricPort::try_receive(uint64_t cycle,
     const uint64_t credit_len = credit_bytes(item);
     if (!handle(item)) {
         return false;
+    }
+    auto it = ingress_enq_cycle_.find(item);
+    if (it != ingress_enq_cycle_.end()) {
+        accumulate_wait(cycle, it->second, ingress_wait_sum_cycles_, ingress_wait_samples_, ingress_wait_max_cycles_);
+        ingress_enq_cycle_.erase(it);
     }
     ready_.pop_front();
     last_deliver_cycle_ = cycle;
@@ -203,6 +229,7 @@ void FabricPort::handle_event(SST::Event* ev) {
     if (!ingress_->add_packet(cevent)) {
         throw std::runtime_error("FabricPort: ingress queue full; credit accounting mismatch.");
     }
+    ingress_enq_cycle_[cevent] = cycle_tag(last_tick_cycle_);
 }
 
 void FabricPort::reset_ingress_utilization() {
@@ -225,6 +252,36 @@ std::size_t FabricPort::ingress_occupancy() const {
     return ingress_->occupancy();
 }
 
+double FabricPort::ingress_avg_wait_cycles() const {
+    if (ingress_wait_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_wait_sum_cycles_) / static_cast<double>(ingress_wait_samples_);
+}
+
+double FabricPort::egress_avg_wait_cycles() const {
+    if (egress_wait_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_wait_sum_cycles_) / static_cast<double>(egress_wait_samples_);
+}
+
+uint64_t FabricPort::ingress_max_wait_cycles() const {
+    return ingress_wait_max_cycles_;
+}
+
+uint64_t FabricPort::egress_max_wait_cycles() const {
+    return egress_wait_max_cycles_;
+}
+
+uint64_t FabricPort::ingress_samples() const {
+    return ingress_wait_samples_;
+}
+
+uint64_t FabricPort::egress_samples() const {
+    return egress_wait_samples_;
+}
+
 bool FabricPort::can_receive(uint64_t cycle) {
     tick(cycle);
     if (last_deliver_cycle_ == cycle) {
@@ -245,6 +302,12 @@ void FabricPort::drain_egress() {
         csEvent* ev = egress_queue_.front();
         if (!try_consume_credit(egress_credits_, credit_bytes(ev))) {
             break;
+        }
+        auto it = egress_enq_cycle_.find(ev);
+        if (it != egress_enq_cycle_.end()) {
+            accumulate_wait(cycle_tag(last_tick_cycle_), it->second,
+                            egress_wait_sum_cycles_, egress_wait_samples_, egress_wait_max_cycles_);
+            egress_enq_cycle_.erase(it);
         }
         link_->send(ev);
         egress_queue_.pop_front();

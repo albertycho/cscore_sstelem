@@ -90,6 +90,7 @@ namespace SST {
             }
             lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
             print_latency_hist_ = params.find<int>("print_latency_hist", 1) != 0;
+            fabric_diag_output_ = params.find<int>("fabric_diag_output", 0) != 0;
             auto dram_size_bytes = params.find<uint64_t>("dram_size_bytes", DEFAULT_DRAM_SIZE_BYTES);
             pool_pa_base = params.find<uint64_t>("pool_pa_base", 0);
             if (pool_pa_base == 0) {
@@ -598,6 +599,9 @@ namespace SST {
                 const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
                 const uint64_t total_demand_miss = demand_return_count(st);
                 const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
+                const uint64_t pool_accesses = st.pool_accesses;
+                const uint64_t pool_completed = st.pool_completed;
+                const uint64_t pool_outstanding = (pool_accesses >= pool_completed) ? (pool_accesses - pool_completed) : 0;
                 const double avg_miss_lat = (total_demand_miss > 0)
                     ? static_cast<double>(st.total_miss_latency_cycles) / static_cast<double>(total_demand_miss)
                     : 0.0;
@@ -610,6 +614,9 @@ namespace SST {
                     std::cout << prefix << "total_miss = " << total_demand_miss << '\n';
                     std::cout << prefix << "avg_miss_lat = " << avg_miss_lat << '\n';
                     std::cout << prefix << "avg_cxl_lat = " << avg_cxl_lat << '\n';
+                    std::cout << prefix << "pool_accesses = " << pool_accesses << '\n';
+                    std::cout << prefix << "pool_completed = " << pool_completed << '\n';
+                    std::cout << prefix << "pool_outstanding = " << pool_outstanding << '\n';
                     if (print_latency_hist_) {
                         std::cout << prefix << "miss_lat_hist_bin_ns = 10\n";
                         std::cout << prefix << "miss_lat_hist = [";
@@ -624,6 +631,8 @@ namespace SST {
                 } else {
                     std::cout << cxl_demand_miss << " / " << total_demand_miss << " LLC misses are CXL" << std::endl;
                     std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl lat: " << avg_cxl_lat << std::endl;
+                    std::cout << "LLC pool accesses/completed/outstanding: "
+                              << pool_accesses << " / " << pool_completed << " / " << pool_outstanding << std::endl;
                     if (print_latency_hist_) {
                         std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
                         for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {
@@ -641,6 +650,17 @@ namespace SST {
                 const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".";
                 std::cout << prefix << "util.dram_avg = " << MYDRAM.queue_average_utilization(0) << '\n';
                 std::cout << prefix << "walltime_s = " << total_sec << '\n';
+                if (fabric_diag_output_) {
+                    const auto fabric_prefix = prefix + "fabric.";
+                    std::cout << fabric_prefix << "ingress_wait_avg_cycles = " << remote_port_.ingress_avg_wait_cycles() << '\n';
+                    std::cout << fabric_prefix << "ingress_wait_max_cycles = " << remote_port_.ingress_max_wait_cycles() << '\n';
+                    std::cout << fabric_prefix << "ingress_samples = " << remote_port_.ingress_samples() << '\n';
+                    std::cout << fabric_prefix << "egress_wait_avg_cycles = " << remote_port_.egress_avg_wait_cycles() << '\n';
+                    std::cout << fabric_prefix << "egress_wait_max_cycles = " << remote_port_.egress_max_wait_cycles() << '\n';
+                    std::cout << fabric_prefix << "egress_samples = " << remote_port_.egress_samples() << '\n';
+                    std::cout << fabric_prefix << "ingress_occ = " << remote_port_.ingress_occupancy() << '\n';
+                    std::cout << fabric_prefix << "ingress_avg_util = " << remote_port_.ingress_avg_utilization() << '\n';
+                }
                 if (active_calls_ > 0) {
                     const auto active_sec = std::chrono::duration<double>(active_time_).count();
                     std::cout << prefix << "active_time_s = " << active_sec << '\n';

@@ -50,7 +50,8 @@ public:
         { "link_queue_size", "CXL ingress queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
         { "pool_node_id", "Logical node id used in fabric headers", "100" },
         { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" },
-        { "lightweight_output", "If set, emit stat.* pool summaries", "0" }
+        { "lightweight_output", "If set, emit stat.* pool summaries", "0" },
+        { "fabric_diag_output", "If set, emit FabricPort queue-wait diagnostics", "0" }
     )
 
     SST_ELI_DOCUMENT_PORTS(
@@ -171,6 +172,7 @@ private:
     uint64_t total_completed_ = 0;
     uint64_t heartbeat_period_ = 1000;
     bool lightweight_output_ = false;
+    bool fabric_diag_output_ = false;
     std::chrono::steady_clock::time_point wall_start_{};
     std::chrono::steady_clock::duration active_time_{};
     uint64_t active_calls_ = 0;

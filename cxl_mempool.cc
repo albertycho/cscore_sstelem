@@ -63,7 +63,8 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
                 resolve_mem_bw(memory_bandwidth_, device_bandwidth_, pool_bw_cycles_per_req_),
                 select_pool_latency_fn(params, latency_cycles_)),
       heartbeat_period_(params.find<uint64_t>("heartbeat_period", 1000)),
-      lightweight_output_(params.find<int>("lightweight_output", 0) != 0) {
+      lightweight_output_(params.find<int>("lightweight_output", 0) != 0),
+      fabric_diag_output_(params.find<int>("fabric_diag_output", 0) != 0) {
 
     registerClock(clock_frequency_, new Clock::Handler<CXLMemoryPool>(this, &CXLMemoryPool::clock_tick));
 
@@ -312,12 +313,66 @@ void CXLMemoryPool::finish() {
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
     const auto stats = request_link_stats();
+    auto avg_ingress_wait = [this]() {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for_each_port([&](const FabricPort& port) {
+            sum += port.ingress_avg_wait_cycles();
+            count++;
+        });
+        return (count > 0) ? (sum / static_cast<double>(count)) : 0.0;
+    };
+    auto avg_egress_wait = [this]() {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for_each_port([&](const FabricPort& port) {
+            sum += port.egress_avg_wait_cycles();
+            count++;
+        });
+        return (count > 0) ? (sum / static_cast<double>(count)) : 0.0;
+    };
+    auto max_ingress_wait = [this]() {
+        uint64_t max_wait = 0;
+        for_each_port([&](const FabricPort& port) {
+            max_wait = std::max(max_wait, port.ingress_max_wait_cycles());
+        });
+        return max_wait;
+    };
+    auto max_egress_wait = [this]() {
+        uint64_t max_wait = 0;
+        for_each_port([&](const FabricPort& port) {
+            max_wait = std::max(max_wait, port.egress_max_wait_cycles());
+        });
+        return max_wait;
+    };
+    auto sum_ingress_samples = [this]() {
+        uint64_t samples = 0;
+        for_each_port([&](const FabricPort& port) {
+            samples += port.ingress_samples();
+        });
+        return samples;
+    };
+    auto sum_egress_samples = [this]() {
+        uint64_t samples = 0;
+        for_each_port([&](const FabricPort& port) {
+            samples += port.egress_samples();
+        });
+        return samples;
+    };
 
     if (lightweight_output_) {
         const auto prefix = std::string("stat.pool.") + std::to_string(pool_node_id_) + ".";
         std::cout << prefix << "util.mem_avg = " << mem_ctrl_.queue_average_utilization(0) << '\n';
         if (stats.avg_util > 0.0) {
             std::cout << prefix << "util.req_link_avg = " << stats.avg_util << '\n';
+        }
+        if (fabric_diag_output_) {
+            std::cout << prefix << "fabric.ingress_wait_avg_cycles = " << avg_ingress_wait() << '\n';
+            std::cout << prefix << "fabric.ingress_wait_max_cycles = " << max_ingress_wait() << '\n';
+            std::cout << prefix << "fabric.ingress_samples = " << sum_ingress_samples() << '\n';
+            std::cout << prefix << "fabric.egress_wait_avg_cycles = " << avg_egress_wait() << '\n';
+            std::cout << prefix << "fabric.egress_wait_max_cycles = " << max_egress_wait() << '\n';
+            std::cout << prefix << "fabric.egress_samples = " << sum_egress_samples() << '\n';
         }
         std::cout << prefix << "walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {

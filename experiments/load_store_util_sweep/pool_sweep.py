@@ -25,6 +25,7 @@ CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 # Output
 LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
+FABRIC_DIAG_OUTPUT = int(os.environ.get("FABRIC_DIAG_OUTPUT", "0"))
 WARM_CACHE_INSTS = 200_000
 WARMUP_MAIN_INSTS = 100_000
 WARMUP_INSTS = WARM_CACHE_INSTS + WARMUP_MAIN_INSTS
@@ -45,6 +46,7 @@ switch.addParams({
     "link_latency_cycles": T_CXL,
     "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     "lightweight_output": LIGHTWEIGHT_OUTPUT,
+    "fabric_diag_output": FABRIC_DIAG_OUTPUT,
 })
 
 pools = []
@@ -60,6 +62,7 @@ for j in range(NUM_POOLS):
         "link_queue_size": REMOTE_LINK_QUEUE_SIZE,
         "heartbeat_period": 0,
         "lightweight_output": LIGHTWEIGHT_OUTPUT,
+        "fabric_diag_output": FABRIC_DIAG_OUTPUT,
     })
     pools.append(pool)
 
@@ -84,6 +87,7 @@ for i in range(NUM_NODES):
         "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
         "lightweight_output": LIGHTWEIGHT_OUTPUT,
         "print_latency_hist": PRINT_LAT_HIST,
+        "fabric_diag_output": FABRIC_DIAG_OUTPUT,
     })
 
     l0 = sst.Link(f"s{i}_to_switch")
