@@ -6,13 +6,13 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "channel.h"
 #include "event_counter.h"
 
 struct cache_stats {
   static constexpr std::size_t POOL_LAT_HIST_BINS = 32;
-  static constexpr std::size_t MISS_LAT_HIST_BINS = 100;
 
   std::string name;
   // prefetch stats
@@ -35,7 +35,7 @@ struct cache_stats {
   uint64_t pool_demand_miss_count = 0;
   uint64_t pool_demand_miss_latency_sum = 0;
   std::array<uint64_t, POOL_LAT_HIST_BINS> pool_latency_hist{};
-  std::array<uint64_t, MISS_LAT_HIST_BINS> miss_latency_hist{};
+  std::vector<uint64_t> miss_latency_hist{};
 };
 
 cache_stats operator-(cache_stats lhs, cache_stats rhs);

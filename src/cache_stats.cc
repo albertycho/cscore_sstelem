@@ -1,5 +1,7 @@
 #include "cache_stats.h"
 
+#include <algorithm>
+
 cache_stats operator-(cache_stats lhs, cache_stats rhs)
 {
   cache_stats result;
@@ -21,8 +23,12 @@ cache_stats operator-(cache_stats lhs, cache_stats rhs)
   for (std::size_t idx = 0; idx < result.pool_latency_hist.size(); ++idx) {
     result.pool_latency_hist[idx] = lhs.pool_latency_hist[idx] - rhs.pool_latency_hist[idx];
   }
-  for (std::size_t idx = 0; idx < result.miss_latency_hist.size(); ++idx) {
-    result.miss_latency_hist[idx] = lhs.miss_latency_hist[idx] - rhs.miss_latency_hist[idx];
+  const std::size_t miss_hist_size = std::max(lhs.miss_latency_hist.size(), rhs.miss_latency_hist.size());
+  result.miss_latency_hist.assign(miss_hist_size, 0);
+  for (std::size_t idx = 0; idx < miss_hist_size; ++idx) {
+    const uint64_t l = idx < lhs.miss_latency_hist.size() ? lhs.miss_latency_hist[idx] : 0;
+    const uint64_t r = idx < rhs.miss_latency_hist.size() ? rhs.miss_latency_hist[idx] : 0;
+    result.miss_latency_hist[idx] = l - r;
   }
   return result;
 }

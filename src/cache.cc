@@ -55,13 +55,16 @@ std::size_t miss_latency_bin(champsim::chrono::clock::duration latency)
   if (ns <= 0) {
     return 0;
   }
-  auto idx = static_cast<std::size_t>(ns / 10);
-  return std::min(idx, cache_stats::MISS_LAT_HIST_BINS - 1);
+  return static_cast<std::size_t>(ns / 10);
 }
 
 void record_miss_latency(cache_stats& stats, champsim::chrono::clock::duration latency)
 {
-  stats.miss_latency_hist.at(miss_latency_bin(latency))++;
+  const auto bin = miss_latency_bin(latency);
+  if (stats.miss_latency_hist.size() <= bin) {
+    stats.miss_latency_hist.resize(bin + 1, 0);
+  }
+  stats.miss_latency_hist[bin]++;
 }
 } // namespace
 
