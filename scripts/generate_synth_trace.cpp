@@ -23,6 +23,7 @@ struct Config {
 
 // Fixed parameters (not configurable via CLI)
 constexpr uint64_t kLineSize = 64;
+constexpr uint64_t kFixedIp = 0x1000ull;
 constexpr double kClockGhz = 2.4;
 // Utilization->probability mapping depends on this assumption.
 constexpr double kIpcAssumed = 0.5;
@@ -161,6 +162,11 @@ static uint64_t pick_addr(bool is_cxl, std::mt19937_64& rng, const Config& cfg) 
     return addr;
 }
 
+static uint64_t pick_ip(uint64_t instr_idx) {
+    (void)instr_idx;
+    return kFixedIp;
+}
+
 int main(int argc, char** argv) {
     Config cfg{};
     if (!parse_args(argc, argv, cfg)) {
@@ -218,7 +224,7 @@ int main(int argc, char** argv) {
     // Loop 1: warm-cache phase (all mem ops, load/store ratio preserved).
     for (uint64_t i = 0; i < warm_cache_instrs && instr_idx < cfg.num_instrs; ++i, ++instr_idx) {
         input_instr instr{};
-        instr.ip = 0x1000ull + (instr_idx * 4ull);
+        instr.ip = pick_ip(instr_idx);
         instr.is_branch = 0;
         instr.branch_taken = 0;
 
@@ -241,7 +247,7 @@ int main(int argc, char** argv) {
     // Loop 2: main traffic phase (mem_pct-controlled mix)
     for (; instr_idx < cfg.num_instrs; ++instr_idx) {
         input_instr instr{};
-        instr.ip = 0x1000ull + (instr_idx * 4ull);
+        instr.ip = pick_ip(instr_idx);
         instr.is_branch = 0;
         instr.branch_taken = 0;
 
@@ -296,6 +302,7 @@ int main(int argc, char** argv) {
     std::cout << "local_base=0x" << std::hex << kLocalBase
               << " cxl_base=0x" << kCxlBase << std::dec << "\n";
     std::cout << "line_size=" << kLineSize << "\n";
+    std::cout << "fixed_ip=0x" << std::hex << kFixedIp << std::dec << "\n";
 
     const uint64_t main_loop_instrs_u64 = (cfg.num_instrs > warm_cache_instrs)
         ? (cfg.num_instrs - warm_cache_instrs)
