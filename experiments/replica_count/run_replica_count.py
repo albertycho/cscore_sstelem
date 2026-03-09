@@ -22,14 +22,14 @@ GEN_SRC = REPO_ROOT / "scripts" / "generate_synth_trace.cpp"
 SIM_NO_REP = SCRIPT_DIR / "pool_replica_count_no_rep.py"
 SIM_REP = SCRIPT_DIR / "pool_replica_count_rep.py"
 
-MPI_RANKS = 8
-NUM_NODES = 8
+MPI_RANKS = 16
+NUM_NODES = 16
 POOL_NODE_ID_BASE = 100
 
 MAX_CORE_BUDGET = 160
 MAX_PARALLEL = max(1, MAX_CORE_BUDGET // MPI_RANKS)
 
-REPLICA_COUNTS = [1, 2, 4, 8]
+REPLICA_COUNTS = [1, 2, 4, 8, 16]
 
 # Fixed 50/50 configuration
 LOAD_PCT = 50
