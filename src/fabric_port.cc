@@ -13,7 +13,7 @@ constexpr uint64_t kDefaultMsgBytes = 64;
 constexpr int64_t kInfiniteCredits = std::numeric_limits<int64_t>::max() / 4;
 constexpr uint64_t kControlCredit = 2;
 
-bool is_reset_control_event(csEvent* const& ev) {
+bool is_reset_control_event(const csEvent* ev) {
     return ev && ev->payload.size() >= 3 && ev->payload[2] == kControlResetUtil;
 }
 
@@ -27,11 +27,11 @@ uint64_t msg_bytes(const csEvent& ev) {
     return kDefaultMsgBytes;
 }
 
-uint64_t event_bytes(csEvent* const& ev) {
+uint64_t event_bytes(const csEvent* ev) {
     return ev ? msg_bytes(*ev) : kDefaultMsgBytes;
 }
 
-uint64_t credit_bytes(csEvent* const& ev) {
+uint64_t credit_bytes(const csEvent* ev) {
     if (ev && ::SST::csimCore::is_control_event(*ev)) {
         return 0;
     }
@@ -66,7 +66,7 @@ bool try_consume_credit(int64_t& credits, uint64_t bytes) {
     return true;
 }
 
-uint64_t event_credit_dst(csEvent* const& ev) {
+uint64_t event_credit_dst(const csEvent* ev) {
     if (ev && !ev->payload.empty()) {
         return ev->payload[0];
     }
