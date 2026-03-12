@@ -213,12 +213,20 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     LinkStats stats{};
     double util_sum = 0.0;
     double avg_sum = 0.0;
+    double ingress_wait_avg_sum = 0.0;
+    double egress_wait_avg_sum = 0.0;
     std::size_t count = 0;
     std::size_t occ_total = 0;
+    uint64_t ingress_wait_max = 0;
+    uint64_t egress_wait_max = 0;
 
     auto accumulate = [&](const FabricPort& port) {
         util_sum += port.ingress_utilization();
         avg_sum += port.ingress_avg_utilization();
+        ingress_wait_avg_sum += port.ingress_wait_avg_cycles();
+        egress_wait_avg_sum += port.egress_wait_avg_cycles();
+        ingress_wait_max = std::max(ingress_wait_max, port.ingress_wait_max_cycles());
+        egress_wait_max = std::max(egress_wait_max, port.egress_wait_max_cycles());
         occ_total += port.ingress_occupancy();
         ++count;
     };
@@ -229,7 +237,11 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     if (count > 0) {
         stats.util = util_sum / static_cast<double>(count);
         stats.avg_util = avg_sum / static_cast<double>(count);
+        stats.ingress_wait_avg_cycles = ingress_wait_avg_sum / static_cast<double>(count);
+        stats.egress_wait_avg_cycles = egress_wait_avg_sum / static_cast<double>(count);
     }
+    stats.ingress_wait_max_cycles = ingress_wait_max;
+    stats.egress_wait_max_cycles = egress_wait_max;
     return stats;
 }
 
@@ -319,6 +331,10 @@ void CXLMemoryPool::finish() {
         if (stats.avg_util > 0.0) {
             std::cout << prefix << "util.req_link_avg = " << stats.avg_util << '\n';
         }
+        std::cout << prefix << "fabric.ingress_wait_avg_cycles = " << stats.ingress_wait_avg_cycles << '\n';
+        std::cout << prefix << "fabric.egress_wait_avg_cycles = " << stats.egress_wait_avg_cycles << '\n';
+        std::cout << prefix << "fabric.ingress_wait_max_cycles = " << stats.ingress_wait_max_cycles << '\n';
+        std::cout << prefix << "fabric.egress_wait_max_cycles = " << stats.egress_wait_max_cycles << '\n';
         std::cout << prefix << "walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();

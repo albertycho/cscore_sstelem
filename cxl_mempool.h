@@ -75,6 +75,10 @@ private:
     struct LinkStats {
         double util = 0.0;
         double avg_util = 0.0;
+        double ingress_wait_avg_cycles = 0.0;
+        double egress_wait_avg_cycles = 0.0;
+        uint64_t ingress_wait_max_cycles = 0;
+        uint64_t egress_wait_max_cycles = 0;
         std::size_t occ = 0;
     };
     void poll_ports(uint64_t cycle);

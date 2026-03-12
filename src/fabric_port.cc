@@ -131,6 +131,13 @@ void FabricPort::configure(SST::Link* link,
     egress_credits_ = egress_credit_cap_;
     egress_queue_max_bytes_ = queue_size_bytes > 0 ? queue_size_bytes : 0;
     egress_queue_bytes_ = 0;
+    ingress_enqueue_cycle_.clear();
+    ingress_wait_sum_cycles_ = 0;
+    ingress_wait_samples_ = 0;
+    ingress_wait_max_cycles_ = 0;
+    egress_wait_sum_cycles_ = 0;
+    egress_wait_samples_ = 0;
+    egress_wait_max_cycles_ = 0;
     tx_bytes_total_ = 0;
     rx_bytes_total_ = 0;
 }
@@ -145,7 +152,9 @@ bool FabricPort::send(csEvent* item) {
     if (!can_send(bytes)) {
         return false;
     }
-    egress_queue_.push_back(item);
+    const uint64_t enqueue_cycle =
+        (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
+    egress_queue_.push_back(EgressEntry{item, enqueue_cycle});
     egress_queue_bytes_ += static_cast<int64_t>(bytes);
     return true;
 }
@@ -213,6 +222,7 @@ void FabricPort::handle_event(SST::Event* ev) {
 
     if (!ingress_) {
         rx_bytes_total_ += event_bytes(cevent);
+        ingress_wait_samples_++;
         ready_.push_back(cevent);
         return;
     }
@@ -221,6 +231,9 @@ void FabricPort::handle_event(SST::Event* ev) {
     if (!ingress_->add_packet(cevent)) {
         throw std::runtime_error("FabricPort: ingress queue full; credit accounting mismatch.");
     }
+    const uint64_t enqueue_cycle =
+        (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
+    ingress_enqueue_cycle_[cevent] = enqueue_cycle;
 }
 
 void FabricPort::reset_ingress_utilization() {
@@ -269,6 +282,28 @@ std::size_t FabricPort::ingress_occupancy() const {
     return ingress_->occupancy();
 }
 
+double FabricPort::ingress_wait_avg_cycles() const {
+    if (ingress_wait_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_wait_sum_cycles_) / static_cast<double>(ingress_wait_samples_);
+}
+
+uint64_t FabricPort::ingress_wait_max_cycles() const {
+    return ingress_wait_max_cycles_;
+}
+
+double FabricPort::egress_wait_avg_cycles() const {
+    if (egress_wait_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_wait_sum_cycles_) / static_cast<double>(egress_wait_samples_);
+}
+
+uint64_t FabricPort::egress_wait_max_cycles() const {
+    return egress_wait_max_cycles_;
+}
+
 uint64_t FabricPort::tx_bytes_total() const {
     return tx_bytes_total_;
 }
@@ -291,17 +326,37 @@ void FabricPort::tick_ingress() {
     }
     auto ready = ingress_->on_tick();
     for (auto& item : ready) {
+        uint64_t wait_cycles = 0;
+        auto it = ingress_enqueue_cycle_.find(item);
+        if (it != ingress_enqueue_cycle_.end()) {
+            const uint64_t enqueue_cycle = it->second;
+            if (last_tick_cycle_ != std::numeric_limits<uint64_t>::max() && last_tick_cycle_ >= enqueue_cycle) {
+                wait_cycles = last_tick_cycle_ - enqueue_cycle;
+            }
+            ingress_enqueue_cycle_.erase(it);
+        }
+        ingress_wait_sum_cycles_ += wait_cycles;
+        ingress_wait_samples_++;
+        ingress_wait_max_cycles_ = std::max(ingress_wait_max_cycles_, wait_cycles);
         ready_.push_back(item);
     }
 }
 
 void FabricPort::drain_egress() {
     while (!egress_queue_.empty()) {
-        csEvent* ev = egress_queue_.front();
+        EgressEntry entry = egress_queue_.front();
+        csEvent* ev = entry.ev;
         if (!try_consume_credit(egress_credits_, credit_bytes(ev))) {
             break;
         }
         const uint64_t send_bytes = event_bytes(ev);
+        uint64_t wait_cycles = 0;
+        if (last_tick_cycle_ != std::numeric_limits<uint64_t>::max() && last_tick_cycle_ >= entry.enqueue_cycle) {
+            wait_cycles = last_tick_cycle_ - entry.enqueue_cycle;
+        }
+        egress_wait_sum_cycles_ += wait_cycles;
+        egress_wait_samples_++;
+        egress_wait_max_cycles_ = std::max(egress_wait_max_cycles_, wait_cycles);
         link_->send(ev);
         egress_queue_.pop_front();
         tx_bytes_total_ += send_bytes;
