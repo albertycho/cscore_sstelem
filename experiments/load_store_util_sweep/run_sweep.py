@@ -217,12 +217,12 @@ def main() -> int:
             bw_row.update(main_counts)
             bw_row.update(bw)
             bw_rows.append(bw_row)
-            if all(k in bw for k in ("host_to_switch_bpc", "switch_to_host_bpc", "host_link_total_bpc")):
+            if all(k in bw for k in ("host_to_switch_gbps", "switch_to_host_gbps", "host_link_total_gbps")):
                 print(
                     "[STATUS] Projected host-link BW "
-                    f"{trace_name}: host->switch={bw['host_to_switch_bpc']:.6f} B/cycle, "
-                    f"switch->host={bw['switch_to_host_bpc']:.6f} B/cycle, "
-                    f"total={bw['host_link_total_bpc']:.6f} B/cycle"
+                    f"{trace_name}: host->switch={bw['host_to_switch_gbps']:.6f} GB/s, "
+                    f"switch->host={bw['switch_to_host_gbps']:.6f} GB/s, "
+                    f"total={bw['host_link_total_gbps']:.6f} GB/s"
                 )
 
         no_rep_out = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.out"
