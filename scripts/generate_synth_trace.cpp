@@ -16,10 +16,11 @@ struct Config {
 
     uint64_t num_instrs = 20'000'000;
     uint64_t warm_cache_instrs = 200'000;
-    int mem_pct = 100;   // target aggregate CXL request-link utilization percent (0-100)
+    int mem_pct = 100;   // target aggregate host-switch bandwidth percent (0-100)
     int load_pct = 50;  // percent of mem ops that are loads
     int cxl_pct = 100;  // percent of mem ops that target CXL
     uint64_t seed = 0x12345678ull;
+    double aggregate_peak_gbps = 0.0; // if >0, use as aggregate host-link peak
 };
 
 // Fixed parameters (not configurable via CLI)
@@ -84,6 +85,18 @@ static bool parse_i32(const std::string& s, int* out) {
     }
 }
 
+static bool parse_f64(const std::string& s, double* out) {
+    try {
+        std::size_t idx = 0;
+        const auto val = std::stod(s, &idx);
+        if (idx != s.size()) return false;
+        *out = val;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 static void print_usage(const char* argv0) {
     std::cerr
         << "Usage: " << argv0 << " [options]\n"
@@ -95,6 +108,7 @@ static void print_usage(const char* argv0) {
         << "  --mem-pct <0-100>\n"
         << "  --load-pct <0-100>\n"
         << "  --cxl-pct <0-100>\n"
+        << "  --aggregate-peak-gbps <x>   (optional; if set, mem_pct targets this measured switch aggregate peak)\n"
         << "  --seed <u64>\n";
 }
 
@@ -141,6 +155,8 @@ static bool parse_args(int argc, char** argv, Config& cfg) {
             if (!parse_i32(value, &cfg.load_pct)) return false;
         } else if (key == "cxl-pct") {
             if (!parse_i32(value, &cfg.cxl_pct)) return false;
+        } else if (key == "aggregate-peak-gbps") {
+            if (!parse_f64(value, &cfg.aggregate_peak_gbps)) return false;
         } else if (key == "seed") {
             if (!parse_u64(value, &cfg.seed)) return false;
         } else {
@@ -210,8 +226,12 @@ int main(int argc, char** argv) {
     const double store_frac = 1.0 - load_frac;
     const double cxl_frac = static_cast<double>(cxl_pct_clamped) / 100.0;
     const double host_link_peak_bpc_per_dir = 64.0 / static_cast<double>(kBwCxlCycles);
-    const double host_link_duplex_peak_bpc_system =
+    const double host_link_duplex_peak_bpc_theoretical =
         static_cast<double>(kNumNodes) * 2.0 * host_link_peak_bpc_per_dir;
+    const bool using_override_peak = (cfg.aggregate_peak_gbps > 0.0);
+    const double host_link_duplex_peak_bpc_system = using_override_peak
+        ? (cfg.aggregate_peak_gbps / kClockGhz)
+        : host_link_duplex_peak_bpc_theoretical;
     const double target_host_link_bpc_system = util_target * host_link_duplex_peak_bpc_system;
     const double bytes_per_cxl_memop_host_links =
         load_frac * (kReqBytesLoad + kRspBytesLoad) +
@@ -229,6 +249,8 @@ int main(int argc, char** argv) {
     const double modeled_util = (host_link_duplex_peak_bpc_system > 0.0)
         ? (modeled_host_link_bpc_system / host_link_duplex_peak_bpc_system)
         : 0.0;
+    const double target_host_link_gbps = target_host_link_bpc_system * kClockGhz;
+    const double host_link_peak_gbps = host_link_duplex_peak_bpc_system * kClockGhz;
 
     uint64_t instr_idx = 0;
 
@@ -303,10 +325,14 @@ int main(int argc, char** argv) {
               << " cxl_frac=" << cxl_frac
               << " store_writeback_factor=" << kStoreWritebackFactor
               << " host_link_peak_bpc_per_dir=" << host_link_peak_bpc_per_dir
+              << " host_link_duplex_peak_bpc_theoretical=" << host_link_duplex_peak_bpc_theoretical
               << " host_link_duplex_peak_bpc_system=" << host_link_duplex_peak_bpc_system
               << " bytes_per_cxl_memop_host_links=" << bytes_per_cxl_memop_host_links
               << " modeled_util=" << modeled_util
               << "\n";
+    std::cout << "target_host_link_gbps=" << target_host_link_gbps
+              << " host_link_peak_gbps=" << host_link_peak_gbps
+              << " using_override_peak=" << (using_override_peak ? 1 : 0) << "\n";
     std::cout << "local_base=0x" << std::hex << kLocalBase
               << " cxl_base=0x" << kCxlBase << std::dec << "\n";
     std::cout << "line_size=" << kLineSize << "\n";

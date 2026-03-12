@@ -33,6 +33,7 @@ NUM_INSTRS = 4_000_000
 WARM_CACHE_INSTS = 200_000
 SEED = 0x12345678
 CXL_PCT = 100
+AGGREGATE_PEAK_GBPS = 20.0
 
 # Must match pool_sweep*.py
 WARMUP_MAIN_INSTS = 100_000
@@ -94,6 +95,7 @@ def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) 
         "--mem-pct", str(mem_pct),
         "--load-pct", str(load_pct),
         "--cxl-pct", str(CXL_PCT),
+        "--aggregate-peak-gbps", str(AGGREGATE_PEAK_GBPS),
         "--seed", hex(SEED),
     ]
     result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True)
@@ -178,6 +180,7 @@ def run_sst(sim_script: Path, trace_path: Path, cxl_config: Path, out_path: Path
 
 def main() -> int:
     print("[STATUS] Starting load/store/util sweep")
+    print(f"[STATUS] Using fixed aggregate synth target peak: {AGGREGATE_PEAK_GBPS} GB/s")
     print(
         "[STATUS] Warmup split: "
         f"warm_cache={WARM_CACHE_INSTS}, "
