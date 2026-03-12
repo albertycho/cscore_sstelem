@@ -74,6 +74,8 @@ public:
     std::size_t ingress_occupancy() const;
     double ingress_wait_avg_cycles() const;
     uint64_t ingress_wait_max_cycles() const;
+    double ingress_queue_wait_avg_cycles() const;
+    uint64_t ingress_queue_wait_max_cycles() const;
     double egress_wait_avg_cycles() const;
     uint64_t egress_wait_max_cycles() const;
     uint64_t tx_bytes_total() const;
@@ -84,10 +86,13 @@ private:
     void tick_ingress();
     void drain_egress();
     void send_credit(uint64_t dst, uint64_t bytes);
+    uint64_t ingress_service_floor_cycles(const csEvent* item) const;
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
     std::unique_ptr<::lat_bw_queue<csEvent*>> ingress_;
+    int64_t ingress_bw_cycles_ = 0;
+    int64_t ingress_lat_cycles_ = 0;
     int64_t egress_credits_ = 0;
     int64_t egress_credit_cap_ = 0;
     int64_t egress_queue_max_bytes_ = 0;
@@ -104,6 +109,9 @@ private:
     uint64_t ingress_wait_sum_cycles_ = 0;
     uint64_t ingress_wait_samples_ = 0;
     uint64_t ingress_wait_max_cycles_ = 0;
+    uint64_t ingress_queue_wait_sum_cycles_ = 0;
+    uint64_t ingress_queue_wait_samples_ = 0;
+    uint64_t ingress_queue_wait_max_cycles_ = 0;
     uint64_t egress_wait_sum_cycles_ = 0;
     uint64_t egress_wait_samples_ = 0;
     uint64_t egress_wait_max_cycles_ = 0;

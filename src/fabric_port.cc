@@ -106,6 +106,8 @@ void FabricPort::configure(SST::Link* link,
     }
     link_ = link;
     self_id_ = self_id;
+    ingress_bw_cycles_ = bw_cycles;
+    ingress_lat_cycles_ = lat_cycles;
     const bool bw_enabled = (bw_cycles > 0);
     const bool lat_enabled = (lat_cycles > 0);
     if (bw_enabled || lat_enabled) {
@@ -135,6 +137,9 @@ void FabricPort::configure(SST::Link* link,
     ingress_wait_sum_cycles_ = 0;
     ingress_wait_samples_ = 0;
     ingress_wait_max_cycles_ = 0;
+    ingress_queue_wait_sum_cycles_ = 0;
+    ingress_queue_wait_samples_ = 0;
+    ingress_queue_wait_max_cycles_ = 0;
     egress_wait_sum_cycles_ = 0;
     egress_wait_samples_ = 0;
     egress_wait_max_cycles_ = 0;
@@ -293,6 +298,17 @@ uint64_t FabricPort::ingress_wait_max_cycles() const {
     return ingress_wait_max_cycles_;
 }
 
+double FabricPort::ingress_queue_wait_avg_cycles() const {
+    if (ingress_queue_wait_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_queue_wait_sum_cycles_) / static_cast<double>(ingress_queue_wait_samples_);
+}
+
+uint64_t FabricPort::ingress_queue_wait_max_cycles() const {
+    return ingress_queue_wait_max_cycles_;
+}
+
 double FabricPort::egress_wait_avg_cycles() const {
     if (egress_wait_samples_ == 0) {
         return 0.0;
@@ -338,6 +354,11 @@ void FabricPort::tick_ingress() {
         ingress_wait_sum_cycles_ += wait_cycles;
         ingress_wait_samples_++;
         ingress_wait_max_cycles_ = std::max(ingress_wait_max_cycles_, wait_cycles);
+        const uint64_t service_floor = ingress_service_floor_cycles(item);
+        const uint64_t queue_wait = wait_cycles > service_floor ? (wait_cycles - service_floor) : 0;
+        ingress_queue_wait_sum_cycles_ += queue_wait;
+        ingress_queue_wait_samples_++;
+        ingress_queue_wait_max_cycles_ = std::max(ingress_queue_wait_max_cycles_, queue_wait);
         ready_.push_back(item);
     }
 }
@@ -375,6 +396,18 @@ void FabricPort::send_credit(uint64_t dst, uint64_t bytes) {
 bool FabricPort::egress_queue_full(uint64_t bytes) const {
     return egress_queue_max_bytes_ > 0 &&
            (egress_queue_bytes_ + static_cast<int64_t>(bytes)) > egress_queue_max_bytes_;
+}
+
+uint64_t FabricPort::ingress_service_floor_cycles(const csEvent* item) const {
+    uint64_t floor = 0;
+    if (ingress_lat_cycles_ > 0) {
+        floor += static_cast<uint64_t>(ingress_lat_cycles_);
+    }
+    if (ingress_bw_cycles_ > 0) {
+        const uint64_t bytes = event_bytes(item);
+        floor += (bytes * static_cast<uint64_t>(ingress_bw_cycles_) + 63ull) / 64ull;
+    }
+    return floor;
 }
 
 } // namespace csimCore

@@ -641,6 +641,9 @@ namespace SST {
                 std::cout << prefix << "fabric.egress_wait_avg_cycles = " << remote_port_.egress_wait_avg_cycles() << '\n';
                 std::cout << prefix << "fabric.ingress_wait_max_cycles = " << remote_port_.ingress_wait_max_cycles() << '\n';
                 std::cout << prefix << "fabric.egress_wait_max_cycles = " << remote_port_.egress_wait_max_cycles() << '\n';
+                std::cout << prefix << "fabric.ingress_queue_wait_avg_cycles = " << remote_port_.ingress_queue_wait_avg_cycles() << '\n';
+                std::cout << prefix << "fabric.ingress_queue_wait_max_cycles = " << remote_port_.ingress_queue_wait_max_cycles() << '\n';
+                std::cout << prefix << "fabric.ingress_occ_bytes = " << remote_port_.ingress_occupancy() << '\n';
                 std::cout << prefix << "walltime_s = " << total_sec << '\n';
                 if (active_calls_ > 0) {
                     const auto active_sec = std::chrono::duration<double>(active_time_).count();
