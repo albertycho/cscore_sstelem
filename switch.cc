@@ -110,15 +110,17 @@ void Switch::setup() {
     wall_start_ = std::chrono::steady_clock::now();
     active_time_ = std::chrono::steady_clock::duration{};
     active_calls_ = 0;
+    tick_count_ = 0;
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
 {
     ScopedTimer timer(active_time_, active_calls_);
-    current_cycle_ = static_cast<uint64_t>(cycle);
+    ++tick_count_;
+    const auto cycle_u = static_cast<uint64_t>(cycle);
     for_each_port([&](PortState& port) {
-        port.port.tick(current_cycle_);
-        try_receive_and_route(port, current_cycle_);
+        port.port.tick(cycle_u);
+        try_receive_and_route(port, cycle_u);
     });
     return false;
 }
@@ -175,7 +177,7 @@ bool Switch::try_route_event(csEvent* ev)
         if (idx >= node_ports_.size()) {
             throw std::runtime_error("Switch: dst node id out of range for configured ports.");
         }
-        if (!node_ports_[idx].port.can_send()) {
+        if (!node_ports_[idx].port.can_send(ev)) {
             return false;
         }
         if (!node_ports_[idx].port.send(ev)) {
@@ -191,7 +193,7 @@ bool Switch::try_route_event(csEvent* ev)
         }
         if (replicate_writes_ && is_write_request(*ev)) {
             for (const auto& pool : pool_ports_) {
-                if (!pool.port.can_send()) {
+                if (!pool.port.can_send(ev)) {
                     return false;
                 }
             }
@@ -206,11 +208,11 @@ bool Switch::try_route_event(csEvent* ev)
             delete ev;
             return true;
         }
-        std::size_t pick = pick_pool_index(true);
+        std::size_t pick = pick_pool_index(true, ev);
         if (pick >= pool_ports_.size()) {
             return false;
         }
-        if (!pool_ports_[pick].port.can_send()) {
+        if (!pool_ports_[pick].port.can_send(ev)) {
             return false;
         }
         ev->payload[1] = pool_node_id_base_ + pick;
@@ -256,7 +258,7 @@ void Switch::for_each_port(const std::function<void(const PortState&)>& fn) cons
     }
 }
 
-std::size_t Switch::pick_pool_index(bool advance)
+std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
 {
     if (pool_ports_.empty()) {
         return pool_ports_.size();
@@ -268,7 +270,7 @@ std::size_t Switch::pick_pool_index(bool advance)
     for (std::size_t offset = 0; offset < total; ++offset) {
         const std::size_t idx = (rr_pool_idx_ + offset) % total;
         const auto& port = pool_ports_[idx].port;
-        if (!port.can_send()) {
+        if (!port.can_send(probe)) {
             continue;
         }
         if (advance) {
@@ -302,12 +304,36 @@ void Switch::finish()
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
+    auto sum_tx_bytes = [](const std::vector<PortState>& ports) {
+        uint64_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.tx_bytes_total();
+        }
+        return sum;
+    };
+    auto sum_rx_bytes = [](const std::vector<PortState>& ports) {
+        uint64_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.rx_bytes_total();
+        }
+        return sum;
+    };
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
+    const double ticks = tick_count_ > 0 ? static_cast<double>(tick_count_) : 1.0;
+    const uint64_t host_to_switch_bytes = sum_rx_bytes(node_ports_);
+    const uint64_t switch_to_host_bytes = sum_tx_bytes(node_ports_);
+    const uint64_t host_link_total_bytes = host_to_switch_bytes + switch_to_host_bytes;
+    const double host_to_switch_bpc = static_cast<double>(host_to_switch_bytes) / ticks;
+    const double switch_to_host_bpc = static_cast<double>(switch_to_host_bytes) / ticks;
+    const double host_link_total_bpc = static_cast<double>(host_link_total_bytes) / ticks;
     if (lightweight_output_) {
         std::cout << "stat.switch.replicated_messages = " << replicated_count_ << '\n';
         std::cout << "stat.switch.util.node_ingress_avg = " << avg_util(node_ports_) << '\n';
         std::cout << "stat.switch.util.pool_ingress_avg = " << avg_util(pool_ports_) << '\n';
+        std::cout << "stat.switch.bw.host_to_switch_bpc = " << host_to_switch_bpc << '\n';
+        std::cout << "stat.switch.bw.switch_to_host_bpc = " << switch_to_host_bpc << '\n';
+        std::cout << "stat.switch.bw.host_link_total_bpc = " << host_link_total_bpc << '\n';
         std::cout << "stat.switch.walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();
@@ -317,6 +343,9 @@ void Switch::finish()
         std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
         std::cout << "Switch avg util node ingress: " << avg_util(node_ports_) << std::endl;
         std::cout << "Switch avg util pool ingress: " << avg_util(pool_ports_) << std::endl;
+        std::cout << "Switch host->switch BW (bytes/cycle): " << host_to_switch_bpc << std::endl;
+        std::cout << "Switch switch->host BW (bytes/cycle): " << switch_to_host_bpc << std::endl;
+        std::cout << "Switch host-link total BW (bytes/cycle): " << host_link_total_bpc << std::endl;
         std::cout << "Switch wall time (s): " << sec << std::endl;
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();

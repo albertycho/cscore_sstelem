@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -28,10 +29,16 @@ constexpr double kClockGhz = 2.4;
 // Utilization->probability mapping depends on this assumption.
 constexpr double kIpcAssumed = 0.5;
 constexpr int kNumNodes = 8;
-constexpr int kNumPools = 1;
-constexpr bool kReplicateWrites = false;
 constexpr int kBwCxlCycles = 25;
 constexpr uint64_t kProbScale = 1'000'000;
+// Stores are write-allocate: each store miss issues an RFO load (8B req + 64B resp).
+// In steady state we also approximate one 64B writeback request per store.
+constexpr double kStoreWritebackFactor = 1.0;
+constexpr double kReqBytesLoad = 8.0;
+constexpr double kRspBytesLoad = 64.0;
+constexpr double kReqBytesStoreRfo = 8.0;
+constexpr double kRspBytesStoreRfo = 64.0;
+constexpr double kReqBytesStoreWb = 64.0;
 
 // Address regions (bytes)
 constexpr uint64_t kLocalBase = 0;
@@ -196,28 +203,32 @@ int main(int argc, char** argv) {
     uint64_t main_loop_load_count = 0;
     uint64_t main_loop_store_count = 0;
     uint64_t main_loop_load_cxl_count = 0;
-    uint64_t main_loop_load_local_count = 0;
     uint64_t main_loop_store_cxl_count = 0;
-    uint64_t main_loop_store_local_count = 0;
 
     const double util_target = static_cast<double>(mem_pct_clamped) / 100.0;
     const double load_frac = static_cast<double>(load_pct_clamped) / 100.0;
     const double store_frac = 1.0 - load_frac;
     const double cxl_frac = static_cast<double>(cxl_pct_clamped) / 100.0;
-    const double pool_factor = kReplicateWrites
-        ? (load_frac / static_cast<double>(kNumPools)) + store_frac
-        : 1.0 / static_cast<double>(kNumPools);
+    const double host_link_peak_bpc_per_dir = 64.0 / static_cast<double>(kBwCxlCycles);
+    const double host_link_duplex_peak_bpc_system =
+        static_cast<double>(kNumNodes) * 2.0 * host_link_peak_bpc_per_dir;
+    const double target_host_link_bpc_system = util_target * host_link_duplex_peak_bpc_system;
+    const double bytes_per_cxl_memop_host_links =
+        load_frac * (kReqBytesLoad + kRspBytesLoad) +
+        store_frac * (kReqBytesStoreRfo + kRspBytesStoreRfo + (kStoreWritebackFactor * kReqBytesStoreWb));
     const double denom = kIpcAssumed
         * static_cast<double>(kNumNodes)
-        * static_cast<double>(kBwCxlCycles)
         * cxl_frac
-        * pool_factor;
-    double mem_prob = (denom > 0.0) ? (util_target / denom) : 0.0;
+        * bytes_per_cxl_memop_host_links;
+    double mem_prob = (denom > 0.0) ? (target_host_link_bpc_system / denom) : 0.0;
     if (mem_prob < 0.0) mem_prob = 0.0;
     if (mem_prob > 1.0) mem_prob = 1.0;
     const uint64_t mem_threshold = static_cast<uint64_t>(mem_prob * static_cast<double>(kProbScale) + 0.5);
-    const double modeled_util =
-        mem_prob * kIpcAssumed * static_cast<double>(kNumNodes) * cxl_frac * pool_factor * static_cast<double>(kBwCxlCycles);
+    const double modeled_host_link_bpc_system =
+        mem_prob * kIpcAssumed * static_cast<double>(kNumNodes) * cxl_frac * bytes_per_cxl_memop_host_links;
+    const double modeled_util = (host_link_duplex_peak_bpc_system > 0.0)
+        ? (modeled_host_link_bpc_system / host_link_duplex_peak_bpc_system)
+        : 0.0;
 
     uint64_t instr_idx = 0;
 
@@ -261,16 +272,12 @@ int main(int argc, char** argv) {
                 main_loop_load_count++;
                 if (is_cxl) {
                     main_loop_load_cxl_count++;
-                } else {
-                    main_loop_load_local_count++;
                 }
             } else {
                 instr.destination_memory[0] = addr;
                 main_loop_store_count++;
                 if (is_cxl) {
                     main_loop_store_cxl_count++;
-                } else {
-                    main_loop_store_local_count++;
                 }
             }
         }
@@ -293,10 +300,11 @@ int main(int argc, char** argv) {
               << " main_loop_stores=" << main_loop_store_count << "\n";
     std::cout << "util_formula ipc=" << kIpcAssumed
               << " nodes=" << kNumNodes
-              << " pools=" << kNumPools
-              << " replicate_writes=" << (kReplicateWrites ? 1 : 0)
               << " cxl_frac=" << cxl_frac
-              << " pool_factor=" << pool_factor
+              << " store_writeback_factor=" << kStoreWritebackFactor
+              << " host_link_peak_bpc_per_dir=" << host_link_peak_bpc_per_dir
+              << " host_link_duplex_peak_bpc_system=" << host_link_duplex_peak_bpc_system
+              << " bytes_per_cxl_memop_host_links=" << bytes_per_cxl_memop_host_links
               << " modeled_util=" << modeled_util
               << "\n";
     std::cout << "local_base=0x" << std::hex << kLocalBase
@@ -308,24 +316,33 @@ int main(int argc, char** argv) {
         ? (cfg.num_instrs - warm_cache_instrs)
         : 0;
     const double instrs = static_cast<double>(main_loop_instrs_u64);
-    const double bytes_per_op = static_cast<double>(kLineSize);
-    const double load_local_bpi = (instrs > 0) ? (static_cast<double>(main_loop_load_local_count) / instrs) * bytes_per_op : 0.0;
-    const double load_cxl_bpi = (instrs > 0) ? (static_cast<double>(main_loop_load_cxl_count) / instrs) * bytes_per_op : 0.0;
-    const double store_local_bpi = (instrs > 0) ? (static_cast<double>(main_loop_store_local_count) / instrs) * bytes_per_op : 0.0;
-    const double store_cxl_bpi = (instrs > 0) ? (static_cast<double>(main_loop_store_cxl_count) / instrs) * bytes_per_op : 0.0;
+    const double host_to_switch_bytes =
+        static_cast<double>(main_loop_load_cxl_count) * kReqBytesLoad +
+        static_cast<double>(main_loop_store_cxl_count) * (kReqBytesStoreRfo + (kStoreWritebackFactor * kReqBytesStoreWb));
+    const double switch_to_host_bytes =
+        static_cast<double>(main_loop_load_cxl_count) * kRspBytesLoad +
+        static_cast<double>(main_loop_store_cxl_count) * kRspBytesStoreRfo;
+    const double host_link_total_bytes = host_to_switch_bytes + switch_to_host_bytes;
 
-    const double load_local_gbps = load_local_bpi * kIpcAssumed * kClockGhz;
-    const double load_cxl_gbps = load_cxl_bpi * kIpcAssumed * kClockGhz;
-    const double store_local_gbps = store_local_bpi * kIpcAssumed * kClockGhz;
-    const double store_cxl_gbps = store_cxl_bpi * kIpcAssumed * kClockGhz;
-    const double total_gbps = load_local_gbps + load_cxl_gbps + store_local_gbps + store_cxl_gbps;
+    const double host_to_switch_bpi = (instrs > 0.0) ? (host_to_switch_bytes / instrs) : 0.0;
+    const double switch_to_host_bpi = (instrs > 0.0) ? (switch_to_host_bytes / instrs) : 0.0;
+    const double host_link_total_bpi = host_to_switch_bpi + switch_to_host_bpi;
 
-    std::cout << "Projected BW (GB/s, main-loop only) assuming IPC=" << kIpcAssumed
-              << " @ " << kClockGhz << "GHz\n";
-    std::cout << "  load_local: " << load_local_gbps
-              << " load_cxl: " << load_cxl_gbps
-              << " store_local: " << store_local_gbps
-              << " store_cxl: " << store_cxl_gbps
-              << " total: " << total_gbps << "\n";
+    const double host_to_switch_bpc_system = host_to_switch_bpi * kIpcAssumed * static_cast<double>(kNumNodes);
+    const double switch_to_host_bpc_system = switch_to_host_bpi * kIpcAssumed * static_cast<double>(kNumNodes);
+    const double host_link_total_bpc_system = host_to_switch_bpc_system + switch_to_host_bpc_system;
+
+    const double host_to_switch_gbps = host_to_switch_bpc_system * kClockGhz;
+    const double switch_to_host_gbps = switch_to_host_bpc_system * kClockGhz;
+    const double host_link_total_gbps = host_link_total_bpc_system * kClockGhz;
+
+    std::cout << "Projected host-switch BW (main-loop only), IPC=" << kIpcAssumed
+              << " @ " << kClockGhz << "GHz, nodes=" << kNumNodes << "\n";
+    std::cout << "PROJECTED_HOST_LINK_BW_BPC host_to_switch=" << host_to_switch_bpc_system
+              << " switch_to_host=" << switch_to_host_bpc_system
+              << " total=" << host_link_total_bpc_system << "\n";
+    std::cout << "PROJECTED_HOST_LINK_BW_GBPS host_to_switch=" << host_to_switch_gbps
+              << " switch_to_host=" << switch_to_host_gbps
+              << " total=" << host_link_total_gbps << "\n";
     return 0;
 }

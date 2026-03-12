@@ -283,7 +283,7 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
         pending_.erase(pending_it);
         return true;
     }
-    if (!target_port->can_send()) {
+    if (!target_port->can_send(64)) {
         return false;
     }
 

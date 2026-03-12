@@ -1,5 +1,7 @@
 #include "lat_bw_queue.h"
 
+#include <cmath>
+
 #include "channel.h"
 #include "csEvent.h"
 #include "SST_CS_packets.h"
@@ -8,12 +10,12 @@ template<typename T>
 lat_bw_queue<T>::lat_bw_queue(double peak_bw_per_cycle,
                               latency_function_type&& latency_function,
                               bandwidth_function_type&& bw_cost_fn,
-                              int64_t max_pending)
+                              int64_t max_pending_bytes)
     : peak_bw_per_cycle{peak_bw_per_cycle}
     , internal_clock{0}
     , latency_function{std::forward<latency_function_type>(latency_function)}
     , bw_cost_fn{std::forward<bandwidth_function_type>(bw_cost_fn)}
-    , max_pending{max_pending}
+    , max_pending_bytes{max_pending_bytes}
     , bw_hist{} {}
 
 template<typename T>
@@ -21,14 +23,22 @@ std::vector<T> lat_bw_queue<T>::on_tick() {
     internal_clock++;
     std::vector<T> completed_on_tick;
 
-    // Pop completed packets
-    while (!active_queue.empty() && active_queue.top().completion_time <= internal_clock) {
-        completed_on_tick.emplace_back(std::move(active_queue.top().payload));
-        active_queue.pop();
-    }
+    auto pop_completed = [&]() {
+        while (!active_queue.empty() && active_queue.top().completion_time <= internal_clock) {
+            occupancy_bytes = std::max<int64_t>(occupancy_bytes - active_queue.top().total_bytes, 0);
+            completed_on_tick.emplace_back(std::move(active_queue.top().payload));
+            active_queue.pop();
+        }
+    };
+
+    // Pop completed packets that were already active at tick start.
+    pop_completed();
 
     // Transmit bytes for this cycle
     service_bandwidth();
+
+    // Pop packets that become ready in the same tick (needed for zero-latency mode).
+    pop_completed();
 
     // Update bandwidth history for utilization
     bw_sum -= bw_hist[bw_idx];
@@ -45,18 +55,20 @@ std::vector<T> lat_bw_queue<T>::on_tick() {
 
 template<typename T>
 bool lat_bw_queue<T>::add_packet(T packet) {
-    if (is_full()) {
-        return false;
-    }
     auto bytes = bw_cost_fn ? bw_cost_fn(packet) : 64.0;
     bytes = std::max<double>(bytes, 1.0);
-    blocked_queue.emplace(pending_entry{std::move(packet), bytes});
+    const auto packet_bytes = static_cast<int64_t>(std::ceil(bytes));
+    if (max_pending_bytes > 0 && (occupancy_bytes + packet_bytes) > max_pending_bytes) {
+        return false;
+    }
+    blocked_queue.emplace(pending_entry{std::move(packet), bytes, packet_bytes});
+    occupancy_bytes += packet_bytes;
     return true;
 }
 
 template<typename T>
 std::size_t lat_bw_queue<T>::occupancy() const {
-    return blocked_queue.size() + active_queue.size();
+    return static_cast<std::size_t>(std::max<int64_t>(occupancy_bytes, 0));
 }
 
 template<typename T>
@@ -82,11 +94,6 @@ void lat_bw_queue<T>::reset_utilization() {
 }
 
 template<typename T>
-bool lat_bw_queue<T>::is_full() const {
-    return max_pending > 0 && static_cast<int64_t>(occupancy()) >= max_pending;
-}
-
-template<typename T>
 void lat_bw_queue<T>::service_bandwidth() {
     bw_used_this_cycle = 0.0;
     auto avail = peak_bw_per_cycle;
@@ -102,10 +109,12 @@ void lat_bw_queue<T>::service_bandwidth() {
         bw_used_this_cycle += send;
 
         if (front.remaining_bytes <= 0.0) {
+            const int64_t completion_latency = std::max<int64_t>(latency_function(get_utilization()), 0);
             active_queue.push(entry{
                 std::move(front.payload),
                 internal_clock,
-                internal_clock + std::max<int64_t>(latency_function(get_utilization()), 1)
+                internal_clock + completion_latency,
+                front.total_bytes
             });
             blocked_queue.pop();
         } else {

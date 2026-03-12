@@ -113,8 +113,6 @@ namespace SST {
 		    primaryComponentDoNotEndSim();
 			
 
-			// tmp_instr.msgSize=0;
-
 			std::vector<std::string> trace_names;
 			trace_names.push_back(trace_name);
 			traces.push_back(get_tracereader(trace_name, 0, false, false));
@@ -479,7 +477,6 @@ namespace SST {
 				auto& trace = traces.at(0); // TODO change if multiple cores
                 for (auto pkt_count = cpu.IN_QUEUE_SIZE - static_cast<long>(std::size(cpu.input_queue)); !trace.eof() && pkt_count > 0; --pkt_count) {
                     cpu.input_queue.push_back(trace());
-                    fetched_insts++;
                     //std::cout<<"input queue size: "<<cpu.input_queue.size()<<std::endl;
                 }
 				if (cpu_heartbeat_period > 0 && (heartbeat_count % cpu_heartbeat_period == 0)) {

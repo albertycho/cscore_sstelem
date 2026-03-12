@@ -1031,9 +1031,8 @@ void CACHE::begin_phase()
   }
 }
 
-void CACHE::end_phase(unsigned finished_cpu)
+void CACHE::end_phase(unsigned /*finished_cpu*/)
 {
-  finished_cpu = finished_cpu;
   roi_stats.total_miss_latency_cycles = sim_stats.total_miss_latency_cycles;
 
   roi_stats.hits = sim_stats.hits;

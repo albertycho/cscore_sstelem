@@ -38,9 +38,9 @@ uint64_t credit_bytes(csEvent* const& ev) {
     return event_bytes(ev);
 }
 
-int64_t credit_capacity_bytes(int64_t queue_size_packets) {
-    if (queue_size_packets > 0) {
-        return queue_size_packets * static_cast<int64_t>(kDefaultMsgBytes);
+int64_t credit_capacity_bytes(int64_t queue_size_bytes) {
+    if (queue_size_bytes > 0) {
+        return queue_size_bytes;
     }
     return kInfiniteCredits;
 }
@@ -97,8 +97,8 @@ void FabricPort::configure(SST::Link* link,
                            uint64_t self_id,
                            int64_t bw_cycles,
                            int64_t lat_cycles,
-                           int64_t queue_size_packets) {
-    if (bw_cycles < 0 || lat_cycles < 0 || queue_size_packets < 0) {
+                           int64_t queue_size_bytes) {
+    if (bw_cycles < 0 || lat_cycles < 0 || queue_size_bytes < 0) {
         throw std::runtime_error("FabricPort: negative configuration values are invalid.");
     }
     if (!link) {
@@ -106,24 +106,33 @@ void FabricPort::configure(SST::Link* link,
     }
     link_ = link;
     self_id_ = self_id;
-
-    const int64_t bw = std::max<int64_t>(bw_cycles, 1);
-    const int64_t lat = std::max<int64_t>(lat_cycles, 1);
-    const double peak_bw_per_cycle = 64.0 / static_cast<double>(bw);
-    auto latency_fn = [lat](double) { return lat; };
-    auto bw_cost_fn = [](csEvent* const& item) {
-        return static_cast<double>(event_bytes(item));
-    };
-    const int64_t ingress_max_pending = 0; // credits gate ingress; never drop on ingress full
-    ingress_ = std::make_unique<::lat_bw_queue<csEvent*>>(peak_bw_per_cycle,
-                                                       latency_fn,
-                                                       bw_cost_fn,
-                                                       ingress_max_pending);
-    egress_credit_cap_ = credit_capacity_bytes(queue_size_packets);
+    const bool bw_enabled = (bw_cycles > 0);
+    const bool lat_enabled = (lat_cycles > 0);
+    if (bw_enabled || lat_enabled) {
+        const double peak_bw_per_cycle = bw_enabled
+            ? (64.0 / static_cast<double>(bw_cycles))
+            : std::numeric_limits<double>::infinity();
+        auto latency_fn = [lat_cycles, lat_enabled](double) {
+            return lat_enabled ? lat_cycles : int64_t{0};
+        };
+        auto bw_cost_fn = [](csEvent* const& item) {
+            return static_cast<double>(event_bytes(item));
+        };
+        const int64_t ingress_max_pending = 0; // credits gate ingress; never drop on ingress full
+        ingress_ = std::make_unique<::lat_bw_queue<csEvent*>>(peak_bw_per_cycle,
+                                                           latency_fn,
+                                                           bw_cost_fn,
+                                                           ingress_max_pending);
+    } else {
+        // No ingress timing model when both are disabled.
+        ingress_.reset();
+    }
+    egress_credit_cap_ = credit_capacity_bytes(queue_size_bytes);
     egress_credits_ = egress_credit_cap_;
-    egress_queue_max_ = queue_size_packets > 0
-        ? static_cast<std::size_t>(queue_size_packets)
-        : std::size_t{0};
+    egress_queue_max_bytes_ = queue_size_bytes > 0 ? queue_size_bytes : 0;
+    egress_queue_bytes_ = 0;
+    tx_bytes_total_ = 0;
+    rx_bytes_total_ = 0;
 }
 
 bool FabricPort::send(csEvent* item) {
@@ -132,10 +141,12 @@ bool FabricPort::send(csEvent* item) {
         link_->send(item);
         return true;
     }
-    if (!can_send()) {
+    const uint64_t bytes = event_bytes(item);
+    if (!can_send(bytes)) {
         return false;
     }
     egress_queue_.push_back(item);
+    egress_queue_bytes_ += static_cast<int64_t>(bytes);
     return true;
 }
 
@@ -200,29 +211,70 @@ void FabricPort::handle_event(SST::Event* ev) {
         }
     }
 
+    if (!ingress_) {
+        rx_bytes_total_ += event_bytes(cevent);
+        ready_.push_back(cevent);
+        return;
+    }
+
+    rx_bytes_total_ += event_bytes(cevent);
     if (!ingress_->add_packet(cevent)) {
         throw std::runtime_error("FabricPort: ingress queue full; credit accounting mismatch.");
     }
 }
 
 void FabricPort::reset_ingress_utilization() {
-    ingress_->reset_utilization();
+    if (ingress_) {
+        ingress_->reset_utilization();
+    }
 }
 
 bool FabricPort::can_send() const {
-    return !egress_queue_full();
+    return can_send(kDefaultMsgBytes);
+}
+
+bool FabricPort::can_send(uint64_t bytes) const {
+    const uint64_t bounded_bytes = std::max<uint64_t>(bytes, 1);
+    if (egress_queue_max_bytes_ <= 0) {
+        return true;
+    }
+    return !egress_queue_full(bounded_bytes);
+}
+
+bool FabricPort::can_send(const csEvent* item) const {
+    if (!item) {
+        return can_send();
+    }
+    return can_send(event_bytes(item));
 }
 
 double FabricPort::ingress_avg_utilization() const {
+    if (!ingress_) {
+        return 0.0;
+    }
     return ingress_->average_utilization();
 }
 
 double FabricPort::ingress_utilization() const {
+    if (!ingress_) {
+        return 0.0;
+    }
     return ingress_->utilization();
 }
 
 std::size_t FabricPort::ingress_occupancy() const {
+    if (!ingress_) {
+        return 0;
+    }
     return ingress_->occupancy();
+}
+
+uint64_t FabricPort::tx_bytes_total() const {
+    return tx_bytes_total_;
+}
+
+uint64_t FabricPort::rx_bytes_total() const {
+    return rx_bytes_total_;
 }
 
 bool FabricPort::can_receive(uint64_t cycle) {
@@ -234,6 +286,9 @@ bool FabricPort::can_receive(uint64_t cycle) {
 }
 
 void FabricPort::tick_ingress() {
+    if (!ingress_) {
+        return;
+    }
     auto ready = ingress_->on_tick();
     for (auto& item : ready) {
         ready_.push_back(item);
@@ -246,8 +301,11 @@ void FabricPort::drain_egress() {
         if (!try_consume_credit(egress_credits_, credit_bytes(ev))) {
             break;
         }
+        const uint64_t send_bytes = event_bytes(ev);
         link_->send(ev);
         egress_queue_.pop_front();
+        tx_bytes_total_ += send_bytes;
+        egress_queue_bytes_ = std::max<int64_t>(egress_queue_bytes_ - static_cast<int64_t>(send_bytes), 0);
     }
 }
 
@@ -259,8 +317,9 @@ void FabricPort::send_credit(uint64_t dst, uint64_t bytes) {
     link_->send(credit);
 }
 
-bool FabricPort::egress_queue_full() const {
-    return egress_queue_max_ > 0 && egress_queue_.size() >= egress_queue_max_;
+bool FabricPort::egress_queue_full(uint64_t bytes) const {
+    return egress_queue_max_bytes_ > 0 &&
+           (egress_queue_bytes_ + static_cast<int64_t>(bytes)) > egress_queue_max_bytes_;
 }
 
 } // namespace csimCore

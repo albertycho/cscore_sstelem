@@ -100,28 +100,45 @@ def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) 
     return trace_path, result.stdout
 
 
-BW_LINE_RE = re.compile(
-    r"load_local:\s*([0-9.eE+-]+)\s*"
-    r"load_cxl:\s*([0-9.eE+-]+)\s*"
-    r"store_local:\s*([0-9.eE+-]+)\s*"
-    r"store_cxl:\s*([0-9.eE+-]+)\s*"
-    r"total:\s*([0-9.eE+-]+)"
+BW_BPC_LINE_RE = re.compile(
+    r"PROJECTED_HOST_LINK_BW_BPC\s+"
+    r"host_to_switch=([0-9.eE+-]+)\s+"
+    r"switch_to_host=([0-9.eE+-]+)\s+"
+    r"total=([0-9.eE+-]+)"
+)
+BW_GBPS_LINE_RE = re.compile(
+    r"PROJECTED_HOST_LINK_BW_GBPS\s+"
+    r"host_to_switch=([0-9.eE+-]+)\s+"
+    r"switch_to_host=([0-9.eE+-]+)\s+"
+    r"total=([0-9.eE+-]+)"
 )
 MAIN_LOOP_COUNTS_RE = re.compile(r"main_loop_loads=(\d+)\s+main_loop_stores=(\d+)")
 
 
 def parse_bw(output: str) -> dict:
+    parsed = {}
     for line in output.splitlines():
-        match = BW_LINE_RE.search(line)
+        match = BW_BPC_LINE_RE.search(line)
         if match:
-            return {
-                "load_local_gbps": float(match.group(1)),
-                "load_cxl_gbps": float(match.group(2)),
-                "store_local_gbps": float(match.group(3)),
-                "store_cxl_gbps": float(match.group(4)),
-                "total_gbps": float(match.group(5)),
-            }
-    return {}
+            parsed.update(
+                {
+                    "host_to_switch_bpc": float(match.group(1)),
+                    "switch_to_host_bpc": float(match.group(2)),
+                    "host_link_total_bpc": float(match.group(3)),
+                }
+            )
+            continue
+        match = BW_GBPS_LINE_RE.search(line)
+        if match:
+            parsed.update(
+                {
+                    "host_to_switch_gbps": float(match.group(1)),
+                    "switch_to_host_gbps": float(match.group(2)),
+                    "host_link_total_gbps": float(match.group(3)),
+                }
+            )
+            parsed["total_gbps"] = parsed["host_link_total_gbps"]
+    return parsed
 
 
 def parse_main_loop_counts(output: str) -> dict:
@@ -200,6 +217,13 @@ def main() -> int:
             bw_row.update(main_counts)
             bw_row.update(bw)
             bw_rows.append(bw_row)
+            if all(k in bw for k in ("host_to_switch_bpc", "switch_to_host_bpc", "host_link_total_bpc")):
+                print(
+                    "[STATUS] Projected host-link BW "
+                    f"{trace_name}: host->switch={bw['host_to_switch_bpc']:.6f} B/cycle, "
+                    f"switch->host={bw['switch_to_host_bpc']:.6f} B/cycle, "
+                    f"total={bw['host_link_total_bpc']:.6f} B/cycle"
+                )
 
         no_rep_out = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.out"
         no_rep_err = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}_no_rep.err"

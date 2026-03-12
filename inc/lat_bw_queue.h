@@ -12,11 +12,13 @@ class lat_bw_queue {
     struct pending_entry {
         T payload;
         double remaining_bytes;
+        int64_t total_bytes;
     };
     struct entry {
         T payload;
         int64_t injection_time;
         int64_t completion_time;
+        int64_t total_bytes;
 
         // reversed comparator for priority queue
         friend bool operator<(const entry& a, const entry& b) {
@@ -33,7 +35,7 @@ public:
     lat_bw_queue(double peak_bw_per_cycle,
                  latency_function_type&& latency_function,
                  bandwidth_function_type&& bw_cost_fn = {},
-                 int64_t max_pending = 0);
+                 int64_t max_pending_bytes = 0);
 
     /// Called once per tick (start of each cycle)
     /// Returns packets completed on this tick
@@ -50,8 +52,6 @@ public:
 
     void reset_utilization();
 
-    bool is_full() const;
-
 private:
     void service_bandwidth();
     double get_utilization() const;
@@ -63,7 +63,8 @@ private:
 
     std::priority_queue<entry> active_queue;    // (packet, injection_time)
     std::queue<pending_entry> blocked_queue;    // waiting to transmit
-    int64_t max_pending;
+    int64_t max_pending_bytes;
+    int64_t occupancy_bytes = 0;
     double util_sum = 0.0;
     uint64_t util_samples = 0;
     std::array<double, kUtilWindow> bw_hist{};

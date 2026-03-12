@@ -26,7 +26,7 @@ csEvent* make_reset_util_event(uint64_t src, uint64_t dst);
 //  - credit-based egress backpressure
 //
 // Usage (csEvent* only):
-//   port.configure(link, self_id, bw_cycles, lat_cycles, queue_size_packets);
+//   port.configure(link, self_id, bw_cycles, lat_cycles, queue_size_bytes);
 //   port.send(ev);                 // returns false if egress queue full
 //   auto ev = port.receive(cyc);   // returns at most one message per cycle
 class FabricPort {
@@ -43,15 +43,16 @@ public:
     // Parameters:
     //   link               SST link pointer (may be null; send() will fail).
     //   self_id            Node id for credit/control messages.
-    //   bw_cycles          Cycles per 64B for ingress bandwidth modeling (0 disables).
-    //   lat_cycles         Base latency in cycles for ingress modeling (0 disables).
-    //   queue_size_packets Egress credit capacity in packets (0 = unbounded).
+    //   bw_cycles          Cycles per 64B for ingress bandwidth modeling (0 disables bandwidth shaping).
+    //   lat_cycles         Base latency in cycles for ingress modeling (0 disables latency shaping).
+    //                     If both bw_cycles and lat_cycles are 0, ingress queue/timing is bypassed.
+    //   queue_size_bytes   Egress credit capacity in bytes (0 = unbounded).
     //                     Ingress is unbounded to avoid drops; credits gate senders.
     void configure(SST::Link* link,
                    uint64_t self_id,
                    int64_t bw_cycles,
                    int64_t lat_cycles,
-                   int64_t queue_size_packets);
+                   int64_t queue_size_bytes);
 
     [[nodiscard]] bool send(csEvent* item);
 
@@ -65,9 +66,13 @@ public:
 
     void reset_ingress_utilization();
     bool can_send() const;
+    bool can_send(uint64_t bytes) const;
+    bool can_send(const csEvent* item) const;
     double ingress_avg_utilization() const;
     double ingress_utilization() const;
     std::size_t ingress_occupancy() const;
+    uint64_t tx_bytes_total() const;
+    uint64_t rx_bytes_total() const;
 
 private:
     bool can_receive(uint64_t cycle);
@@ -80,13 +85,16 @@ private:
     std::unique_ptr<::lat_bw_queue<csEvent*>> ingress_;
     int64_t egress_credits_ = 0;
     int64_t egress_credit_cap_ = 0;
-    std::size_t egress_queue_max_ = 0;
+    int64_t egress_queue_max_bytes_ = 0;
+    int64_t egress_queue_bytes_ = 0;
     std::deque<csEvent*> egress_queue_;
     std::deque<csEvent*> ready_;
     uint64_t last_tick_cycle_ = std::numeric_limits<uint64_t>::max();
     uint64_t last_deliver_cycle_ = std::numeric_limits<uint64_t>::max();
+    uint64_t tx_bytes_total_ = 0;
+    uint64_t rx_bytes_total_ = 0;
 
-    bool egress_queue_full() const;
+    bool egress_queue_full(uint64_t bytes) const;
 };
 
 } // namespace csimCore

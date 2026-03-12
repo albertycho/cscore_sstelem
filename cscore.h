@@ -83,9 +83,9 @@ namespace SST {
             { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
             { "cpu_heartbeat_period", "Cycles between CPU retired-instruction prints (0 disables)", "0" },
             { "util_heartbeat_period", "Cycles between utilization logs (0 disables)", "0" },
-            { "cxl_link_bw_cycles", "CXL link bandwidth in cycles per 64B (core-side FabricPort)", "0" },
-            { "cxl_link_latency_cycles", "CXL link base latency in cycles (core-side FabricPort)", "0" },
-            { "cxl_link_queue_size", "CXL link queue capacity in packets (used as byte credits; 0 = unbounded)", "0" },
+            { "cxl_link_bw_cycles", "CXL ingress bandwidth in cycles per 64B (core-side FabricPort; 0 disables ingress bandwidth shaping)", "0" },
+            { "cxl_link_latency_cycles", "CXL ingress base latency in cycles (core-side FabricPort; 0 disables ingress latency shaping; when both bw+lat are 0, ingress queue is bypassed)", "0" },
+            { "cxl_link_queue_size", "CXL link queue capacity in bytes (0 = unbounded)", "0" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
             { "warm_cache_insts", "Initial instructions where remote requests are satisfied locally (cache warm only, no fabric traffic). Clamped to warmup_insts.", "0 (defaults to warmup_insts)" },
@@ -117,10 +117,6 @@ namespace SST {
         bool cxl_port_configured_ = false;
         //champsim::csim_sst *csst;
         //champsim::csim_sst csst;
-
-        // this was there for early debug. probably should remove
-        input_instr tmp_instr;
-
 
         private:
 
@@ -162,7 +158,6 @@ namespace SST {
         duration time_quantum;
 
         //DBG
-        uint64_t fetched_insts=0;
         uint64_t heartbeat_count=0;
         uint64_t cache_heartbeat_period=1000;
         uint64_t cpu_heartbeat_period=0;
