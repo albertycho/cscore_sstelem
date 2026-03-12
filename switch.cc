@@ -149,9 +149,7 @@ bool Switch::clock_tick(SST::Cycle_t cycle)
     const auto cycle_u = static_cast<uint64_t>(cycle);
     for_each_port([&](PortState& port) {
         port.port.tick(cycle_u);
-        try_route_pending(port);
         try_receive_and_route(port, cycle_u);
-        try_route_pending(port);
     });
     return false;
 }
@@ -262,32 +260,10 @@ bool Switch::try_route_event(csEvent* ev)
     throw std::runtime_error(msg);
 }
 
-void Switch::try_route_pending(PortState& port)
-{
-    while (!port.pending_route.empty()) {
-        csEvent* ev = port.pending_route.front();
-        if (!try_route_event(ev)) {
-            break;
-        }
-        port.pending_route.pop_front();
-    }
-}
-
 void Switch::try_receive_and_route(PortState& port, uint64_t cycle)
 {
-    port.port.try_receive(cycle, [this, &port](csEvent* ev) {
-        // Keep per-input-port order but avoid link-level HOL blocking:
-        // if this event cannot be routed now, park it and return true so
-        // the FabricPort can pop and issue credits upstream.
-        if (!port.pending_route.empty()) {
-            port.pending_route.push_back(ev);
-            return true;
-        }
-        if (try_route_event(ev)) {
-            return true;
-        }
-        port.pending_route.push_back(ev);
-        return true;
+    port.port.try_receive(cycle, [this](csEvent* ev) {
+        return try_route_event(ev);
     });
 }
 
@@ -426,13 +402,6 @@ void Switch::finish()
         }
         return sum;
     };
-    auto sum_pending = [](const std::vector<PortState>& ports) {
-        std::size_t sum = 0;
-        for (const auto& port : ports) {
-            sum += port.pending_route.size();
-        }
-        return sum;
-    };
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
     const double ticks = tick_count_ > 0 ? static_cast<double>(tick_count_) : 1.0;
@@ -467,8 +436,6 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.pool_ingress_queue_wait_max_cycles = " << max_ingress_queue_wait(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_occ_bytes = " << sum_ingress_occ(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_occ_bytes = " << sum_ingress_occ(pool_ports_) << '\n';
-        std::cout << "stat.switch.fabric.node_pending_route = " << sum_pending(node_ports_) << '\n';
-        std::cout << "stat.switch.fabric.pool_pending_route = " << sum_pending(pool_ports_) << '\n';
         std::cout << "stat.switch.bw.host_to_switch_gbps = " << host_to_switch_gbps << '\n';
         std::cout << "stat.switch.bw.switch_to_host_gbps = " << switch_to_host_gbps << '\n';
         std::cout << "stat.switch.bw.host_link_total_gbps = " << host_link_total_gbps << '\n';
@@ -491,14 +458,6 @@ void Switch::finish()
             std::cout << "  Switch active time (s): " << active_sec << std::endl;
         }
     }
-
-    // Cleanup any unrouted events still buffered at end of simulation.
-    for_each_port([](PortState& port) {
-        while (!port.pending_route.empty()) {
-            delete port.pending_route.front();
-            port.pending_route.pop_front();
-        }
-    });
 }
 
 } // namespace csimCore
