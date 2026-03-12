@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <chrono>
+#include <deque>
 
 #include <sst/core/component.h>
 #include <sst/core/link.h>
@@ -69,6 +70,7 @@ private:
     bool clock_tick(SST::Cycle_t cycle);
     void reset_stats_and_broadcast();
     bool try_route_event(csEvent* ev);
+    void try_route_pending(PortState& port);
     void try_receive_and_route(PortState& port, uint64_t cycle);
     void for_each_port(const std::function<void(PortState&)>& fn);
     void for_each_port(const std::function<void(const PortState&)>& fn) const;
@@ -88,6 +90,7 @@ private:
     bool lightweight_output_ = false;
     struct PortState {
         FabricPort port;
+        std::deque<csEvent*> pending_route;
     };
     std::vector<PortState> node_ports_;
     std::vector<PortState> pool_ports_;
