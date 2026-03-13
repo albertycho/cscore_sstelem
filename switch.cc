@@ -462,6 +462,89 @@ void Switch::finish()
         }
         return max_burst;
     };
+    auto avg_ingress_arrival_burst_pkts = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_avg_pkts();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_arrival_burst_bytes = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_avg_bytes();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_arrival_burst_stddev_pkts = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_stddev_pkts();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_arrival_burst_stddev_bytes = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_stddev_bytes();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_arrival_nonempty_frac = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_nonempty_frac();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_release_burst_pkts = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_burst_avg_pkts();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_release_burst_bytes = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_burst_avg_bytes();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_release_burst_stddev_pkts = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_burst_stddev_pkts();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_release_burst_stddev_bytes = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_burst_stddev_bytes();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_release_nonempty_frac = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_nonempty_frac();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_occ = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_occ_avg_bytes();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_occ_stddev = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_occ_stddev_bytes();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto max_ingress_occ_bytes = [](const std::vector<PortState>& ports) {
+        uint64_t max_occ = 0;
+        for (const auto& port : ports) max_occ = std::max(max_occ, port.port.ingress_occ_max_bytes());
+        return max_occ;
+    };
+    auto avg_ingress_occ_nonempty_frac = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_occ_nonempty_frac();
+        return sum / static_cast<double>(ports.size());
+    };
     auto sum_rx_bytes_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
@@ -552,12 +635,40 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.pool_ready_retry_count = " << sum_ready_retries(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_arrival_burst_max_pkts = " << max_ingress_arrival_burst_pkts(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_arrival_burst_max_bytes = " << max_ingress_arrival_burst_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_burst_avg_pkts = " << avg_ingress_arrival_burst_pkts(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_burst_avg_bytes = " << avg_ingress_arrival_burst_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_burst_stddev_pkts = " << avg_ingress_arrival_burst_stddev_pkts(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_burst_stddev_bytes = " << avg_ingress_arrival_burst_stddev_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_nonempty_frac = " << avg_ingress_arrival_nonempty_frac(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_release_burst_max_pkts = " << max_ingress_release_burst_pkts(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_release_burst_max_bytes = " << max_ingress_release_burst_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_burst_avg_pkts = " << avg_ingress_release_burst_pkts(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_burst_avg_bytes = " << avg_ingress_release_burst_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_burst_stddev_pkts = " << avg_ingress_release_burst_stddev_pkts(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_burst_stddev_bytes = " << avg_ingress_release_burst_stddev_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_nonempty_frac = " << avg_ingress_release_nonempty_frac(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_max_pkts = " << max_ingress_arrival_burst_pkts(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_max_bytes = " << max_ingress_arrival_burst_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_avg_pkts = " << avg_ingress_arrival_burst_pkts(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_avg_bytes = " << avg_ingress_arrival_burst_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_stddev_pkts = " << avg_ingress_arrival_burst_stddev_pkts(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_stddev_bytes = " << avg_ingress_arrival_burst_stddev_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_nonempty_frac = " << avg_ingress_arrival_nonempty_frac(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_release_burst_max_pkts = " << max_ingress_release_burst_pkts(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_release_burst_max_bytes = " << max_ingress_release_burst_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_burst_avg_pkts = " << avg_ingress_release_burst_pkts(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_burst_avg_bytes = " << avg_ingress_release_burst_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_burst_stddev_pkts = " << avg_ingress_release_burst_stddev_pkts(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_burst_stddev_bytes = " << avg_ingress_release_burst_stddev_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_nonempty_frac = " << avg_ingress_release_nonempty_frac(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_avg_bytes = " << avg_ingress_occ(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_stddev_bytes = " << avg_ingress_occ_stddev(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_max_bytes = " << max_ingress_occ_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_nonempty_frac = " << avg_ingress_occ_nonempty_frac(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_avg_bytes = " << avg_ingress_occ(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_stddev_bytes = " << avg_ingress_occ_stddev(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_max_bytes = " << max_ingress_occ_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_nonempty_frac = " << avg_ingress_occ_nonempty_frac(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.demand_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.write_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.response = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
