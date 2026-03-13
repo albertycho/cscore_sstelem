@@ -82,6 +82,12 @@ private:
         double ingress_queue_wait_avg_cycles = 0.0;
         uint64_t ingress_queue_wait_max_cycles = 0;
         std::size_t occ = 0;
+        double ready_wait_avg_cycles = 0.0;
+        uint64_t ready_wait_max_cycles = 0;
+        double ready_occ_avg = 0.0;
+        std::size_t ready_occ = 0;
+        std::size_t ready_occ_max = 0;
+        uint64_t ready_retry_count = 0;
     };
     void poll_ports(uint64_t cycle);
     // Average utilization plus total occupancy for request ingress links.

@@ -595,6 +595,9 @@ namespace SST {
                 const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
                 const uint64_t total_demand_miss = demand_return_count(st);
                 const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
+                const double avg_pool_roundtrip_lat = (st.pool_completed > 0)
+                    ? static_cast<double>(st.pool_latency_sum) / static_cast<double>(st.pool_completed)
+                    : 0.0;
                 const double avg_miss_lat = (total_demand_miss > 0)
                     ? static_cast<double>(st.total_miss_latency_cycles) / static_cast<double>(total_demand_miss)
                     : 0.0;
@@ -603,6 +606,9 @@ namespace SST {
                     : 0.0;
                 if (lightweight_output_) {
                     const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".llc.";
+                    std::cout << prefix << "pool_accesses = " << st.pool_accesses << '\n';
+                    std::cout << prefix << "pool_completed = " << st.pool_completed << '\n';
+                    std::cout << prefix << "avg_pool_roundtrip_lat = " << avg_pool_roundtrip_lat << '\n';
                     std::cout << prefix << "cxl_miss = " << cxl_demand_miss << '\n';
                     std::cout << prefix << "total_miss = " << total_demand_miss << '\n';
                     std::cout << prefix << "avg_miss_lat = " << avg_miss_lat << '\n';
@@ -644,6 +650,12 @@ namespace SST {
                 std::cout << prefix << "fabric.ingress_queue_wait_avg_cycles = " << remote_port_.ingress_queue_wait_avg_cycles() << '\n';
                 std::cout << prefix << "fabric.ingress_queue_wait_max_cycles = " << remote_port_.ingress_queue_wait_max_cycles() << '\n';
                 std::cout << prefix << "fabric.ingress_occ_bytes = " << remote_port_.ingress_occupancy() << '\n';
+                std::cout << prefix << "fabric.ready_wait_avg_cycles = " << remote_port_.ready_wait_avg_cycles() << '\n';
+                std::cout << prefix << "fabric.ready_wait_max_cycles = " << remote_port_.ready_wait_max_cycles() << '\n';
+                std::cout << prefix << "fabric.ready_occ_avg_pkts = " << remote_port_.ready_occupancy_avg() << '\n';
+                std::cout << prefix << "fabric.ready_occ_pkts = " << remote_port_.ready_occupancy() << '\n';
+                std::cout << prefix << "fabric.ready_occ_max_pkts = " << remote_port_.ready_occupancy_max() << '\n';
+                std::cout << prefix << "fabric.ready_retry_count = " << remote_port_.ready_retry_count() << '\n';
                 std::cout << prefix << "walltime_s = " << total_sec << '\n';
                 if (active_calls_ > 0) {
                     const auto active_sec = std::chrono::duration<double>(active_time_).count();

@@ -169,6 +169,9 @@ void FabricPort::tick(uint64_t cycle) {
         last_tick_cycle_ = cycle;
         tick_ingress();
         drain_egress();
+        ready_occ_sum_ += static_cast<uint64_t>(ready_.size());
+        ready_occ_samples_++;
+        ready_occ_max_ = std::max(ready_occ_max_, ready_.size());
     }
 }
 
@@ -180,6 +183,7 @@ std::optional<csEvent*> FabricPort::receive(uint64_t cycle) {
     const uint64_t credit_dst = event_credit_dst(item);
     const uint64_t credit_len = credit_bytes(item);
     ready_.pop_front();
+    record_ready_pop(cycle, item);
     last_deliver_cycle_ = cycle;
     send_credit(credit_dst, credit_len);
     return item;
@@ -194,9 +198,11 @@ bool FabricPort::try_receive(uint64_t cycle,
     const uint64_t credit_dst = event_credit_dst(item);
     const uint64_t credit_len = credit_bytes(item);
     if (!handle(item)) {
+        ready_retry_count_++;
         return false;
     }
     ready_.pop_front();
+    record_ready_pop(cycle, item);
     last_deliver_cycle_ = cycle;
     send_credit(credit_dst, credit_len);
     return true;
@@ -220,7 +226,7 @@ void FabricPort::handle_event(SST::Event* ev) {
         if (ctrl_code == kControlResetUtil) {
             reset_ingress_utilization();
             // Reset controls are out-of-band: do not let data backlog delay phase reset propagation.
-            ready_.push_front(cevent);
+            push_ready(cevent, true);
             return;
         }
     }
@@ -228,7 +234,7 @@ void FabricPort::handle_event(SST::Event* ev) {
     if (!ingress_) {
         rx_bytes_total_ += event_bytes(cevent);
         ingress_wait_samples_++;
-        ready_.push_back(cevent);
+        push_ready(cevent);
         return;
     }
 
@@ -287,6 +293,21 @@ std::size_t FabricPort::ingress_occupancy() const {
     return ingress_->occupancy();
 }
 
+std::size_t FabricPort::ready_occupancy() const {
+    return ready_.size();
+}
+
+double FabricPort::ready_occupancy_avg() const {
+    if (ready_occ_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ready_occ_sum_) / static_cast<double>(ready_occ_samples_);
+}
+
+std::size_t FabricPort::ready_occupancy_max() const {
+    return ready_occ_max_;
+}
+
 double FabricPort::ingress_wait_avg_cycles() const {
     if (ingress_wait_samples_ == 0) {
         return 0.0;
@@ -307,6 +328,21 @@ double FabricPort::ingress_queue_wait_avg_cycles() const {
 
 uint64_t FabricPort::ingress_queue_wait_max_cycles() const {
     return ingress_queue_wait_max_cycles_;
+}
+
+double FabricPort::ready_wait_avg_cycles() const {
+    if (ready_wait_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ready_wait_sum_cycles_) / static_cast<double>(ready_wait_samples_);
+}
+
+uint64_t FabricPort::ready_wait_max_cycles() const {
+    return ready_wait_max_cycles_;
+}
+
+uint64_t FabricPort::ready_retry_count() const {
+    return ready_retry_count_;
 }
 
 double FabricPort::egress_wait_avg_cycles() const {
@@ -359,7 +395,7 @@ void FabricPort::tick_ingress() {
         ingress_queue_wait_sum_cycles_ += queue_wait;
         ingress_queue_wait_samples_++;
         ingress_queue_wait_max_cycles_ = std::max(ingress_queue_wait_max_cycles_, queue_wait);
-        ready_.push_back(item);
+        push_ready(item);
     }
 }
 
@@ -408,6 +444,33 @@ uint64_t FabricPort::ingress_service_floor_cycles(const csEvent* item) const {
         floor += (bytes * static_cast<uint64_t>(ingress_bw_cycles_) + 63ull) / 64ull;
     }
     return floor;
+}
+
+void FabricPort::push_ready(csEvent* item, bool front) {
+    const uint64_t enqueue_cycle =
+        (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
+    ready_enqueue_cycle_[item] = enqueue_cycle;
+    if (front) {
+        ready_.push_front(item);
+    } else {
+        ready_.push_back(item);
+    }
+    ready_occ_max_ = std::max(ready_occ_max_, ready_.size());
+}
+
+void FabricPort::record_ready_pop(uint64_t cycle, csEvent* item) {
+    uint64_t wait_cycles = 0;
+    auto it = ready_enqueue_cycle_.find(item);
+    if (it != ready_enqueue_cycle_.end()) {
+        const uint64_t enqueue_cycle = it->second;
+        if (cycle >= enqueue_cycle) {
+            wait_cycles = cycle - enqueue_cycle;
+        }
+        ready_enqueue_cycle_.erase(it);
+    }
+    ready_wait_sum_cycles_ += wait_cycles;
+    ready_wait_samples_++;
+    ready_wait_max_cycles_ = std::max(ready_wait_max_cycles_, wait_cycles);
 }
 
 } // namespace csimCore

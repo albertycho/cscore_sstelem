@@ -216,11 +216,17 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     double ingress_wait_avg_sum = 0.0;
     double egress_wait_avg_sum = 0.0;
     double ingress_queue_wait_avg_sum = 0.0;
+    double ready_wait_avg_sum = 0.0;
+    double ready_occ_avg_sum = 0.0;
     std::size_t count = 0;
     std::size_t occ_total = 0;
+    std::size_t ready_occ_total = 0;
+    std::size_t ready_occ_max = 0;
     uint64_t ingress_wait_max = 0;
     uint64_t egress_wait_max = 0;
     uint64_t ingress_queue_wait_max = 0;
+    uint64_t ready_wait_max = 0;
+    uint64_t ready_retry_count = 0;
 
     auto accumulate = [&](const FabricPort& port) {
         util_sum += port.ingress_utilization();
@@ -232,6 +238,12 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
         ingress_queue_wait_avg_sum += port.ingress_queue_wait_avg_cycles();
         ingress_queue_wait_max = std::max(ingress_queue_wait_max, port.ingress_queue_wait_max_cycles());
         occ_total += port.ingress_occupancy();
+        ready_wait_avg_sum += port.ready_wait_avg_cycles();
+        ready_wait_max = std::max(ready_wait_max, port.ready_wait_max_cycles());
+        ready_occ_avg_sum += port.ready_occupancy_avg();
+        ready_occ_total += port.ready_occupancy();
+        ready_occ_max = std::max(ready_occ_max, port.ready_occupancy_max());
+        ready_retry_count += port.ready_retry_count();
         ++count;
     };
 
@@ -244,10 +256,16 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
         stats.ingress_wait_avg_cycles = ingress_wait_avg_sum / static_cast<double>(count);
         stats.egress_wait_avg_cycles = egress_wait_avg_sum / static_cast<double>(count);
         stats.ingress_queue_wait_avg_cycles = ingress_queue_wait_avg_sum / static_cast<double>(count);
+        stats.ready_wait_avg_cycles = ready_wait_avg_sum / static_cast<double>(count);
+        stats.ready_occ_avg = ready_occ_avg_sum / static_cast<double>(count);
     }
     stats.ingress_wait_max_cycles = ingress_wait_max;
     stats.egress_wait_max_cycles = egress_wait_max;
     stats.ingress_queue_wait_max_cycles = ingress_queue_wait_max;
+    stats.ready_wait_max_cycles = ready_wait_max;
+    stats.ready_occ = ready_occ_total;
+    stats.ready_occ_max = ready_occ_max;
+    stats.ready_retry_count = ready_retry_count;
     return stats;
 }
 
@@ -344,6 +362,12 @@ void CXLMemoryPool::finish() {
         std::cout << prefix << "fabric.ingress_queue_wait_avg_cycles = " << stats.ingress_queue_wait_avg_cycles << '\n';
         std::cout << prefix << "fabric.ingress_queue_wait_max_cycles = " << stats.ingress_queue_wait_max_cycles << '\n';
         std::cout << prefix << "fabric.ingress_occ_bytes = " << stats.occ << '\n';
+        std::cout << prefix << "fabric.ready_wait_avg_cycles = " << stats.ready_wait_avg_cycles << '\n';
+        std::cout << prefix << "fabric.ready_wait_max_cycles = " << stats.ready_wait_max_cycles << '\n';
+        std::cout << prefix << "fabric.ready_occ_avg_pkts = " << stats.ready_occ_avg << '\n';
+        std::cout << prefix << "fabric.ready_occ_pkts = " << stats.ready_occ << '\n';
+        std::cout << prefix << "fabric.ready_occ_max_pkts = " << stats.ready_occ_max << '\n';
+        std::cout << prefix << "fabric.ready_retry_count = " << stats.ready_retry_count << '\n';
         std::cout << prefix << "walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();

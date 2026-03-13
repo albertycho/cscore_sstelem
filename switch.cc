@@ -360,6 +360,24 @@ void Switch::finish()
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
+    auto avg_ready_wait = [](const std::vector<PortState>& ports) {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for (const auto& port : ports) {
+            sum += port.port.ready_wait_avg_cycles();
+            count++;
+        }
+        return count > 0 ? sum / static_cast<double>(count) : 0.0;
+    };
+    auto avg_ready_occ = [](const std::vector<PortState>& ports) {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for (const auto& port : ports) {
+            sum += port.port.ready_occupancy_avg();
+            count++;
+        }
+        return count > 0 ? sum / static_cast<double>(count) : 0.0;
+    };
     auto max_ingress_wait = [](const std::vector<PortState>& ports) {
         uint64_t max_wait = 0;
         for (const auto& port : ports) {
@@ -381,10 +399,38 @@ void Switch::finish()
         }
         return max_wait;
     };
+    auto max_ready_wait = [](const std::vector<PortState>& ports) {
+        uint64_t max_wait = 0;
+        for (const auto& port : ports) {
+            max_wait = std::max(max_wait, port.port.ready_wait_max_cycles());
+        }
+        return max_wait;
+    };
     auto sum_ingress_occ = [](const std::vector<PortState>& ports) {
         std::size_t sum = 0;
         for (const auto& port : ports) {
             sum += port.port.ingress_occupancy();
+        }
+        return sum;
+    };
+    auto sum_ready_occ = [](const std::vector<PortState>& ports) {
+        std::size_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.ready_occupancy();
+        }
+        return sum;
+    };
+    auto max_ready_occ = [](const std::vector<PortState>& ports) {
+        std::size_t max_occ = 0;
+        for (const auto& port : ports) {
+            max_occ = std::max(max_occ, port.port.ready_occupancy_max());
+        }
+        return max_occ;
+    };
+    auto sum_ready_retries = [](const std::vector<PortState>& ports) {
+        uint64_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.ready_retry_count();
         }
         return sum;
     };
@@ -428,14 +474,26 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.pool_egress_wait_avg_cycles = " << avg_egress_wait(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_queue_wait_avg_cycles = " << avg_ingress_queue_wait(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_queue_wait_avg_cycles = " << avg_ingress_queue_wait(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ready_wait_avg_cycles = " << avg_ready_wait(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ready_wait_avg_cycles = " << avg_ready_wait(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_wait_max_cycles = " << max_ingress_wait(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_egress_wait_max_cycles = " << max_egress_wait(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_wait_max_cycles = " << max_ingress_wait(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_egress_wait_max_cycles = " << max_egress_wait(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_queue_wait_max_cycles = " << max_ingress_queue_wait(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_queue_wait_max_cycles = " << max_ingress_queue_wait(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ready_wait_max_cycles = " << max_ready_wait(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ready_wait_max_cycles = " << max_ready_wait(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_occ_bytes = " << sum_ingress_occ(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_occ_bytes = " << sum_ingress_occ(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ready_occ_avg_pkts = " << avg_ready_occ(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ready_occ_avg_pkts = " << avg_ready_occ(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ready_occ_pkts = " << sum_ready_occ(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ready_occ_pkts = " << sum_ready_occ(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ready_occ_max_pkts = " << max_ready_occ(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ready_occ_max_pkts = " << max_ready_occ(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ready_retry_count = " << sum_ready_retries(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ready_retry_count = " << sum_ready_retries(pool_ports_) << '\n';
         std::cout << "stat.switch.bw.host_to_switch_gbps = " << host_to_switch_gbps << '\n';
         std::cout << "stat.switch.bw.switch_to_host_gbps = " << switch_to_host_gbps << '\n';
         std::cout << "stat.switch.bw.host_link_total_gbps = " << host_link_total_gbps << '\n';

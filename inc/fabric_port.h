@@ -72,10 +72,16 @@ public:
     double ingress_avg_utilization() const;
     double ingress_utilization() const;
     std::size_t ingress_occupancy() const;
+    std::size_t ready_occupancy() const;
+    double ready_occupancy_avg() const;
+    std::size_t ready_occupancy_max() const;
     double ingress_wait_avg_cycles() const;
     uint64_t ingress_wait_max_cycles() const;
     double ingress_queue_wait_avg_cycles() const;
     uint64_t ingress_queue_wait_max_cycles() const;
+    double ready_wait_avg_cycles() const;
+    uint64_t ready_wait_max_cycles() const;
+    uint64_t ready_retry_count() const;
     double egress_wait_avg_cycles() const;
     uint64_t egress_wait_max_cycles() const;
     uint64_t tx_bytes_total() const;
@@ -87,6 +93,8 @@ private:
     void drain_egress();
     void send_credit(uint64_t dst, uint64_t bytes);
     uint64_t ingress_service_floor_cycles(const csEvent* item) const;
+    void push_ready(csEvent* item, bool front = false);
+    void record_ready_pop(uint64_t cycle, csEvent* item);
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
@@ -104,8 +112,16 @@ private:
     std::deque<EgressEntry> egress_queue_;
     std::deque<csEvent*> ready_;
     std::unordered_map<csEvent*, uint64_t> ingress_enqueue_cycle_;
+    std::unordered_map<csEvent*, uint64_t> ready_enqueue_cycle_;
     uint64_t last_tick_cycle_ = std::numeric_limits<uint64_t>::max();
     uint64_t last_deliver_cycle_ = std::numeric_limits<uint64_t>::max();
+    uint64_t ready_wait_sum_cycles_ = 0;
+    uint64_t ready_wait_samples_ = 0;
+    uint64_t ready_wait_max_cycles_ = 0;
+    uint64_t ready_retry_count_ = 0;
+    uint64_t ready_occ_sum_ = 0;
+    uint64_t ready_occ_samples_ = 0;
+    std::size_t ready_occ_max_ = 0;
     uint64_t ingress_wait_sum_cycles_ = 0;
     uint64_t ingress_wait_samples_ = 0;
     uint64_t ingress_wait_max_cycles_ = 0;
