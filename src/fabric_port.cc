@@ -143,6 +143,13 @@ void FabricPort::configure(SST::Link* link,
     egress_wait_sum_cycles_ = 0;
     egress_wait_samples_ = 0;
     egress_wait_max_cycles_ = 0;
+    ingress_arrival_burst_cycle_ = std::numeric_limits<uint64_t>::max();
+    ingress_arrival_burst_pkts_cur_ = 0;
+    ingress_arrival_burst_bytes_cur_ = 0;
+    ingress_arrival_burst_max_pkts_ = 0;
+    ingress_arrival_burst_max_bytes_ = 0;
+    ingress_release_burst_max_pkts_ = 0;
+    ingress_release_burst_max_bytes_ = 0;
     tx_bytes_total_ = 0;
     rx_bytes_total_ = 0;
     tx_bytes_by_class_.fill(0);
@@ -236,6 +243,8 @@ void FabricPort::handle_event(SST::Event* ev) {
     }
 
     record_rx(cevent);
+    record_ingress_arrival((last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_,
+                           event_bytes(cevent));
     if (!ingress_) {
         ingress_wait_samples_++;
         push_ready(cevent);
@@ -359,6 +368,22 @@ uint64_t FabricPort::egress_wait_max_cycles() const {
     return egress_wait_max_cycles_;
 }
 
+uint64_t FabricPort::ingress_arrival_burst_max_pkts() const {
+    return ingress_arrival_burst_max_pkts_;
+}
+
+uint64_t FabricPort::ingress_arrival_burst_max_bytes() const {
+    return ingress_arrival_burst_max_bytes_;
+}
+
+uint64_t FabricPort::ingress_release_burst_max_pkts() const {
+    return ingress_release_burst_max_pkts_;
+}
+
+uint64_t FabricPort::ingress_release_burst_max_bytes() const {
+    return ingress_release_burst_max_bytes_;
+}
+
 uint64_t FabricPort::tx_bytes_total() const {
     return tx_bytes_total_;
 }
@@ -396,6 +421,7 @@ void FabricPort::tick_ingress() {
         return;
     }
     auto ready = ingress_->on_tick();
+    record_ingress_release(ready);
     for (auto& item : ready) {
         uint64_t wait_cycles = 0;
         auto it = ingress_enqueue_cycle_.find(item);
@@ -528,6 +554,29 @@ void FabricPort::record_tx(const csEvent* item) {
     const auto cls = classify_event(item);
     tx_bytes_by_class_[static_cast<std::size_t>(cls)] += bytes;
     tx_packets_by_class_[static_cast<std::size_t>(cls)]++;
+}
+
+void FabricPort::record_ingress_arrival(uint64_t cycle, uint64_t bytes) {
+    if (ingress_arrival_burst_cycle_ != cycle) {
+        ingress_arrival_burst_cycle_ = cycle;
+        ingress_arrival_burst_pkts_cur_ = 0;
+        ingress_arrival_burst_bytes_cur_ = 0;
+    }
+    ingress_arrival_burst_pkts_cur_++;
+    ingress_arrival_burst_bytes_cur_ += bytes;
+    ingress_arrival_burst_max_pkts_ = std::max(ingress_arrival_burst_max_pkts_, ingress_arrival_burst_pkts_cur_);
+    ingress_arrival_burst_max_bytes_ = std::max(ingress_arrival_burst_max_bytes_, ingress_arrival_burst_bytes_cur_);
+}
+
+void FabricPort::record_ingress_release(const std::vector<csEvent*>& ready) {
+    uint64_t burst_pkts = 0;
+    uint64_t burst_bytes = 0;
+    for (const auto* item : ready) {
+        burst_pkts++;
+        burst_bytes += event_bytes(item);
+    }
+    ingress_release_burst_max_pkts_ = std::max(ingress_release_burst_max_pkts_, burst_pkts);
+    ingress_release_burst_max_bytes_ = std::max(ingress_release_burst_max_bytes_, burst_bytes);
 }
 
 } // namespace csimCore

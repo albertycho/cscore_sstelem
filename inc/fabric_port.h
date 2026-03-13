@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 #include <sst/core/link.h>
 
@@ -93,6 +94,10 @@ public:
     uint64_t ready_retry_count() const;
     double egress_wait_avg_cycles() const;
     uint64_t egress_wait_max_cycles() const;
+    uint64_t ingress_arrival_burst_max_pkts() const;
+    uint64_t ingress_arrival_burst_max_bytes() const;
+    uint64_t ingress_release_burst_max_pkts() const;
+    uint64_t ingress_release_burst_max_bytes() const;
     uint64_t tx_bytes_total() const;
     uint64_t rx_bytes_total() const;
     uint64_t tx_bytes(TrafficClass cls) const;
@@ -111,6 +116,8 @@ private:
     static TrafficClass classify_event(const csEvent* item);
     void record_rx(const csEvent* item);
     void record_tx(const csEvent* item);
+    void record_ingress_arrival(uint64_t cycle, uint64_t bytes);
+    void record_ingress_release(const std::vector<csEvent*>& ready);
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
@@ -147,6 +154,13 @@ private:
     uint64_t egress_wait_sum_cycles_ = 0;
     uint64_t egress_wait_samples_ = 0;
     uint64_t egress_wait_max_cycles_ = 0;
+    uint64_t ingress_arrival_burst_cycle_ = std::numeric_limits<uint64_t>::max();
+    uint64_t ingress_arrival_burst_pkts_cur_ = 0;
+    uint64_t ingress_arrival_burst_bytes_cur_ = 0;
+    uint64_t ingress_arrival_burst_max_pkts_ = 0;
+    uint64_t ingress_arrival_burst_max_bytes_ = 0;
+    uint64_t ingress_release_burst_max_pkts_ = 0;
+    uint64_t ingress_release_burst_max_bytes_ = 0;
     uint64_t tx_bytes_total_ = 0;
     uint64_t rx_bytes_total_ = 0;
     std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> tx_bytes_by_class_{};

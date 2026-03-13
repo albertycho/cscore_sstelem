@@ -656,6 +656,10 @@ namespace SST {
                 std::cout << prefix << "fabric.ready_occ_pkts = " << remote_port_.ready_occupancy() << '\n';
                 std::cout << prefix << "fabric.ready_occ_max_pkts = " << remote_port_.ready_occupancy_max() << '\n';
                 std::cout << prefix << "fabric.ready_retry_count = " << remote_port_.ready_retry_count() << '\n';
+                std::cout << prefix << "fabric.ingress_arrival_burst_max_pkts = " << remote_port_.ingress_arrival_burst_max_pkts() << '\n';
+                std::cout << prefix << "fabric.ingress_arrival_burst_max_bytes = " << remote_port_.ingress_arrival_burst_max_bytes() << '\n';
+                std::cout << prefix << "fabric.ingress_release_burst_max_pkts = " << remote_port_.ingress_release_burst_max_pkts() << '\n';
+                std::cout << prefix << "fabric.ingress_release_burst_max_bytes = " << remote_port_.ingress_release_burst_max_bytes() << '\n';
                 std::cout << prefix << "fabric.rx_bytes.demand_req = " << remote_port_.rx_bytes(FabricPort::TrafficClass::DemandReq) << '\n';
                 std::cout << prefix << "fabric.rx_bytes.write_req = " << remote_port_.rx_bytes(FabricPort::TrafficClass::WriteReq) << '\n';
                 std::cout << prefix << "fabric.rx_bytes.response = " << remote_port_.rx_bytes(FabricPort::TrafficClass::Response) << '\n';

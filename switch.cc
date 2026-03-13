@@ -434,6 +434,34 @@ void Switch::finish()
         }
         return sum;
     };
+    auto max_ingress_arrival_burst_pkts = [](const std::vector<PortState>& ports) {
+        uint64_t max_burst = 0;
+        for (const auto& port : ports) {
+            max_burst = std::max(max_burst, port.port.ingress_arrival_burst_max_pkts());
+        }
+        return max_burst;
+    };
+    auto max_ingress_arrival_burst_bytes = [](const std::vector<PortState>& ports) {
+        uint64_t max_burst = 0;
+        for (const auto& port : ports) {
+            max_burst = std::max(max_burst, port.port.ingress_arrival_burst_max_bytes());
+        }
+        return max_burst;
+    };
+    auto max_ingress_release_burst_pkts = [](const std::vector<PortState>& ports) {
+        uint64_t max_burst = 0;
+        for (const auto& port : ports) {
+            max_burst = std::max(max_burst, port.port.ingress_release_burst_max_pkts());
+        }
+        return max_burst;
+    };
+    auto max_ingress_release_burst_bytes = [](const std::vector<PortState>& ports) {
+        uint64_t max_burst = 0;
+        for (const auto& port : ports) {
+            max_burst = std::max(max_burst, port.port.ingress_release_burst_max_bytes());
+        }
+        return max_burst;
+    };
     auto sum_rx_bytes_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
@@ -522,6 +550,14 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.pool_ready_occ_max_pkts = " << max_ready_occ(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ready_retry_count = " << sum_ready_retries(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ready_retry_count = " << sum_ready_retries(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_burst_max_pkts = " << max_ingress_arrival_burst_pkts(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_burst_max_bytes = " << max_ingress_arrival_burst_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_burst_max_pkts = " << max_ingress_release_burst_pkts(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_burst_max_bytes = " << max_ingress_release_burst_bytes(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_max_pkts = " << max_ingress_arrival_burst_pkts(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_max_bytes = " << max_ingress_arrival_burst_bytes(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_burst_max_pkts = " << max_ingress_release_burst_pkts(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_burst_max_bytes = " << max_ingress_release_burst_bytes(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.demand_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.write_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.response = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
