@@ -434,6 +434,34 @@ void Switch::finish()
         }
         return sum;
     };
+    auto sum_rx_bytes_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+        uint64_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.rx_bytes(cls);
+        }
+        return sum;
+    };
+    auto sum_tx_bytes_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+        uint64_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.tx_bytes(cls);
+        }
+        return sum;
+    };
+    auto sum_rx_pkts_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+        uint64_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.rx_packets(cls);
+        }
+        return sum;
+    };
+    auto sum_tx_pkts_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+        uint64_t sum = 0;
+        for (const auto& port : ports) {
+            sum += port.port.tx_packets(cls);
+        }
+        return sum;
+    };
     auto sum_tx_bytes = [](const std::vector<PortState>& ports) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
@@ -494,6 +522,30 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.pool_ready_occ_max_pkts = " << max_ready_occ(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ready_retry_count = " << sum_ready_retries(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ready_retry_count = " << sum_ready_retries(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_rx_bytes.demand_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.node_rx_bytes.write_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.node_rx_bytes.response = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
+        std::cout << "stat.switch.fabric.node_tx_bytes.demand_req = " << sum_tx_bytes_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.node_tx_bytes.write_req = " << sum_tx_bytes_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.node_tx_bytes.response = " << sum_tx_bytes_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
+        std::cout << "stat.switch.fabric.pool_rx_bytes.demand_req = " << sum_rx_bytes_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_rx_bytes.write_req = " << sum_rx_bytes_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_rx_bytes.response = " << sum_rx_bytes_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
+        std::cout << "stat.switch.fabric.pool_tx_bytes.demand_req = " << sum_tx_bytes_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_tx_bytes.write_req = " << sum_tx_bytes_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_tx_bytes.response = " << sum_tx_bytes_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
+        std::cout << "stat.switch.fabric.node_rx_pkts.demand_req = " << sum_rx_pkts_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.node_rx_pkts.write_req = " << sum_rx_pkts_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.node_rx_pkts.response = " << sum_rx_pkts_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
+        std::cout << "stat.switch.fabric.node_tx_pkts.demand_req = " << sum_tx_pkts_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.node_tx_pkts.write_req = " << sum_tx_pkts_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.node_tx_pkts.response = " << sum_tx_pkts_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
+        std::cout << "stat.switch.fabric.pool_rx_pkts.demand_req = " << sum_rx_pkts_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_rx_pkts.write_req = " << sum_rx_pkts_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_rx_pkts.response = " << sum_rx_pkts_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
+        std::cout << "stat.switch.fabric.pool_tx_pkts.demand_req = " << sum_tx_pkts_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_tx_pkts.write_req = " << sum_tx_pkts_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
+        std::cout << "stat.switch.fabric.pool_tx_pkts.response = " << sum_tx_pkts_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
         std::cout << "stat.switch.bw.host_to_switch_gbps = " << host_to_switch_gbps << '\n';
         std::cout << "stat.switch.bw.switch_to_host_gbps = " << switch_to_host_gbps << '\n';
         std::cout << "stat.switch.bw.host_link_total_gbps = " << host_link_total_gbps << '\n';

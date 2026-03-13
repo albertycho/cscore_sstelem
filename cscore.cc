@@ -656,6 +656,18 @@ namespace SST {
                 std::cout << prefix << "fabric.ready_occ_pkts = " << remote_port_.ready_occupancy() << '\n';
                 std::cout << prefix << "fabric.ready_occ_max_pkts = " << remote_port_.ready_occupancy_max() << '\n';
                 std::cout << prefix << "fabric.ready_retry_count = " << remote_port_.ready_retry_count() << '\n';
+                std::cout << prefix << "fabric.rx_bytes.demand_req = " << remote_port_.rx_bytes(FabricPort::TrafficClass::DemandReq) << '\n';
+                std::cout << prefix << "fabric.rx_bytes.write_req = " << remote_port_.rx_bytes(FabricPort::TrafficClass::WriteReq) << '\n';
+                std::cout << prefix << "fabric.rx_bytes.response = " << remote_port_.rx_bytes(FabricPort::TrafficClass::Response) << '\n';
+                std::cout << prefix << "fabric.tx_bytes.demand_req = " << remote_port_.tx_bytes(FabricPort::TrafficClass::DemandReq) << '\n';
+                std::cout << prefix << "fabric.tx_bytes.write_req = " << remote_port_.tx_bytes(FabricPort::TrafficClass::WriteReq) << '\n';
+                std::cout << prefix << "fabric.tx_bytes.response = " << remote_port_.tx_bytes(FabricPort::TrafficClass::Response) << '\n';
+                std::cout << prefix << "fabric.rx_pkts.demand_req = " << remote_port_.rx_packets(FabricPort::TrafficClass::DemandReq) << '\n';
+                std::cout << prefix << "fabric.rx_pkts.write_req = " << remote_port_.rx_packets(FabricPort::TrafficClass::WriteReq) << '\n';
+                std::cout << prefix << "fabric.rx_pkts.response = " << remote_port_.rx_packets(FabricPort::TrafficClass::Response) << '\n';
+                std::cout << prefix << "fabric.tx_pkts.demand_req = " << remote_port_.tx_packets(FabricPort::TrafficClass::DemandReq) << '\n';
+                std::cout << prefix << "fabric.tx_pkts.write_req = " << remote_port_.tx_packets(FabricPort::TrafficClass::WriteReq) << '\n';
+                std::cout << prefix << "fabric.tx_pkts.response = " << remote_port_.tx_packets(FabricPort::TrafficClass::Response) << '\n';
                 std::cout << prefix << "walltime_s = " << total_sec << '\n';
                 if (active_calls_ > 0) {
                     const auto active_sec = std::chrono::duration<double>(active_time_).count();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -33,6 +34,14 @@ csEvent* make_reset_util_event(uint64_t src, uint64_t dst);
 class FabricPort {
 private:
 public:
+    enum class TrafficClass : std::size_t {
+        DemandReq = 0,
+        WriteReq = 1,
+        Response = 2,
+        OtherReq = 3,
+        Count = 4,
+    };
+
     FabricPort();
     ~FabricPort();
     FabricPort(const FabricPort&) = delete;
@@ -86,6 +95,10 @@ public:
     uint64_t egress_wait_max_cycles() const;
     uint64_t tx_bytes_total() const;
     uint64_t rx_bytes_total() const;
+    uint64_t tx_bytes(TrafficClass cls) const;
+    uint64_t rx_bytes(TrafficClass cls) const;
+    uint64_t tx_packets(TrafficClass cls) const;
+    uint64_t rx_packets(TrafficClass cls) const;
 
 private:
     bool can_receive(uint64_t cycle);
@@ -95,6 +108,9 @@ private:
     uint64_t ingress_service_floor_cycles(const csEvent* item) const;
     void push_ready(csEvent* item, bool front = false);
     void record_ready_pop(uint64_t cycle, csEvent* item);
+    static TrafficClass classify_event(const csEvent* item);
+    void record_rx(const csEvent* item);
+    void record_tx(const csEvent* item);
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
@@ -133,6 +149,10 @@ private:
     uint64_t egress_wait_max_cycles_ = 0;
     uint64_t tx_bytes_total_ = 0;
     uint64_t rx_bytes_total_ = 0;
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> tx_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> rx_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> tx_packets_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> rx_packets_by_class_{};
 
     bool egress_queue_full(uint64_t bytes) const;
 };

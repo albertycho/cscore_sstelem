@@ -227,6 +227,10 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     uint64_t ingress_queue_wait_max = 0;
     uint64_t ready_wait_max = 0;
     uint64_t ready_retry_count = 0;
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_bytes_by_class{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_bytes_by_class{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_packets_by_class{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_packets_by_class{};
 
     auto accumulate = [&](const FabricPort& port) {
         util_sum += port.ingress_utilization();
@@ -244,6 +248,13 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
         ready_occ_total += port.ready_occupancy();
         ready_occ_max = std::max(ready_occ_max, port.ready_occupancy_max());
         ready_retry_count += port.ready_retry_count();
+        for (std::size_t i = 0; i < static_cast<std::size_t>(FabricPort::TrafficClass::Count); ++i) {
+            const auto cls = static_cast<FabricPort::TrafficClass>(i);
+            rx_bytes_by_class[i] += port.rx_bytes(cls);
+            tx_bytes_by_class[i] += port.tx_bytes(cls);
+            rx_packets_by_class[i] += port.rx_packets(cls);
+            tx_packets_by_class[i] += port.tx_packets(cls);
+        }
         ++count;
     };
 
@@ -266,6 +277,10 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     stats.ready_occ = ready_occ_total;
     stats.ready_occ_max = ready_occ_max;
     stats.ready_retry_count = ready_retry_count;
+    stats.rx_bytes_by_class = rx_bytes_by_class;
+    stats.tx_bytes_by_class = tx_bytes_by_class;
+    stats.rx_packets_by_class = rx_packets_by_class;
+    stats.tx_packets_by_class = tx_packets_by_class;
     return stats;
 }
 
@@ -368,6 +383,30 @@ void CXLMemoryPool::finish() {
         std::cout << prefix << "fabric.ready_occ_pkts = " << stats.ready_occ << '\n';
         std::cout << prefix << "fabric.ready_occ_max_pkts = " << stats.ready_occ_max << '\n';
         std::cout << prefix << "fabric.ready_retry_count = " << stats.ready_retry_count << '\n';
+        std::cout << prefix << "fabric.rx_bytes.demand_req = "
+                  << stats.rx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::DemandReq)] << '\n';
+        std::cout << prefix << "fabric.rx_bytes.write_req = "
+                  << stats.rx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::WriteReq)] << '\n';
+        std::cout << prefix << "fabric.rx_bytes.response = "
+                  << stats.rx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::Response)] << '\n';
+        std::cout << prefix << "fabric.tx_bytes.demand_req = "
+                  << stats.tx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::DemandReq)] << '\n';
+        std::cout << prefix << "fabric.tx_bytes.write_req = "
+                  << stats.tx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::WriteReq)] << '\n';
+        std::cout << prefix << "fabric.tx_bytes.response = "
+                  << stats.tx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::Response)] << '\n';
+        std::cout << prefix << "fabric.rx_pkts.demand_req = "
+                  << stats.rx_packets_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::DemandReq)] << '\n';
+        std::cout << prefix << "fabric.rx_pkts.write_req = "
+                  << stats.rx_packets_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::WriteReq)] << '\n';
+        std::cout << prefix << "fabric.rx_pkts.response = "
+                  << stats.rx_packets_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::Response)] << '\n';
+        std::cout << prefix << "fabric.tx_pkts.demand_req = "
+                  << stats.tx_packets_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::DemandReq)] << '\n';
+        std::cout << prefix << "fabric.tx_pkts.write_req = "
+                  << stats.tx_packets_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::WriteReq)] << '\n';
+        std::cout << prefix << "fabric.tx_pkts.response = "
+                  << stats.tx_packets_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::Response)] << '\n';
         std::cout << prefix << "walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();

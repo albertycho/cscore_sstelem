@@ -88,6 +88,10 @@ private:
         std::size_t ready_occ = 0;
         std::size_t ready_occ_max = 0;
         uint64_t ready_retry_count = 0;
+        std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_bytes_by_class{};
+        std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_bytes_by_class{};
+        std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_packets_by_class{};
+        std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_packets_by_class{};
     };
     void poll_ports(uint64_t cycle);
     // Average utilization plus total occupancy for request ingress links.

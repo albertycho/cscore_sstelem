@@ -145,6 +145,10 @@ void FabricPort::configure(SST::Link* link,
     egress_wait_max_cycles_ = 0;
     tx_bytes_total_ = 0;
     rx_bytes_total_ = 0;
+    tx_bytes_by_class_.fill(0);
+    rx_bytes_by_class_.fill(0);
+    tx_packets_by_class_.fill(0);
+    rx_packets_by_class_.fill(0);
 }
 
 bool FabricPort::send(csEvent* item) {
@@ -231,14 +235,13 @@ void FabricPort::handle_event(SST::Event* ev) {
         }
     }
 
+    record_rx(cevent);
     if (!ingress_) {
-        rx_bytes_total_ += event_bytes(cevent);
         ingress_wait_samples_++;
         push_ready(cevent);
         return;
     }
 
-    rx_bytes_total_ += event_bytes(cevent);
     if (!ingress_->add_packet(cevent)) {
         throw std::runtime_error("FabricPort: ingress queue full; credit accounting mismatch.");
     }
@@ -364,6 +367,22 @@ uint64_t FabricPort::rx_bytes_total() const {
     return rx_bytes_total_;
 }
 
+uint64_t FabricPort::tx_bytes(TrafficClass cls) const {
+    return tx_bytes_by_class_[static_cast<std::size_t>(cls)];
+}
+
+uint64_t FabricPort::rx_bytes(TrafficClass cls) const {
+    return rx_bytes_by_class_[static_cast<std::size_t>(cls)];
+}
+
+uint64_t FabricPort::tx_packets(TrafficClass cls) const {
+    return tx_packets_by_class_[static_cast<std::size_t>(cls)];
+}
+
+uint64_t FabricPort::rx_packets(TrafficClass cls) const {
+    return rx_packets_by_class_[static_cast<std::size_t>(cls)];
+}
+
 bool FabricPort::can_receive(uint64_t cycle) {
     tick(cycle);
     if (last_deliver_cycle_ == cycle) {
@@ -406,7 +425,6 @@ void FabricPort::drain_egress() {
         if (!try_consume_credit(egress_credits_, credit_bytes(ev))) {
             break;
         }
-        const uint64_t send_bytes = event_bytes(ev);
         uint64_t wait_cycles = 0;
         if (last_tick_cycle_ != std::numeric_limits<uint64_t>::max() && last_tick_cycle_ >= entry.enqueue_cycle) {
             wait_cycles = last_tick_cycle_ - entry.enqueue_cycle;
@@ -415,9 +433,9 @@ void FabricPort::drain_egress() {
         egress_wait_samples_++;
         egress_wait_max_cycles_ = std::max(egress_wait_max_cycles_, wait_cycles);
         link_->send(ev);
+        record_tx(ev);
         egress_queue_.pop_front();
-        tx_bytes_total_ += send_bytes;
-        egress_queue_bytes_ = std::max<int64_t>(egress_queue_bytes_ - static_cast<int64_t>(send_bytes), 0);
+        egress_queue_bytes_ = std::max<int64_t>(egress_queue_bytes_ - static_cast<int64_t>(event_bytes(ev)), 0);
     }
 }
 
@@ -471,6 +489,45 @@ void FabricPort::record_ready_pop(uint64_t cycle, csEvent* item) {
     ready_wait_sum_cycles_ += wait_cycles;
     ready_wait_samples_++;
     ready_wait_max_cycles_ = std::max(ready_wait_max_cycles_, wait_cycles);
+}
+
+FabricPort::TrafficClass FabricPort::classify_event(const csEvent* item) {
+    if (!item) {
+        return TrafficClass::OtherReq;
+    }
+    if (is_control_event(*item)) {
+        return TrafficClass::OtherReq;
+    }
+    if (item->payload.size() > 10) {
+        const auto type = static_cast<access_type>(item->payload[10]);
+        if (type == access_type::LOAD || type == access_type::RFO) {
+            return TrafficClass::DemandReq;
+        }
+        if (type == access_type::WRITE) {
+            return TrafficClass::WriteReq;
+        }
+        return TrafficClass::OtherReq;
+    }
+    if (item->payload.size() > 8) {
+        return TrafficClass::Response;
+    }
+    return TrafficClass::OtherReq;
+}
+
+void FabricPort::record_rx(const csEvent* item) {
+    const auto bytes = event_bytes(item);
+    rx_bytes_total_ += bytes;
+    const auto cls = classify_event(item);
+    rx_bytes_by_class_[static_cast<std::size_t>(cls)] += bytes;
+    rx_packets_by_class_[static_cast<std::size_t>(cls)]++;
+}
+
+void FabricPort::record_tx(const csEvent* item) {
+    const auto bytes = event_bytes(item);
+    tx_bytes_total_ += bytes;
+    const auto cls = classify_event(item);
+    tx_bytes_by_class_[static_cast<std::size_t>(cls)] += bytes;
+    tx_packets_by_class_[static_cast<std::size_t>(cls)]++;
 }
 
 } // namespace csimCore
