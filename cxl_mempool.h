@@ -67,6 +67,14 @@ private:
         uint32_t sst_cpu = 0;
         uint32_t src_node = std::numeric_limits<uint32_t>::max();
         uint32_t dst_node = std::numeric_limits<uint32_t>::max();
+        access_type type = access_type::LOAD;
+        uint64_t response_ready_cycle = std::numeric_limits<uint64_t>::max();
+    };
+
+    struct ResponseWaitStats {
+        uint64_t completed = 0;
+        uint64_t wait_sum_cycles = 0;
+        uint64_t wait_max_cycles = 0;
     };
 
     bool clock_tick(SST::Cycle_t current);
@@ -88,6 +96,10 @@ private:
         std::size_t ready_occ = 0;
         std::size_t ready_occ_max = 0;
         uint64_t ready_retry_count = 0;
+        uint64_t ingress_arrival_burst_max_pkts = 0;
+        uint64_t ingress_arrival_burst_max_bytes = 0;
+        uint64_t ingress_release_burst_max_pkts = 0;
+        uint64_t ingress_release_burst_max_bytes = 0;
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_bytes_by_class{};
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_bytes_by_class{};
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_packets_by_class{};
@@ -122,6 +134,7 @@ private:
     MY_MEMORY_CONTROLLER mem_ctrl_;
     uint64_t next_tag_ = 1;
     std::unordered_map<uint64_t, OutstandingRequest> pending_;
+    std::array<ResponseWaitStats, MY_MEMORY_CONTROLLER::kDiagClassCount> response_wait_stats_{};
     uint64_t tick_count_ = 0;
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;

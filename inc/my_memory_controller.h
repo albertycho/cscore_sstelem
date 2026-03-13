@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <vector>
 #include <iostream>
+#include <array>
+#include <unordered_map>
 
 #include "chrono.h"
 #include "operable.h"
@@ -49,6 +51,29 @@ public:
     using channel_type = champsim::channel;
     using lat_bw_queue_type = lat_bw_queue<channel_type::request_type>;
     using latency_function_type = lat_bw_queue_type::latency_function_type;
+    static constexpr std::size_t kDiagClassCount = 4;
+
+    enum class RequestDiagClass : std::size_t {
+        Load = 0,
+        Rfo = 1,
+        Write = 2,
+        Other = 3,
+    };
+
+    struct RequestDiagStats {
+        uint64_t completed = 0;
+        uint64_t response_completed = 0;
+        uint64_t queue_wait_sum_cycles = 0;
+        uint64_t queue_wait_max_cycles = 0;
+        uint64_t service_sum_cycles = 0;
+        uint64_t service_max_cycles = 0;
+        uint64_t total_sum_cycles = 0;
+        uint64_t total_max_cycles = 0;
+        std::array<uint64_t, kDiagClassCount> ahead_pkts_sum{};
+        std::array<uint64_t, kDiagClassCount> ahead_pkts_max{};
+        std::array<uint64_t, kDiagClassCount> ahead_bytes_sum{};
+        std::array<uint64_t, kDiagClassCount> ahead_bytes_max{};
+    };
 
     MY_MEMORY_CONTROLLER();
     MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
@@ -62,10 +87,34 @@ public:
     void begin_phase() final;
     void end_phase(unsigned cpu) final;
     void print_deadlock() final;
+    RequestDiagStats demand_diag_stats() const;
+    const RequestDiagStats& request_diag_stats(RequestDiagClass cls) const {
+        return request_diag_stats_[static_cast<std::size_t>(cls)];
+    }
+    static const char* request_diag_class_name(RequestDiagClass cls);
 
 private:
+    struct RequestDiagState {
+        RequestDiagClass cls = RequestDiagClass::Other;
+        bool response_requested = false;
+        int64_t enqueue_cycle = -1;
+        int64_t service_start_cycle = -1;
+        std::array<uint64_t, kDiagClassCount> ahead_pkts{};
+        std::array<uint64_t, kDiagClassCount> ahead_bytes{};
+    };
+
+    static RequestDiagClass classify_request(const channel_type::request_type& req);
+    static uint64_t request_tag(const channel_type::request_type& req);
+    void observe_enqueue(channel_type::request_type& req,
+                         const lat_bw_queue_type::queue_snapshot& snapshot,
+                         int64_t cycle);
+    void observe_service_start(channel_type::request_type& req, int64_t cycle);
+    void observe_completion(channel_type::request_type& req, int64_t cycle);
+
     std::vector<channel_type*> queues;
     std::vector<lat_bw_queue_type> lat_bw_queues;
+    std::unordered_map<uint64_t, RequestDiagState> request_diag_state_;
+    std::array<RequestDiagStats, kDiagClassCount> request_diag_stats_{};
     //champsim::data::bytes channel_width;
     champsim::data::bytes size_ = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES};
 
@@ -87,6 +136,10 @@ public:
         for (auto& q : lat_bw_queues) {
             q.reset_utilization();
         }
+    }
+    void reset_diagnostics() {
+        request_diag_state_.clear();
+        request_diag_stats_.fill(RequestDiagStats{});
     }
 
 };

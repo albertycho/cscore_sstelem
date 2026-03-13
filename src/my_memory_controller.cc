@@ -17,7 +17,23 @@ MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_peri
                 ? (64.0 / static_cast<double>(bw_cycles_per_req))
                 : 0.0),
             /*latency_function=*/std::forward<latency_function_type>(latency_function),
-            /*bw_cost_fn=*/[](const channel_type::request_type&) { return 64.0; }))
+            /*bw_cost_fn=*/[](const channel_type::request_type&) { return 64.0; },
+            /*max_pending_bytes=*/0,
+            /*class_count=*/kDiagClassCount,
+            /*classify_fn=*/[](const channel_type::request_type& req) {
+                return static_cast<std::size_t>(classify_request(req));
+            },
+            /*enqueue_observer=*/[this](channel_type::request_type& req,
+                                        const lat_bw_queue_type::queue_snapshot& snapshot,
+                                        int64_t cycle) {
+                observe_enqueue(req, snapshot, cycle);
+            },
+            /*service_start_observer=*/[this](channel_type::request_type& req, int64_t cycle) {
+                observe_service_start(req, cycle);
+            },
+            /*completion_observer=*/[this](channel_type::request_type& req, int64_t cycle) {
+                observe_completion(req, cycle);
+            }))
     , size_(size)
 {
 }
@@ -79,5 +95,138 @@ void MY_MEMORY_CONTROLLER::end_phase(unsigned cpu)
 
 void MY_MEMORY_CONTROLLER::print_deadlock()
 {
+}
+
+MY_MEMORY_CONTROLLER::RequestDiagStats MY_MEMORY_CONTROLLER::demand_diag_stats() const
+{
+    RequestDiagStats out{};
+    auto merge = [&out](const RequestDiagStats& in) {
+        out.completed += in.completed;
+        out.response_completed += in.response_completed;
+        out.queue_wait_sum_cycles += in.queue_wait_sum_cycles;
+        out.queue_wait_max_cycles = std::max(out.queue_wait_max_cycles, in.queue_wait_max_cycles);
+        out.service_sum_cycles += in.service_sum_cycles;
+        out.service_max_cycles = std::max(out.service_max_cycles, in.service_max_cycles);
+        out.total_sum_cycles += in.total_sum_cycles;
+        out.total_max_cycles = std::max(out.total_max_cycles, in.total_max_cycles);
+        for (std::size_t i = 0; i < kDiagClassCount; ++i) {
+            out.ahead_pkts_sum[i] += in.ahead_pkts_sum[i];
+            out.ahead_pkts_max[i] = std::max(out.ahead_pkts_max[i], in.ahead_pkts_max[i]);
+            out.ahead_bytes_sum[i] += in.ahead_bytes_sum[i];
+            out.ahead_bytes_max[i] = std::max(out.ahead_bytes_max[i], in.ahead_bytes_max[i]);
+        }
+    };
+    merge(request_diag_stats_[static_cast<std::size_t>(RequestDiagClass::Load)]);
+    merge(request_diag_stats_[static_cast<std::size_t>(RequestDiagClass::Rfo)]);
+    return out;
+}
+
+const char* MY_MEMORY_CONTROLLER::request_diag_class_name(RequestDiagClass cls)
+{
+    switch (cls) {
+    case RequestDiagClass::Load:
+        return "load";
+    case RequestDiagClass::Rfo:
+        return "rfo";
+    case RequestDiagClass::Write:
+        return "write";
+    case RequestDiagClass::Other:
+    default:
+        return "other";
+    }
+}
+
+MY_MEMORY_CONTROLLER::RequestDiagClass
+MY_MEMORY_CONTROLLER::classify_request(const channel_type::request_type& req)
+{
+    switch (req.type) {
+    case access_type::LOAD:
+        return RequestDiagClass::Load;
+    case access_type::RFO:
+        return RequestDiagClass::Rfo;
+    case access_type::WRITE:
+        return RequestDiagClass::Write;
+    default:
+        return RequestDiagClass::Other;
+    }
+}
+
+uint64_t MY_MEMORY_CONTROLLER::request_tag(const channel_type::request_type& req)
+{
+    if (req.instr_depend_on_me.empty()) {
+        return 0;
+    }
+    return req.instr_depend_on_me.front();
+}
+
+void MY_MEMORY_CONTROLLER::observe_enqueue(channel_type::request_type& req,
+                                           const lat_bw_queue_type::queue_snapshot& snapshot,
+                                           int64_t cycle)
+{
+    const auto tag = request_tag(req);
+    if (tag == 0) {
+        return;
+    }
+    RequestDiagState state{};
+    state.cls = classify_request(req);
+    state.response_requested = req.response_requested;
+    state.enqueue_cycle = cycle;
+    for (std::size_t i = 0; i < std::min<std::size_t>(snapshot.packets_by_class.size(), kDiagClassCount); ++i) {
+        state.ahead_pkts[i] = snapshot.packets_by_class[i];
+    }
+    for (std::size_t i = 0; i < std::min<std::size_t>(snapshot.bytes_by_class.size(), kDiagClassCount); ++i) {
+        state.ahead_bytes[i] = snapshot.bytes_by_class[i];
+    }
+    request_diag_state_[tag] = state;
+}
+
+void MY_MEMORY_CONTROLLER::observe_service_start(channel_type::request_type& req, int64_t cycle)
+{
+    const auto tag = request_tag(req);
+    auto it = request_diag_state_.find(tag);
+    if (it == request_diag_state_.end()) {
+        return;
+    }
+    if (it->second.service_start_cycle < 0) {
+        it->second.service_start_cycle = cycle;
+    }
+}
+
+void MY_MEMORY_CONTROLLER::observe_completion(channel_type::request_type& req, int64_t cycle)
+{
+    const auto tag = request_tag(req);
+    auto it = request_diag_state_.find(tag);
+    if (it == request_diag_state_.end()) {
+        return;
+    }
+    auto& state = it->second;
+    auto& stats = request_diag_stats_[static_cast<std::size_t>(state.cls)];
+    const uint64_t queue_wait = (state.enqueue_cycle >= 0 && state.service_start_cycle >= state.enqueue_cycle)
+        ? static_cast<uint64_t>(state.service_start_cycle - state.enqueue_cycle)
+        : 0;
+    const uint64_t service_wait = (state.service_start_cycle >= 0 && cycle >= state.service_start_cycle)
+        ? static_cast<uint64_t>(cycle - state.service_start_cycle)
+        : 0;
+    const uint64_t total_wait = (state.enqueue_cycle >= 0 && cycle >= state.enqueue_cycle)
+        ? static_cast<uint64_t>(cycle - state.enqueue_cycle)
+        : 0;
+
+    stats.completed++;
+    if (state.response_requested) {
+        stats.response_completed++;
+    }
+    stats.queue_wait_sum_cycles += queue_wait;
+    stats.queue_wait_max_cycles = std::max(stats.queue_wait_max_cycles, queue_wait);
+    stats.service_sum_cycles += service_wait;
+    stats.service_max_cycles = std::max(stats.service_max_cycles, service_wait);
+    stats.total_sum_cycles += total_wait;
+    stats.total_max_cycles = std::max(stats.total_max_cycles, total_wait);
+    for (std::size_t i = 0; i < kDiagClassCount; ++i) {
+        stats.ahead_pkts_sum[i] += state.ahead_pkts[i];
+        stats.ahead_pkts_max[i] = std::max(stats.ahead_pkts_max[i], state.ahead_pkts[i]);
+        stats.ahead_bytes_sum[i] += state.ahead_bytes[i];
+        stats.ahead_bytes_max[i] = std::max(stats.ahead_bytes_max[i], state.ahead_bytes[i]);
+    }
+    request_diag_state_.erase(it);
 }
 // namespace champsim

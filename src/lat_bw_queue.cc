@@ -10,12 +10,24 @@ template<typename T>
 lat_bw_queue<T>::lat_bw_queue(double peak_bw_per_cycle,
                               latency_function_type&& latency_function,
                               bandwidth_function_type&& bw_cost_fn,
-                              int64_t max_pending_bytes)
+                              int64_t max_pending_bytes,
+                              std::size_t class_count,
+                              classify_function_type&& classify_fn,
+                              enqueue_observer_type&& enqueue_observer,
+                              event_observer_type&& service_start_observer,
+                              event_observer_type&& completion_observer)
     : peak_bw_per_cycle{peak_bw_per_cycle}
     , internal_clock{0}
     , latency_function{std::forward<latency_function_type>(latency_function)}
     , bw_cost_fn{std::forward<bandwidth_function_type>(bw_cost_fn)}
     , max_pending_bytes{max_pending_bytes}
+    , class_count{class_count}
+    , classify_fn{std::forward<classify_function_type>(classify_fn)}
+    , enqueue_observer{std::forward<enqueue_observer_type>(enqueue_observer)}
+    , service_start_observer{std::forward<event_observer_type>(service_start_observer)}
+    , completion_observer{std::forward<event_observer_type>(completion_observer)}
+    , occupancy_packets_by_class(class_count, 0)
+    , occupancy_bytes_by_class(class_count, 0)
     , bw_hist{} {}
 
 template<typename T>
@@ -25,8 +37,20 @@ std::vector<T> lat_bw_queue<T>::on_tick() {
 
     auto pop_completed = [&]() {
         while (!active_queue.empty() && active_queue.top().completion_time <= internal_clock) {
-            occupancy_bytes = std::max<int64_t>(occupancy_bytes - active_queue.top().total_bytes, 0);
-            completed_on_tick.emplace_back(std::move(active_queue.top().payload));
+            auto completed = std::move(active_queue.top());
+            if (completion_observer) {
+                completion_observer(completed.payload, internal_clock);
+            }
+            occupancy_bytes = std::max<int64_t>(occupancy_bytes - completed.total_bytes, 0);
+            if (completed.class_id < occupancy_packets_by_class.size()) {
+                occupancy_packets_by_class[completed.class_id] =
+                    occupancy_packets_by_class[completed.class_id] > 0 ? occupancy_packets_by_class[completed.class_id] - 1 : 0;
+                occupancy_bytes_by_class[completed.class_id] =
+                    occupancy_bytes_by_class[completed.class_id] >= static_cast<uint64_t>(completed.total_bytes)
+                        ? occupancy_bytes_by_class[completed.class_id] - static_cast<uint64_t>(completed.total_bytes)
+                        : 0;
+            }
+            completed_on_tick.emplace_back(std::move(completed.payload));
             active_queue.pop();
         }
     };
@@ -61,8 +85,16 @@ bool lat_bw_queue<T>::add_packet(T packet) {
     if (max_pending_bytes > 0 && (occupancy_bytes + packet_bytes) > max_pending_bytes) {
         return false;
     }
-    blocked_queue.emplace(pending_entry{std::move(packet), bytes, packet_bytes});
+    if (enqueue_observer) {
+        enqueue_observer(packet, snapshot(), internal_clock);
+    }
+    const auto cls = classify_packet(packet);
+    blocked_queue.emplace(pending_entry{std::move(packet), bytes, packet_bytes, cls, false});
     occupancy_bytes += packet_bytes;
+    if (cls < occupancy_packets_by_class.size()) {
+        occupancy_packets_by_class[cls]++;
+        occupancy_bytes_by_class[cls] += static_cast<uint64_t>(packet_bytes);
+    }
     return true;
 }
 
@@ -103,6 +135,12 @@ void lat_bw_queue<T>::service_bandwidth() {
 
     while (avail > 0.0 && !blocked_queue.empty()) {
         auto& front = blocked_queue.front();
+        if (!front.service_started) {
+            if (service_start_observer) {
+                service_start_observer(front.payload, internal_clock);
+            }
+            front.service_started = true;
+        }
         const double send = std::min(avail, front.remaining_bytes);
         front.remaining_bytes -= send;
         avail -= send;
@@ -114,7 +152,8 @@ void lat_bw_queue<T>::service_bandwidth() {
                 std::move(front.payload),
                 internal_clock,
                 internal_clock + completion_latency,
-                front.total_bytes
+                front.total_bytes,
+                front.class_id
             });
             blocked_queue.pop();
         } else {
@@ -133,6 +172,27 @@ double lat_bw_queue<T>::get_utilization() const {
         return 0.0;
     }
     return std::clamp(bw_sum / denom, 0.0, 1.0);
+}
+
+template<typename T>
+auto lat_bw_queue<T>::snapshot() const -> queue_snapshot {
+    queue_snapshot snap;
+    snap.total_bytes = static_cast<uint64_t>(std::max<int64_t>(occupancy_bytes, 0));
+    snap.packets_by_class = occupancy_packets_by_class;
+    snap.bytes_by_class = occupancy_bytes_by_class;
+    for (const auto packets : occupancy_packets_by_class) {
+        snap.total_packets += packets;
+    }
+    return snap;
+}
+
+template<typename T>
+std::size_t lat_bw_queue<T>::classify_packet(const T& packet) const {
+    if (!classify_fn || class_count == 0) {
+        return 0;
+    }
+    const auto cls = classify_fn(packet);
+    return cls < class_count ? cls : 0;
 }
 
 template class lat_bw_queue<SST::csimCore::csEvent*>;

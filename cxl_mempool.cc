@@ -179,7 +179,14 @@ void CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
     const uint64_t tag = next_tag_++;
     channel_req.instr_depend_on_me.push_back(tag);
     if (request.response_requested) {
-        pending_[tag] = OutstandingRequest{request.cpu, request.sst_cpu, request.src_node, request.dst_node};
+        pending_[tag] = OutstandingRequest{
+            request.cpu,
+            request.sst_cpu,
+            request.src_node,
+            request.dst_node,
+            request.type,
+            std::numeric_limits<uint64_t>::max()
+        };
     }
 
     auto& pool_queue = mem_channel_.PQ;
@@ -227,6 +234,10 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     uint64_t ingress_queue_wait_max = 0;
     uint64_t ready_wait_max = 0;
     uint64_t ready_retry_count = 0;
+    uint64_t ingress_arrival_burst_max_pkts = 0;
+    uint64_t ingress_arrival_burst_max_bytes = 0;
+    uint64_t ingress_release_burst_max_pkts = 0;
+    uint64_t ingress_release_burst_max_bytes = 0;
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_bytes_by_class{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_bytes_by_class{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_packets_by_class{};
@@ -248,6 +259,10 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
         ready_occ_total += port.ready_occupancy();
         ready_occ_max = std::max(ready_occ_max, port.ready_occupancy_max());
         ready_retry_count += port.ready_retry_count();
+        ingress_arrival_burst_max_pkts = std::max(ingress_arrival_burst_max_pkts, port.ingress_arrival_burst_max_pkts());
+        ingress_arrival_burst_max_bytes = std::max(ingress_arrival_burst_max_bytes, port.ingress_arrival_burst_max_bytes());
+        ingress_release_burst_max_pkts = std::max(ingress_release_burst_max_pkts, port.ingress_release_burst_max_pkts());
+        ingress_release_burst_max_bytes = std::max(ingress_release_burst_max_bytes, port.ingress_release_burst_max_bytes());
         for (std::size_t i = 0; i < static_cast<std::size_t>(FabricPort::TrafficClass::Count); ++i) {
             const auto cls = static_cast<FabricPort::TrafficClass>(i);
             rx_bytes_by_class[i] += port.rx_bytes(cls);
@@ -277,6 +292,10 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     stats.ready_occ = ready_occ_total;
     stats.ready_occ_max = ready_occ_max;
     stats.ready_retry_count = ready_retry_count;
+    stats.ingress_arrival_burst_max_pkts = ingress_arrival_burst_max_pkts;
+    stats.ingress_arrival_burst_max_bytes = ingress_arrival_burst_max_bytes;
+    stats.ingress_release_burst_max_pkts = ingress_release_burst_max_pkts;
+    stats.ingress_release_burst_max_bytes = ingress_release_burst_max_bytes;
     stats.rx_bytes_by_class = rx_bytes_by_class;
     stats.tx_bytes_by_class = tx_bytes_by_class;
     stats.rx_packets_by_class = rx_packets_by_class;
@@ -286,6 +305,8 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
 
 void CXLMemoryPool::reset_stats() {
     mem_ctrl_.reset_utilization();
+    mem_ctrl_.reset_diagnostics();
+    response_wait_stats_.fill(ResponseWaitStats{});
     for_each_port([](FabricPort& port) { port.reset_ingress_utilization(); });
 }
 
@@ -327,7 +348,11 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
     if (pending_it == pending_.end()) {
         return true;
     }
-    const OutstandingRequest route = pending_it->second;
+    auto& pending = pending_it->second;
+    if (pending.response_ready_cycle == std::numeric_limits<uint64_t>::max()) {
+        pending.response_ready_cycle = tick_count_;
+    }
+    const OutstandingRequest route = pending;
 
     auto* target_port = select_egress_port(route.sst_cpu);
     if (!target_port) {
@@ -355,6 +380,28 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
         delete ev;
         return false;
     }
+    std::size_t cls_idx = static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Other);
+    switch (route.type) {
+    case access_type::LOAD:
+        cls_idx = static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Load);
+        break;
+    case access_type::RFO:
+        cls_idx = static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Rfo);
+        break;
+    case access_type::WRITE:
+        cls_idx = static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Write);
+        break;
+    default:
+        break;
+    }
+    auto& resp_stats = response_wait_stats_[cls_idx];
+    const uint64_t response_wait =
+        (route.response_ready_cycle != std::numeric_limits<uint64_t>::max() && tick_count_ >= route.response_ready_cycle)
+            ? (tick_count_ - route.response_ready_cycle)
+            : 0;
+    resp_stats.completed++;
+    resp_stats.wait_sum_cycles += response_wait;
+    resp_stats.wait_max_cycles = std::max(resp_stats.wait_max_cycles, response_wait);
     pending_.erase(pending_it);
     return true;
 }
@@ -366,9 +413,48 @@ void CXLMemoryPool::finish() {
 
     if (lightweight_output_) {
         const auto prefix = std::string("stat.pool.") + std::to_string(pool_node_id_) + ".";
+        const auto demand_diag = mem_ctrl_.demand_diag_stats();
         std::cout << prefix << "util.mem_avg = " << mem_ctrl_.queue_average_utilization(0) << '\n';
         if (stats.avg_util > 0.0) {
             std::cout << prefix << "util.req_link_avg = " << stats.avg_util << '\n';
+        }
+        auto print_diag = [&](const std::string& name, const MY_MEMORY_CONTROLLER::RequestDiagStats& diag) {
+            const double denom = diag.completed > 0 ? static_cast<double>(diag.completed) : 1.0;
+            std::cout << prefix << "memq." << name << ".completed = " << diag.completed << '\n';
+            std::cout << prefix << "memq." << name << ".response_completed = " << diag.response_completed << '\n';
+            std::cout << prefix << "memq." << name << ".queue_wait_avg_cycles = "
+                      << (diag.completed > 0 ? static_cast<double>(diag.queue_wait_sum_cycles) / denom : 0.0) << '\n';
+            std::cout << prefix << "memq." << name << ".queue_wait_max_cycles = " << diag.queue_wait_max_cycles << '\n';
+            std::cout << prefix << "memq." << name << ".service_avg_cycles = "
+                      << (diag.completed > 0 ? static_cast<double>(diag.service_sum_cycles) / denom : 0.0) << '\n';
+            std::cout << prefix << "memq." << name << ".service_max_cycles = " << diag.service_max_cycles << '\n';
+            std::cout << prefix << "memq." << name << ".total_avg_cycles = "
+                      << (diag.completed > 0 ? static_cast<double>(diag.total_sum_cycles) / denom : 0.0) << '\n';
+            std::cout << prefix << "memq." << name << ".total_max_cycles = " << diag.total_max_cycles << '\n';
+            static constexpr std::array<const char*, MY_MEMORY_CONTROLLER::kDiagClassCount> kAheadNames = {"load", "rfo", "write", "other"};
+            for (std::size_t i = 0; i < kAheadNames.size(); ++i) {
+                std::cout << prefix << "memq." << name << ".ahead_pkts_avg." << kAheadNames[i] << " = "
+                          << (diag.completed > 0 ? static_cast<double>(diag.ahead_pkts_sum[i]) / denom : 0.0) << '\n';
+                std::cout << prefix << "memq." << name << ".ahead_pkts_max." << kAheadNames[i] << " = "
+                          << diag.ahead_pkts_max[i] << '\n';
+                std::cout << prefix << "memq." << name << ".ahead_bytes_avg." << kAheadNames[i] << " = "
+                          << (diag.completed > 0 ? static_cast<double>(diag.ahead_bytes_sum[i]) / denom : 0.0) << '\n';
+                std::cout << prefix << "memq." << name << ".ahead_bytes_max." << kAheadNames[i] << " = "
+                          << diag.ahead_bytes_max[i] << '\n';
+            }
+        };
+        print_diag("demand", demand_diag);
+        for (std::size_t i = 0; i < MY_MEMORY_CONTROLLER::kDiagClassCount; ++i) {
+            const auto cls = static_cast<MY_MEMORY_CONTROLLER::RequestDiagClass>(i);
+            print_diag(MY_MEMORY_CONTROLLER::request_diag_class_name(cls), mem_ctrl_.request_diag_stats(cls));
+            const auto& resp_stats = response_wait_stats_[i];
+            const double resp_denom = resp_stats.completed > 0 ? static_cast<double>(resp_stats.completed) : 1.0;
+            std::cout << prefix << "respq." << MY_MEMORY_CONTROLLER::request_diag_class_name(cls) << ".completed = "
+                      << resp_stats.completed << '\n';
+            std::cout << prefix << "respq." << MY_MEMORY_CONTROLLER::request_diag_class_name(cls) << ".wait_avg_cycles = "
+                      << (resp_stats.completed > 0 ? static_cast<double>(resp_stats.wait_sum_cycles) / resp_denom : 0.0) << '\n';
+            std::cout << prefix << "respq." << MY_MEMORY_CONTROLLER::request_diag_class_name(cls) << ".wait_max_cycles = "
+                      << resp_stats.wait_max_cycles << '\n';
         }
         std::cout << prefix << "fabric.ingress_wait_avg_cycles = " << stats.ingress_wait_avg_cycles << '\n';
         std::cout << prefix << "fabric.egress_wait_avg_cycles = " << stats.egress_wait_avg_cycles << '\n';
@@ -383,6 +469,10 @@ void CXLMemoryPool::finish() {
         std::cout << prefix << "fabric.ready_occ_pkts = " << stats.ready_occ << '\n';
         std::cout << prefix << "fabric.ready_occ_max_pkts = " << stats.ready_occ_max << '\n';
         std::cout << prefix << "fabric.ready_retry_count = " << stats.ready_retry_count << '\n';
+        std::cout << prefix << "fabric.ingress_arrival_burst_max_pkts = " << stats.ingress_arrival_burst_max_pkts << '\n';
+        std::cout << prefix << "fabric.ingress_arrival_burst_max_bytes = " << stats.ingress_arrival_burst_max_bytes << '\n';
+        std::cout << prefix << "fabric.ingress_release_burst_max_pkts = " << stats.ingress_release_burst_max_pkts << '\n';
+        std::cout << prefix << "fabric.ingress_release_burst_max_bytes = " << stats.ingress_release_burst_max_bytes << '\n';
         std::cout << prefix << "fabric.rx_bytes.demand_req = "
                   << stats.rx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::DemandReq)] << '\n';
         std::cout << prefix << "fabric.rx_bytes.write_req = "
