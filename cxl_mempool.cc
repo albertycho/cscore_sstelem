@@ -234,10 +234,6 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     uint64_t ingress_queue_wait_max = 0;
     uint64_t ready_wait_max = 0;
     uint64_t ready_retry_count = 0;
-    uint64_t ingress_arrival_burst_max_pkts = 0;
-    uint64_t ingress_arrival_burst_max_bytes = 0;
-    uint64_t ingress_release_burst_max_pkts = 0;
-    uint64_t ingress_release_burst_max_bytes = 0;
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_bytes_by_class{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_bytes_by_class{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_packets_by_class{};
@@ -259,10 +255,6 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
         ready_occ_total += port.ready_occupancy();
         ready_occ_max = std::max(ready_occ_max, port.ready_occupancy_max());
         ready_retry_count += port.ready_retry_count();
-        ingress_arrival_burst_max_pkts = std::max(ingress_arrival_burst_max_pkts, port.ingress_arrival_burst_max_pkts());
-        ingress_arrival_burst_max_bytes = std::max(ingress_arrival_burst_max_bytes, port.ingress_arrival_burst_max_bytes());
-        ingress_release_burst_max_pkts = std::max(ingress_release_burst_max_pkts, port.ingress_release_burst_max_pkts());
-        ingress_release_burst_max_bytes = std::max(ingress_release_burst_max_bytes, port.ingress_release_burst_max_bytes());
         for (std::size_t i = 0; i < static_cast<std::size_t>(FabricPort::TrafficClass::Count); ++i) {
             const auto cls = static_cast<FabricPort::TrafficClass>(i);
             rx_bytes_by_class[i] += port.rx_bytes(cls);
@@ -292,10 +284,6 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
     stats.ready_occ = ready_occ_total;
     stats.ready_occ_max = ready_occ_max;
     stats.ready_retry_count = ready_retry_count;
-    stats.ingress_arrival_burst_max_pkts = ingress_arrival_burst_max_pkts;
-    stats.ingress_arrival_burst_max_bytes = ingress_arrival_burst_max_bytes;
-    stats.ingress_release_burst_max_pkts = ingress_release_burst_max_pkts;
-    stats.ingress_release_burst_max_bytes = ingress_release_burst_max_bytes;
     stats.rx_bytes_by_class = rx_bytes_by_class;
     stats.tx_bytes_by_class = tx_bytes_by_class;
     stats.rx_packets_by_class = rx_packets_by_class;
@@ -469,10 +457,6 @@ void CXLMemoryPool::finish() {
         std::cout << prefix << "fabric.ready_occ_pkts = " << stats.ready_occ << '\n';
         std::cout << prefix << "fabric.ready_occ_max_pkts = " << stats.ready_occ_max << '\n';
         std::cout << prefix << "fabric.ready_retry_count = " << stats.ready_retry_count << '\n';
-        std::cout << prefix << "fabric.ingress_arrival_burst_max_pkts = " << stats.ingress_arrival_burst_max_pkts << '\n';
-        std::cout << prefix << "fabric.ingress_arrival_burst_max_bytes = " << stats.ingress_arrival_burst_max_bytes << '\n';
-        std::cout << prefix << "fabric.ingress_release_burst_max_pkts = " << stats.ingress_release_burst_max_pkts << '\n';
-        std::cout << prefix << "fabric.ingress_release_burst_max_bytes = " << stats.ingress_release_burst_max_bytes << '\n';
         std::cout << prefix << "fabric.rx_bytes.demand_req = "
                   << stats.rx_bytes_by_class[static_cast<std::size_t>(FabricPort::TrafficClass::DemandReq)] << '\n';
         std::cout << prefix << "fabric.rx_bytes.write_req = "

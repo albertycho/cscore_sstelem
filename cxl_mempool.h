@@ -96,10 +96,6 @@ private:
         std::size_t ready_occ = 0;
         std::size_t ready_occ_max = 0;
         uint64_t ready_retry_count = 0;
-        uint64_t ingress_arrival_burst_max_pkts = 0;
-        uint64_t ingress_arrival_burst_max_bytes = 0;
-        uint64_t ingress_release_burst_max_pkts = 0;
-        uint64_t ingress_release_burst_max_bytes = 0;
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_bytes_by_class{};
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_bytes_by_class{};
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_packets_by_class{};
