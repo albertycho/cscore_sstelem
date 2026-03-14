@@ -94,8 +94,8 @@ long MY_MEMORY_CONTROLLER::operate()
 
         occ_total_bytes += static_cast<uint64_t>(lat_bw_queue.occupancy());
         for (std::size_t cls = 0; cls < kDiagClassCount; ++cls) {
-            occ_bytes_by_class[cls] += lat_bw_queue.occupancy_bytes_by_class(cls);
-            occ_pkts_by_class[cls] += lat_bw_queue.occupancy_packets_by_class(cls);
+            occ_bytes_by_class[cls] += lat_bw_queue.class_byte_occupancy(cls);
+            occ_pkts_by_class[cls] += lat_bw_queue.class_packet_occupancy(cls);
         }
 
         // // Warn if more than one response was queued for this channel
