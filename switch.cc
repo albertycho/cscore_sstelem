@@ -140,6 +140,11 @@ void Switch::setup() {
     active_time_ = std::chrono::steady_clock::duration{};
     active_calls_ = 0;
     tick_count_ = 0;
+    route_blocked_to_node_ = 0;
+    route_blocked_to_pool_ = 0;
+    route_blocked_replicated_write_ = 0;
+    route_send_fail_to_node_ = 0;
+    route_send_fail_to_pool_ = 0;
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
@@ -207,9 +212,11 @@ bool Switch::try_route_event(csEvent* ev)
             throw std::runtime_error("Switch: dst node id out of range for configured ports.");
         }
         if (!node_ports_[idx].port.can_send(ev)) {
+            route_blocked_to_node_++;
             return false;
         }
         if (!node_ports_[idx].port.send(ev)) {
+            route_send_fail_to_node_++;
             delete ev;
         }
         return true;
@@ -223,6 +230,7 @@ bool Switch::try_route_event(csEvent* ev)
         if (replicate_writes_ && is_write_request(*ev)) {
             for (const auto& pool : pool_ports_) {
                 if (!pool.port.can_send(ev)) {
+                    route_blocked_replicated_write_++;
                     return false;
                 }
             }
@@ -231,6 +239,7 @@ bool Switch::try_route_event(csEvent* ev)
                 auto* clone = clone_event_with_dst(*ev, pool_dst);
                 replicated_count_++;
                 if (!pool_ports_[static_cast<size_t>(p)].port.send(clone)) {
+                    route_send_fail_to_pool_++;
                     delete clone;
                 }
             }
@@ -239,13 +248,16 @@ bool Switch::try_route_event(csEvent* ev)
         }
         std::size_t pick = pick_pool_index(true, ev);
         if (pick >= pool_ports_.size()) {
+            route_blocked_to_pool_++;
             return false;
         }
         if (!pool_ports_[pick].port.can_send(ev)) {
+            route_blocked_to_pool_++;
             return false;
         }
         ev->payload[1] = pool_node_id_base_ + pick;
         if (!pool_ports_[pick].port.send(ev)) {
+            route_send_fail_to_pool_++;
             delete ev;
         }
         return true;
@@ -313,6 +325,11 @@ std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
 void Switch::reset_stats_and_broadcast()
 {
     for_each_port([](PortState& port) { port.port.reset_ingress_utilization(); });
+    route_blocked_to_node_ = 0;
+    route_blocked_to_pool_ = 0;
+    route_blocked_replicated_write_ = 0;
+    route_send_fail_to_node_ = 0;
+    route_send_fail_to_pool_ = 0;
     for (int p = 0; p < num_pools_; ++p) {
         const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
         auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
@@ -492,6 +509,40 @@ void Switch::finish()
         for (const auto& port : ports) sum += port.port.ingress_arrival_nonempty_frac();
         return sum / static_cast<double>(ports.size());
     };
+    auto max_ingress_arrival_run_cycles = [](const std::vector<PortState>& ports) {
+        uint64_t max_run = 0;
+        for (const auto& port : ports) max_run = std::max(max_run, port.port.ingress_arrival_run_max_cycles());
+        return max_run;
+    };
+    auto avg_ingress_arrival_run_cycles = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_run_avg_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_arrival_run_stddev = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_run_stddev_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto max_ingress_arrival_gap_cycles = [](const std::vector<PortState>& ports) {
+        uint64_t max_gap = 0;
+        for (const auto& port : ports) max_gap = std::max(max_gap, port.port.ingress_arrival_gap_max_cycles());
+        return max_gap;
+    };
+    auto avg_ingress_arrival_gap_cycles = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_gap_avg_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_arrival_gap_stddev = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_arrival_gap_stddev_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
     auto avg_ingress_release_burst_pkts = [](const std::vector<PortState>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
@@ -522,6 +573,40 @@ void Switch::finish()
         for (const auto& port : ports) sum += port.port.ingress_release_nonempty_frac();
         return sum / static_cast<double>(ports.size());
     };
+    auto max_ingress_release_run_cycles = [](const std::vector<PortState>& ports) {
+        uint64_t max_run = 0;
+        for (const auto& port : ports) max_run = std::max(max_run, port.port.ingress_release_run_max_cycles());
+        return max_run;
+    };
+    auto avg_ingress_release_run_cycles = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_run_avg_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_release_run_stddev = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_run_stddev_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto max_ingress_release_gap_cycles = [](const std::vector<PortState>& ports) {
+        uint64_t max_gap = 0;
+        for (const auto& port : ports) max_gap = std::max(max_gap, port.port.ingress_release_gap_max_cycles());
+        return max_gap;
+    };
+    auto avg_ingress_release_gap_cycles = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_gap_avg_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_release_gap_stddev = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_release_gap_stddev_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
     auto avg_ingress_occ = [](const std::vector<PortState>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
@@ -543,6 +628,40 @@ void Switch::finish()
         if (ports.empty()) return 0.0;
         double sum = 0.0;
         for (const auto& port : ports) sum += port.port.ingress_occ_nonempty_frac();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto max_ingress_occ_run_cycles = [](const std::vector<PortState>& ports) {
+        uint64_t max_run = 0;
+        for (const auto& port : ports) max_run = std::max(max_run, port.port.ingress_occ_run_max_cycles());
+        return max_run;
+    };
+    auto avg_ingress_occ_run_cycles = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_occ_run_avg_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_occ_run_stddev = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_occ_run_stddev_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto max_ingress_occ_gap_cycles = [](const std::vector<PortState>& ports) {
+        uint64_t max_gap = 0;
+        for (const auto& port : ports) max_gap = std::max(max_gap, port.port.ingress_occ_gap_max_cycles());
+        return max_gap;
+    };
+    auto avg_ingress_occ_gap_cycles = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_occ_gap_avg_cycles();
+        return sum / static_cast<double>(ports.size());
+    };
+    auto avg_ingress_occ_gap_stddev = [](const std::vector<PortState>& ports) {
+        if (ports.empty()) return 0.0;
+        double sum = 0.0;
+        for (const auto& port : ports) sum += port.port.ingress_occ_gap_stddev_cycles();
         return sum / static_cast<double>(ports.size());
     };
     auto sum_rx_bytes_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
@@ -640,6 +759,12 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.node_ingress_arrival_burst_stddev_pkts = " << avg_ingress_arrival_burst_stddev_pkts(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_arrival_burst_stddev_bytes = " << avg_ingress_arrival_burst_stddev_bytes(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_arrival_nonempty_frac = " << avg_ingress_arrival_nonempty_frac(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_run_max_cycles = " << max_ingress_arrival_run_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_run_avg_cycles = " << avg_ingress_arrival_run_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_run_stddev_cycles = " << avg_ingress_arrival_run_stddev(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_gap_max_cycles = " << max_ingress_arrival_gap_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_gap_avg_cycles = " << avg_ingress_arrival_gap_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_arrival_gap_stddev_cycles = " << avg_ingress_arrival_gap_stddev(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_release_burst_max_pkts = " << max_ingress_release_burst_pkts(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_release_burst_max_bytes = " << max_ingress_release_burst_bytes(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_release_burst_avg_pkts = " << avg_ingress_release_burst_pkts(node_ports_) << '\n';
@@ -647,6 +772,12 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.node_ingress_release_burst_stddev_pkts = " << avg_ingress_release_burst_stddev_pkts(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_release_burst_stddev_bytes = " << avg_ingress_release_burst_stddev_bytes(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_release_nonempty_frac = " << avg_ingress_release_nonempty_frac(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_run_max_cycles = " << max_ingress_release_run_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_run_avg_cycles = " << avg_ingress_release_run_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_run_stddev_cycles = " << avg_ingress_release_run_stddev(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_gap_max_cycles = " << max_ingress_release_gap_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_gap_avg_cycles = " << avg_ingress_release_gap_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_release_gap_stddev_cycles = " << avg_ingress_release_gap_stddev(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_max_pkts = " << max_ingress_arrival_burst_pkts(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_max_bytes = " << max_ingress_arrival_burst_bytes(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_avg_pkts = " << avg_ingress_arrival_burst_pkts(pool_ports_) << '\n';
@@ -654,6 +785,12 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_stddev_pkts = " << avg_ingress_arrival_burst_stddev_pkts(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_arrival_burst_stddev_bytes = " << avg_ingress_arrival_burst_stddev_bytes(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_arrival_nonempty_frac = " << avg_ingress_arrival_nonempty_frac(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_run_max_cycles = " << max_ingress_arrival_run_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_run_avg_cycles = " << avg_ingress_arrival_run_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_run_stddev_cycles = " << avg_ingress_arrival_run_stddev(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_gap_max_cycles = " << max_ingress_arrival_gap_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_gap_avg_cycles = " << avg_ingress_arrival_gap_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_arrival_gap_stddev_cycles = " << avg_ingress_arrival_gap_stddev(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_release_burst_max_pkts = " << max_ingress_release_burst_pkts(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_release_burst_max_bytes = " << max_ingress_release_burst_bytes(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_release_burst_avg_pkts = " << avg_ingress_release_burst_pkts(pool_ports_) << '\n';
@@ -661,14 +798,37 @@ void Switch::finish()
         std::cout << "stat.switch.fabric.pool_ingress_release_burst_stddev_pkts = " << avg_ingress_release_burst_stddev_pkts(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_release_burst_stddev_bytes = " << avg_ingress_release_burst_stddev_bytes(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_release_nonempty_frac = " << avg_ingress_release_nonempty_frac(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_run_max_cycles = " << max_ingress_release_run_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_run_avg_cycles = " << avg_ingress_release_run_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_run_stddev_cycles = " << avg_ingress_release_run_stddev(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_gap_max_cycles = " << max_ingress_release_gap_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_gap_avg_cycles = " << avg_ingress_release_gap_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_release_gap_stddev_cycles = " << avg_ingress_release_gap_stddev(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_occ_avg_bytes = " << avg_ingress_occ(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_occ_stddev_bytes = " << avg_ingress_occ_stddev(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_occ_max_bytes = " << max_ingress_occ_bytes(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.node_ingress_occ_nonempty_frac = " << avg_ingress_occ_nonempty_frac(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_run_max_cycles = " << max_ingress_occ_run_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_run_avg_cycles = " << avg_ingress_occ_run_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_run_stddev_cycles = " << avg_ingress_occ_run_stddev(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_gap_max_cycles = " << max_ingress_occ_gap_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_gap_avg_cycles = " << avg_ingress_occ_gap_cycles(node_ports_) << '\n';
+        std::cout << "stat.switch.fabric.node_ingress_occ_gap_stddev_cycles = " << avg_ingress_occ_gap_stddev(node_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_occ_avg_bytes = " << avg_ingress_occ(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_occ_stddev_bytes = " << avg_ingress_occ_stddev(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_occ_max_bytes = " << max_ingress_occ_bytes(pool_ports_) << '\n';
         std::cout << "stat.switch.fabric.pool_ingress_occ_nonempty_frac = " << avg_ingress_occ_nonempty_frac(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_run_max_cycles = " << max_ingress_occ_run_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_run_avg_cycles = " << avg_ingress_occ_run_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_run_stddev_cycles = " << avg_ingress_occ_run_stddev(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_gap_max_cycles = " << max_ingress_occ_gap_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_gap_avg_cycles = " << avg_ingress_occ_gap_cycles(pool_ports_) << '\n';
+        std::cout << "stat.switch.fabric.pool_ingress_occ_gap_stddev_cycles = " << avg_ingress_occ_gap_stddev(pool_ports_) << '\n';
+        std::cout << "stat.switch.route.blocked_to_node = " << route_blocked_to_node_ << '\n';
+        std::cout << "stat.switch.route.blocked_to_pool = " << route_blocked_to_pool_ << '\n';
+        std::cout << "stat.switch.route.blocked_replicated_write = " << route_blocked_replicated_write_ << '\n';
+        std::cout << "stat.switch.route.send_fail_to_node = " << route_send_fail_to_node_ << '\n';
+        std::cout << "stat.switch.route.send_fail_to_pool = " << route_send_fail_to_pool_ << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.demand_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.write_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
         std::cout << "stat.switch.fabric.node_rx_bytes.response = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
@@ -696,6 +856,46 @@ void Switch::finish()
         std::cout << "stat.switch.bw.host_to_switch_gbps = " << host_to_switch_gbps << '\n';
         std::cout << "stat.switch.bw.switch_to_host_gbps = " << switch_to_host_gbps << '\n';
         std::cout << "stat.switch.bw.host_link_total_gbps = " << host_link_total_gbps << '\n';
+        auto print_port_stats = [](const std::string& prefix, const FabricPort& port) {
+            std::cout << prefix << "ingress_wait_avg_cycles = " << port.ingress_wait_avg_cycles() << '\n';
+            std::cout << prefix << "ingress_wait_max_cycles = " << port.ingress_wait_max_cycles() << '\n';
+            std::cout << prefix << "egress_wait_avg_cycles = " << port.egress_wait_avg_cycles() << '\n';
+            std::cout << prefix << "egress_wait_max_cycles = " << port.egress_wait_max_cycles() << '\n';
+            std::cout << prefix << "ingress_queue_wait_avg_cycles = " << port.ingress_queue_wait_avg_cycles() << '\n';
+            std::cout << prefix << "ingress_queue_wait_max_cycles = " << port.ingress_queue_wait_max_cycles() << '\n';
+            std::cout << prefix << "ingress_arrival_burst_avg_bytes = " << port.ingress_arrival_burst_avg_bytes() << '\n';
+            std::cout << prefix << "ingress_arrival_nonempty_frac = " << port.ingress_arrival_nonempty_frac() << '\n';
+            std::cout << prefix << "ingress_arrival_run_max_cycles = " << port.ingress_arrival_run_max_cycles() << '\n';
+            std::cout << prefix << "ingress_arrival_run_avg_cycles = " << port.ingress_arrival_run_avg_cycles() << '\n';
+            std::cout << prefix << "ingress_arrival_gap_max_cycles = " << port.ingress_arrival_gap_max_cycles() << '\n';
+            std::cout << prefix << "ingress_arrival_gap_avg_cycles = " << port.ingress_arrival_gap_avg_cycles() << '\n';
+            std::cout << prefix << "ingress_release_burst_avg_bytes = " << port.ingress_release_burst_avg_bytes() << '\n';
+            std::cout << prefix << "ingress_release_nonempty_frac = " << port.ingress_release_nonempty_frac() << '\n';
+            std::cout << prefix << "ingress_release_run_max_cycles = " << port.ingress_release_run_max_cycles() << '\n';
+            std::cout << prefix << "ingress_release_run_avg_cycles = " << port.ingress_release_run_avg_cycles() << '\n';
+            std::cout << prefix << "ingress_release_gap_max_cycles = " << port.ingress_release_gap_max_cycles() << '\n';
+            std::cout << prefix << "ingress_release_gap_avg_cycles = " << port.ingress_release_gap_avg_cycles() << '\n';
+            std::cout << prefix << "ingress_occ_avg_bytes = " << port.ingress_occ_avg_bytes() << '\n';
+            std::cout << prefix << "ingress_occ_stddev_bytes = " << port.ingress_occ_stddev_bytes() << '\n';
+            std::cout << prefix << "ingress_occ_max_bytes = " << port.ingress_occ_max_bytes() << '\n';
+            std::cout << prefix << "ingress_occ_nonempty_frac = " << port.ingress_occ_nonempty_frac() << '\n';
+            std::cout << prefix << "ingress_occ_run_max_cycles = " << port.ingress_occ_run_max_cycles() << '\n';
+            std::cout << prefix << "ingress_occ_run_avg_cycles = " << port.ingress_occ_run_avg_cycles() << '\n';
+            std::cout << prefix << "ingress_occ_gap_max_cycles = " << port.ingress_occ_gap_max_cycles() << '\n';
+            std::cout << prefix << "ingress_occ_gap_avg_cycles = " << port.ingress_occ_gap_avg_cycles() << '\n';
+            std::cout << prefix << "rx_bytes.demand_req = " << port.rx_bytes(FabricPort::TrafficClass::DemandReq) << '\n';
+            std::cout << prefix << "rx_bytes.write_req = " << port.rx_bytes(FabricPort::TrafficClass::WriteReq) << '\n';
+            std::cout << prefix << "rx_bytes.response = " << port.rx_bytes(FabricPort::TrafficClass::Response) << '\n';
+            std::cout << prefix << "tx_bytes.demand_req = " << port.tx_bytes(FabricPort::TrafficClass::DemandReq) << '\n';
+            std::cout << prefix << "tx_bytes.write_req = " << port.tx_bytes(FabricPort::TrafficClass::WriteReq) << '\n';
+            std::cout << prefix << "tx_bytes.response = " << port.tx_bytes(FabricPort::TrafficClass::Response) << '\n';
+        };
+        for (std::size_t i = 0; i < node_ports_.size(); ++i) {
+            print_port_stats("stat.switch.port.node." + std::to_string(i) + ".", node_ports_[i].port);
+        }
+        for (std::size_t i = 0; i < pool_ports_.size(); ++i) {
+            print_port_stats("stat.switch.port.pool." + std::to_string(i) + ".", pool_ports_[i].port);
+        }
         std::cout << "stat.switch.walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();

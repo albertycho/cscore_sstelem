@@ -104,6 +104,22 @@ std::size_t lat_bw_queue<T>::occupancy() const {
 }
 
 template<typename T>
+uint64_t lat_bw_queue<T>::occupancy_packets(std::size_t class_id) const {
+    if (class_id >= occupancy_packets_by_class.size()) {
+        return 0;
+    }
+    return occupancy_packets_by_class[class_id];
+}
+
+template<typename T>
+uint64_t lat_bw_queue<T>::occupancy_bytes(std::size_t class_id) const {
+    if (class_id >= occupancy_bytes_by_class.size()) {
+        return 0;
+    }
+    return occupancy_bytes_by_class[class_id];
+}
+
+template<typename T>
 double lat_bw_queue<T>::utilization() const {
     return get_utilization();
 }

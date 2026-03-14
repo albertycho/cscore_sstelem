@@ -72,9 +72,26 @@ private:
     };
 
     struct ResponseWaitStats {
+        uint64_t attempted = 0;
         uint64_t completed = 0;
+        uint64_t can_send_blocked = 0;
+        uint64_t send_failed = 0;
         uint64_t wait_sum_cycles = 0;
         uint64_t wait_max_cycles = 0;
+    };
+
+    struct CycleBurstStats {
+        uint64_t max_pkts = 0;
+        uint64_t nonempty_cycles = 0;
+        uint64_t sum_pkts = 0;
+        long double sq_sum_pkts = 0.0L;
+    };
+
+    struct QueueOccStats {
+        uint64_t samples = 0;
+        uint64_t sum = 0;
+        long double sq_sum = 0.0L;
+        uint64_t max = 0;
     };
 
     bool clock_tick(SST::Cycle_t current);
@@ -103,6 +120,12 @@ private:
         double ingress_arrival_burst_stddev_pkts = 0.0;
         double ingress_arrival_burst_stddev_bytes = 0.0;
         double ingress_arrival_nonempty_frac = 0.0;
+        uint64_t ingress_arrival_run_max_cycles = 0;
+        double ingress_arrival_run_avg_cycles = 0.0;
+        double ingress_arrival_run_stddev_cycles = 0.0;
+        uint64_t ingress_arrival_gap_max_cycles = 0;
+        double ingress_arrival_gap_avg_cycles = 0.0;
+        double ingress_arrival_gap_stddev_cycles = 0.0;
         uint64_t ingress_release_burst_max_pkts = 0;
         uint64_t ingress_release_burst_max_bytes = 0;
         double ingress_release_burst_avg_pkts = 0.0;
@@ -110,10 +133,22 @@ private:
         double ingress_release_burst_stddev_pkts = 0.0;
         double ingress_release_burst_stddev_bytes = 0.0;
         double ingress_release_nonempty_frac = 0.0;
+        uint64_t ingress_release_run_max_cycles = 0;
+        double ingress_release_run_avg_cycles = 0.0;
+        double ingress_release_run_stddev_cycles = 0.0;
+        uint64_t ingress_release_gap_max_cycles = 0;
+        double ingress_release_gap_avg_cycles = 0.0;
+        double ingress_release_gap_stddev_cycles = 0.0;
         double ingress_occ_avg_bytes = 0.0;
         double ingress_occ_stddev_bytes = 0.0;
         uint64_t ingress_occ_max_bytes = 0;
         double ingress_occ_nonempty_frac = 0.0;
+        uint64_t ingress_occ_run_max_cycles = 0;
+        double ingress_occ_run_avg_cycles = 0.0;
+        double ingress_occ_run_stddev_cycles = 0.0;
+        uint64_t ingress_occ_gap_max_cycles = 0;
+        double ingress_occ_gap_avg_cycles = 0.0;
+        double ingress_occ_gap_stddev_cycles = 0.0;
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_bytes_by_class{};
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> tx_bytes_by_class{};
         std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> rx_packets_by_class{};
@@ -149,6 +184,13 @@ private:
     uint64_t next_tag_ = 1;
     std::unordered_map<uint64_t, OutstandingRequest> pending_;
     std::array<ResponseWaitStats, MY_MEMORY_CONTROLLER::kDiagClassCount> response_wait_stats_{};
+    CycleBurstStats returned_burst_stats_{};
+    CycleBurstStats sent_burst_stats_{};
+    uint64_t response_blocked_cycles_ = 0;
+    uint64_t response_blocked_sum_pkts_ = 0;
+    uint64_t response_blocked_max_pkts_ = 0;
+    QueueOccStats returned_occ_stats_{};
+    QueueOccStats pending_occ_stats_{};
     uint64_t tick_count_ = 0;
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;

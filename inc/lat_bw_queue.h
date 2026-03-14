@@ -68,6 +68,8 @@ public:
     bool add_packet(T packet);
 
     std::size_t occupancy() const;
+    uint64_t occupancy_packets(std::size_t class_id) const;
+    uint64_t occupancy_bytes(std::size_t class_id) const;
 
     double utilization() const;
 

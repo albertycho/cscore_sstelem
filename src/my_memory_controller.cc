@@ -46,6 +46,13 @@ void MY_MEMORY_CONTROLLER::initialize()
 long MY_MEMORY_CONTROLLER::operate()
 {
     long progress = 0;
+    std::array<uint64_t, kDiagClassCount> enqueued_by_class{};
+    std::array<uint64_t, kDiagClassCount> completed_by_class{};
+    uint64_t enqueued_total = 0;
+    uint64_t completed_total = 0;
+    uint64_t occ_total_bytes = 0;
+    std::array<uint64_t, kDiagClassCount> occ_bytes_by_class{};
+    std::array<uint64_t, kDiagClassCount> occ_pkts_by_class{};
 
     for(size_t i = 0; i < queues.size(); ++i) {
         if(queues[i] == nullptr) continue;
@@ -56,6 +63,11 @@ long MY_MEMORY_CONTROLLER::operate()
         auto completed_requests = lat_bw_queue.on_tick();
         while(!completed_requests.empty()) {
             auto& req = completed_requests.back();
+            const auto cls_idx = static_cast<std::size_t>(classify_request(req));
+            if (cls_idx < kDiagClassCount) {
+                completed_by_class[cls_idx]++;
+            }
+            completed_total++;
             if(req.response_requested) {
                 champsim_channel.returned.emplace_back(std::move(req));
             }
@@ -66,6 +78,11 @@ long MY_MEMORY_CONTROLLER::operate()
         // Drain requests from the champsim channel into the latency/bandwidth queue
         auto drain_into_queue = [&](auto& q) {
             while(!q.empty()) {
+                const auto cls_idx = static_cast<std::size_t>(classify_request(q.front()));
+                if (cls_idx < kDiagClassCount) {
+                    enqueued_by_class[cls_idx]++;
+                }
+                enqueued_total++;
                 lat_bw_queue.add_packet(std::move(q.front()));
                 q.pop_front();
                 progress++;
@@ -75,11 +92,59 @@ long MY_MEMORY_CONTROLLER::operate()
         drain_into_queue(champsim_channel.PQ);
         drain_into_queue(champsim_channel.WQ);
 
+        occ_total_bytes += static_cast<uint64_t>(lat_bw_queue.occupancy());
+        for (std::size_t cls = 0; cls < kDiagClassCount; ++cls) {
+            occ_bytes_by_class[cls] += lat_bw_queue.occupancy_bytes(cls);
+            occ_pkts_by_class[cls] += lat_bw_queue.occupancy_packets(cls);
+        }
+
         // // Warn if more than one response was queued for this channel
         // if (lat_bw_queue.returned.size() > 1) {
         //     std::cerr << "Warning: channel returned queue has " << lat_bw_queue.returned.size() << " responses (expected <=1) at "
         //               << static_cast<const void*>(ul) << std::endl;
         // }
+    }
+
+    queue_diag_stats_.occ_samples++;
+    queue_diag_stats_.occ_sum_bytes += occ_total_bytes;
+    queue_diag_stats_.occ_sq_sum_bytes += static_cast<long double>(occ_total_bytes) * static_cast<long double>(occ_total_bytes);
+    queue_diag_stats_.occ_max_bytes = std::max(queue_diag_stats_.occ_max_bytes, occ_total_bytes);
+    if (occ_total_bytes > 0) {
+        queue_diag_stats_.occ_nonempty_cycles++;
+    }
+    for (std::size_t cls = 0; cls < kDiagClassCount; ++cls) {
+        queue_diag_stats_.occ_sum_bytes_by_class[cls] += occ_bytes_by_class[cls];
+        queue_diag_stats_.occ_max_bytes_by_class[cls] =
+            std::max(queue_diag_stats_.occ_max_bytes_by_class[cls], occ_bytes_by_class[cls]);
+        queue_diag_stats_.occ_sum_pkts_by_class[cls] += occ_pkts_by_class[cls];
+        queue_diag_stats_.occ_max_pkts_by_class[cls] =
+            std::max(queue_diag_stats_.occ_max_pkts_by_class[cls], occ_pkts_by_class[cls]);
+    }
+    if (enqueued_total > 0) {
+        queue_diag_stats_.enqueue_burst_nonempty_cycles++;
+        queue_diag_stats_.enqueue_burst_sum_pkts += enqueued_total;
+        queue_diag_stats_.enqueue_burst_sq_sum_pkts +=
+            static_cast<long double>(enqueued_total) * static_cast<long double>(enqueued_total);
+        queue_diag_stats_.enqueue_burst_max_pkts =
+            std::max(queue_diag_stats_.enqueue_burst_max_pkts, enqueued_total);
+        for (std::size_t cls = 0; cls < kDiagClassCount; ++cls) {
+            queue_diag_stats_.enqueue_burst_sum_pkts_by_class[cls] += enqueued_by_class[cls];
+            queue_diag_stats_.enqueue_burst_max_pkts_by_class[cls] =
+                std::max(queue_diag_stats_.enqueue_burst_max_pkts_by_class[cls], enqueued_by_class[cls]);
+        }
+    }
+    if (completed_total > 0) {
+        queue_diag_stats_.complete_burst_nonempty_cycles++;
+        queue_diag_stats_.complete_burst_sum_pkts += completed_total;
+        queue_diag_stats_.complete_burst_sq_sum_pkts +=
+            static_cast<long double>(completed_total) * static_cast<long double>(completed_total);
+        queue_diag_stats_.complete_burst_max_pkts =
+            std::max(queue_diag_stats_.complete_burst_max_pkts, completed_total);
+        for (std::size_t cls = 0; cls < kDiagClassCount; ++cls) {
+            queue_diag_stats_.complete_burst_sum_pkts_by_class[cls] += completed_by_class[cls];
+            queue_diag_stats_.complete_burst_max_pkts_by_class[cls] =
+                std::max(queue_diag_stats_.complete_burst_max_pkts_by_class[cls], completed_by_class[cls]);
+        }
     }
 
     return progress;

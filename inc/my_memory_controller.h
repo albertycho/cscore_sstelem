@@ -75,6 +75,30 @@ public:
         std::array<uint64_t, kDiagClassCount> ahead_bytes_max{};
     };
 
+    struct QueueDiagStats {
+        uint64_t occ_samples = 0;
+        uint64_t occ_sum_bytes = 0;
+        long double occ_sq_sum_bytes = 0.0L;
+        uint64_t occ_nonempty_cycles = 0;
+        uint64_t occ_max_bytes = 0;
+        std::array<uint64_t, kDiagClassCount> occ_sum_bytes_by_class{};
+        std::array<uint64_t, kDiagClassCount> occ_max_bytes_by_class{};
+        std::array<uint64_t, kDiagClassCount> occ_sum_pkts_by_class{};
+        std::array<uint64_t, kDiagClassCount> occ_max_pkts_by_class{};
+        uint64_t enqueue_burst_nonempty_cycles = 0;
+        uint64_t enqueue_burst_sum_pkts = 0;
+        long double enqueue_burst_sq_sum_pkts = 0.0L;
+        uint64_t enqueue_burst_max_pkts = 0;
+        std::array<uint64_t, kDiagClassCount> enqueue_burst_sum_pkts_by_class{};
+        std::array<uint64_t, kDiagClassCount> enqueue_burst_max_pkts_by_class{};
+        uint64_t complete_burst_nonempty_cycles = 0;
+        uint64_t complete_burst_sum_pkts = 0;
+        long double complete_burst_sq_sum_pkts = 0.0L;
+        uint64_t complete_burst_max_pkts = 0;
+        std::array<uint64_t, kDiagClassCount> complete_burst_sum_pkts_by_class{};
+        std::array<uint64_t, kDiagClassCount> complete_burst_max_pkts_by_class{};
+    };
+
     MY_MEMORY_CONTROLLER();
     MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_period,
                          std::vector<channel_type*>&& queues, 
@@ -88,6 +112,7 @@ public:
     void end_phase(unsigned cpu) final;
     void print_deadlock() final;
     RequestDiagStats demand_diag_stats() const;
+    const QueueDiagStats& queue_diag_stats() const { return queue_diag_stats_; }
     const RequestDiagStats& request_diag_stats(RequestDiagClass cls) const {
         return request_diag_stats_[static_cast<std::size_t>(cls)];
     }
@@ -115,6 +140,7 @@ private:
     std::vector<lat_bw_queue_type> lat_bw_queues;
     std::unordered_map<uint64_t, RequestDiagState> request_diag_state_;
     std::array<RequestDiagStats, kDiagClassCount> request_diag_stats_{};
+    QueueDiagStats queue_diag_stats_{};
     //champsim::data::bytes channel_width;
     champsim::data::bytes size_ = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES};
 
@@ -140,6 +166,7 @@ public:
     void reset_diagnostics() {
         request_diag_state_.clear();
         request_diag_stats_.fill(RequestDiagStats{});
+        queue_diag_stats_ = QueueDiagStats{};
     }
 
 };

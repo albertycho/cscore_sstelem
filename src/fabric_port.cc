@@ -163,6 +163,16 @@ void FabricPort::configure(SST::Link* link,
     ingress_arrival_burst_sum_bytes_ = 0;
     ingress_arrival_burst_sq_sum_pkts_ = 0.0L;
     ingress_arrival_burst_sq_sum_bytes_ = 0.0L;
+    ingress_arrival_prev_cycle_ = std::numeric_limits<uint64_t>::max();
+    ingress_arrival_run_cur_cycles_ = 0;
+    ingress_arrival_run_max_cycles_ = 0;
+    ingress_arrival_run_count_ = 0;
+    ingress_arrival_run_sum_cycles_ = 0;
+    ingress_arrival_run_sq_sum_cycles_ = 0.0L;
+    ingress_arrival_gap_max_cycles_ = 0;
+    ingress_arrival_gap_count_ = 0;
+    ingress_arrival_gap_sum_cycles_ = 0;
+    ingress_arrival_gap_sq_sum_cycles_ = 0.0L;
     ingress_release_burst_max_pkts_ = 0;
     ingress_release_burst_max_bytes_ = 0;
     ingress_release_nonempty_cycles_ = 0;
@@ -170,11 +180,33 @@ void FabricPort::configure(SST::Link* link,
     ingress_release_burst_sum_bytes_ = 0;
     ingress_release_burst_sq_sum_pkts_ = 0.0L;
     ingress_release_burst_sq_sum_bytes_ = 0.0L;
+    ingress_release_seen_nonempty_ = false;
+    ingress_release_run_cur_cycles_ = 0;
+    ingress_release_run_max_cycles_ = 0;
+    ingress_release_run_count_ = 0;
+    ingress_release_run_sum_cycles_ = 0;
+    ingress_release_run_sq_sum_cycles_ = 0.0L;
+    ingress_release_gap_cur_cycles_ = 0;
+    ingress_release_gap_max_cycles_ = 0;
+    ingress_release_gap_count_ = 0;
+    ingress_release_gap_sum_cycles_ = 0;
+    ingress_release_gap_sq_sum_cycles_ = 0.0L;
     ingress_occ_sum_bytes_ = 0;
     ingress_occ_sq_sum_bytes_ = 0.0L;
     ingress_occ_samples_ = 0;
     ingress_occ_nonempty_cycles_ = 0;
     ingress_occ_max_bytes_ = 0;
+    ingress_occ_seen_nonempty_ = false;
+    ingress_occ_run_cur_cycles_ = 0;
+    ingress_occ_run_max_cycles_ = 0;
+    ingress_occ_run_count_ = 0;
+    ingress_occ_run_sum_cycles_ = 0;
+    ingress_occ_run_sq_sum_cycles_ = 0.0L;
+    ingress_occ_gap_cur_cycles_ = 0;
+    ingress_occ_gap_max_cycles_ = 0;
+    ingress_occ_gap_count_ = 0;
+    ingress_occ_gap_sum_cycles_ = 0;
+    ingress_occ_gap_sq_sum_cycles_ = 0.0L;
     tick_samples_ = 0;
     tx_bytes_total_ = 0;
     rx_bytes_total_ = 0;
@@ -213,6 +245,26 @@ void FabricPort::tick(uint64_t cycle) {
         ingress_occ_max_bytes_ = std::max(ingress_occ_max_bytes_, occ);
         if (occ > 0) {
             ingress_occ_nonempty_cycles_++;
+            if (ingress_occ_gap_cur_cycles_ > 0) {
+                ingress_occ_gap_count_++;
+                ingress_occ_gap_sum_cycles_ += ingress_occ_gap_cur_cycles_;
+                ingress_occ_gap_sq_sum_cycles_ += static_cast<long double>(ingress_occ_gap_cur_cycles_) *
+                                                  static_cast<long double>(ingress_occ_gap_cur_cycles_);
+                ingress_occ_gap_cur_cycles_ = 0;
+            }
+            ingress_occ_seen_nonempty_ = true;
+            ingress_occ_run_cur_cycles_++;
+            ingress_occ_run_max_cycles_ = std::max(ingress_occ_run_max_cycles_, ingress_occ_run_cur_cycles_);
+        } else if (ingress_occ_seen_nonempty_) {
+            if (ingress_occ_run_cur_cycles_ > 0) {
+                ingress_occ_run_count_++;
+                ingress_occ_run_sum_cycles_ += ingress_occ_run_cur_cycles_;
+                ingress_occ_run_sq_sum_cycles_ += static_cast<long double>(ingress_occ_run_cur_cycles_) *
+                                                  static_cast<long double>(ingress_occ_run_cur_cycles_);
+                ingress_occ_run_cur_cycles_ = 0;
+            }
+            ingress_occ_gap_cur_cycles_++;
+            ingress_occ_gap_max_cycles_ = std::max(ingress_occ_gap_max_cycles_, ingress_occ_gap_cur_cycles_);
         }
         tick_samples_++;
         ready_occ_sum_ += static_cast<uint64_t>(ready_.size());
@@ -455,6 +507,45 @@ double FabricPort::ingress_arrival_nonempty_frac() const {
     return static_cast<double>(count) / static_cast<double>(tick_samples_);
 }
 
+uint64_t FabricPort::ingress_arrival_run_max_cycles() const {
+    return std::max(ingress_arrival_run_max_cycles_, ingress_arrival_run_cur_cycles_);
+}
+
+double FabricPort::ingress_arrival_run_avg_cycles() const {
+    const uint64_t count = ingress_arrival_run_count_ + (ingress_arrival_run_cur_cycles_ > 0 ? 1 : 0);
+    if (count == 0) {
+        return 0.0;
+    }
+    const uint64_t sum = ingress_arrival_run_sum_cycles_ + ingress_arrival_run_cur_cycles_;
+    return static_cast<double>(sum) / static_cast<double>(count);
+}
+
+double FabricPort::ingress_arrival_run_stddev_cycles() const {
+    const uint64_t count = ingress_arrival_run_count_ + (ingress_arrival_run_cur_cycles_ > 0 ? 1 : 0);
+    const long double sum = static_cast<long double>(ingress_arrival_run_sum_cycles_ + ingress_arrival_run_cur_cycles_);
+    const long double sq_sum =
+        ingress_arrival_run_sq_sum_cycles_ +
+        static_cast<long double>(ingress_arrival_run_cur_cycles_) * static_cast<long double>(ingress_arrival_run_cur_cycles_);
+    return safe_stddev(sq_sum, sum, count);
+}
+
+uint64_t FabricPort::ingress_arrival_gap_max_cycles() const {
+    return ingress_arrival_gap_max_cycles_;
+}
+
+double FabricPort::ingress_arrival_gap_avg_cycles() const {
+    if (ingress_arrival_gap_count_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_arrival_gap_sum_cycles_) / static_cast<double>(ingress_arrival_gap_count_);
+}
+
+double FabricPort::ingress_arrival_gap_stddev_cycles() const {
+    return safe_stddev(ingress_arrival_gap_sq_sum_cycles_,
+                       static_cast<long double>(ingress_arrival_gap_sum_cycles_),
+                       ingress_arrival_gap_count_);
+}
+
 uint64_t FabricPort::ingress_release_burst_max_pkts() const {
     return ingress_release_burst_max_pkts_;
 }
@@ -496,6 +587,50 @@ double FabricPort::ingress_release_nonempty_frac() const {
     return static_cast<double>(ingress_release_nonempty_cycles_) / static_cast<double>(tick_samples_);
 }
 
+uint64_t FabricPort::ingress_release_run_max_cycles() const {
+    return std::max(ingress_release_run_max_cycles_, ingress_release_run_cur_cycles_);
+}
+
+double FabricPort::ingress_release_run_avg_cycles() const {
+    const uint64_t count = ingress_release_run_count_ + (ingress_release_run_cur_cycles_ > 0 ? 1 : 0);
+    if (count == 0) {
+        return 0.0;
+    }
+    const uint64_t sum = ingress_release_run_sum_cycles_ + ingress_release_run_cur_cycles_;
+    return static_cast<double>(sum) / static_cast<double>(count);
+}
+
+double FabricPort::ingress_release_run_stddev_cycles() const {
+    const uint64_t count = ingress_release_run_count_ + (ingress_release_run_cur_cycles_ > 0 ? 1 : 0);
+    const long double sum = static_cast<long double>(ingress_release_run_sum_cycles_ + ingress_release_run_cur_cycles_);
+    const long double sq_sum =
+        ingress_release_run_sq_sum_cycles_ +
+        static_cast<long double>(ingress_release_run_cur_cycles_) * static_cast<long double>(ingress_release_run_cur_cycles_);
+    return safe_stddev(sq_sum, sum, count);
+}
+
+uint64_t FabricPort::ingress_release_gap_max_cycles() const {
+    return std::max(ingress_release_gap_max_cycles_, ingress_release_gap_cur_cycles_);
+}
+
+double FabricPort::ingress_release_gap_avg_cycles() const {
+    const uint64_t count = ingress_release_gap_count_ + (ingress_release_gap_cur_cycles_ > 0 ? 1 : 0);
+    if (count == 0) {
+        return 0.0;
+    }
+    const uint64_t sum = ingress_release_gap_sum_cycles_ + ingress_release_gap_cur_cycles_;
+    return static_cast<double>(sum) / static_cast<double>(count);
+}
+
+double FabricPort::ingress_release_gap_stddev_cycles() const {
+    const uint64_t count = ingress_release_gap_count_ + (ingress_release_gap_cur_cycles_ > 0 ? 1 : 0);
+    const long double sum = static_cast<long double>(ingress_release_gap_sum_cycles_ + ingress_release_gap_cur_cycles_);
+    const long double sq_sum =
+        ingress_release_gap_sq_sum_cycles_ +
+        static_cast<long double>(ingress_release_gap_cur_cycles_) * static_cast<long double>(ingress_release_gap_cur_cycles_);
+    return safe_stddev(sq_sum, sum, count);
+}
+
 double FabricPort::ingress_occ_avg_bytes() const {
     if (ingress_occ_samples_ == 0) {
         return 0.0;
@@ -518,6 +653,50 @@ double FabricPort::ingress_occ_nonempty_frac() const {
         return 0.0;
     }
     return static_cast<double>(ingress_occ_nonempty_cycles_) / static_cast<double>(ingress_occ_samples_);
+}
+
+uint64_t FabricPort::ingress_occ_run_max_cycles() const {
+    return std::max(ingress_occ_run_max_cycles_, ingress_occ_run_cur_cycles_);
+}
+
+double FabricPort::ingress_occ_run_avg_cycles() const {
+    const uint64_t count = ingress_occ_run_count_ + (ingress_occ_run_cur_cycles_ > 0 ? 1 : 0);
+    if (count == 0) {
+        return 0.0;
+    }
+    const uint64_t sum = ingress_occ_run_sum_cycles_ + ingress_occ_run_cur_cycles_;
+    return static_cast<double>(sum) / static_cast<double>(count);
+}
+
+double FabricPort::ingress_occ_run_stddev_cycles() const {
+    const uint64_t count = ingress_occ_run_count_ + (ingress_occ_run_cur_cycles_ > 0 ? 1 : 0);
+    const long double sum = static_cast<long double>(ingress_occ_run_sum_cycles_ + ingress_occ_run_cur_cycles_);
+    const long double sq_sum =
+        ingress_occ_run_sq_sum_cycles_ +
+        static_cast<long double>(ingress_occ_run_cur_cycles_) * static_cast<long double>(ingress_occ_run_cur_cycles_);
+    return safe_stddev(sq_sum, sum, count);
+}
+
+uint64_t FabricPort::ingress_occ_gap_max_cycles() const {
+    return std::max(ingress_occ_gap_max_cycles_, ingress_occ_gap_cur_cycles_);
+}
+
+double FabricPort::ingress_occ_gap_avg_cycles() const {
+    const uint64_t count = ingress_occ_gap_count_ + (ingress_occ_gap_cur_cycles_ > 0 ? 1 : 0);
+    if (count == 0) {
+        return 0.0;
+    }
+    const uint64_t sum = ingress_occ_gap_sum_cycles_ + ingress_occ_gap_cur_cycles_;
+    return static_cast<double>(sum) / static_cast<double>(count);
+}
+
+double FabricPort::ingress_occ_gap_stddev_cycles() const {
+    const uint64_t count = ingress_occ_gap_count_ + (ingress_occ_gap_cur_cycles_ > 0 ? 1 : 0);
+    const long double sum = static_cast<long double>(ingress_occ_gap_sum_cycles_ + ingress_occ_gap_cur_cycles_);
+    const long double sq_sum =
+        ingress_occ_gap_sq_sum_cycles_ +
+        static_cast<long double>(ingress_occ_gap_cur_cycles_) * static_cast<long double>(ingress_occ_gap_cur_cycles_);
+    return safe_stddev(sq_sum, sum, count);
 }
 
 uint64_t FabricPort::tx_bytes_total() const {
@@ -703,6 +882,29 @@ void FabricPort::record_ingress_arrival(uint64_t cycle, uint64_t bytes) {
             ingress_arrival_burst_sq_sum_bytes_ += static_cast<long double>(ingress_arrival_burst_bytes_cur_) *
                                                    static_cast<long double>(ingress_arrival_burst_bytes_cur_);
         }
+        if (ingress_arrival_prev_cycle_ == std::numeric_limits<uint64_t>::max()) {
+            ingress_arrival_run_cur_cycles_ = 1;
+        } else if (cycle == ingress_arrival_prev_cycle_ + 1) {
+            ingress_arrival_run_cur_cycles_++;
+        } else {
+            if (ingress_arrival_run_cur_cycles_ > 0) {
+                ingress_arrival_run_count_++;
+                ingress_arrival_run_sum_cycles_ += ingress_arrival_run_cur_cycles_;
+                ingress_arrival_run_sq_sum_cycles_ += static_cast<long double>(ingress_arrival_run_cur_cycles_) *
+                                                      static_cast<long double>(ingress_arrival_run_cur_cycles_);
+            }
+            const uint64_t gap_cycles = cycle > ingress_arrival_prev_cycle_ ? (cycle - ingress_arrival_prev_cycle_ - 1) : 0;
+            if (gap_cycles > 0) {
+                ingress_arrival_gap_count_++;
+                ingress_arrival_gap_sum_cycles_ += gap_cycles;
+                ingress_arrival_gap_sq_sum_cycles_ += static_cast<long double>(gap_cycles) *
+                                                      static_cast<long double>(gap_cycles);
+                ingress_arrival_gap_max_cycles_ = std::max(ingress_arrival_gap_max_cycles_, gap_cycles);
+            }
+            ingress_arrival_run_cur_cycles_ = 1;
+        }
+        ingress_arrival_run_max_cycles_ = std::max(ingress_arrival_run_max_cycles_, ingress_arrival_run_cur_cycles_);
+        ingress_arrival_prev_cycle_ = cycle;
         ingress_arrival_burst_cycle_ = cycle;
         ingress_arrival_burst_pkts_cur_ = 0;
         ingress_arrival_burst_bytes_cur_ = 0;
@@ -726,6 +928,26 @@ void FabricPort::record_ingress_release(const std::vector<csEvent*>& ready) {
         ingress_release_burst_sum_bytes_ += burst_bytes;
         ingress_release_burst_sq_sum_pkts_ += static_cast<long double>(burst_pkts) * static_cast<long double>(burst_pkts);
         ingress_release_burst_sq_sum_bytes_ += static_cast<long double>(burst_bytes) * static_cast<long double>(burst_bytes);
+        if (ingress_release_gap_cur_cycles_ > 0) {
+            ingress_release_gap_count_++;
+            ingress_release_gap_sum_cycles_ += ingress_release_gap_cur_cycles_;
+            ingress_release_gap_sq_sum_cycles_ += static_cast<long double>(ingress_release_gap_cur_cycles_) *
+                                                  static_cast<long double>(ingress_release_gap_cur_cycles_);
+            ingress_release_gap_cur_cycles_ = 0;
+        }
+        ingress_release_seen_nonempty_ = true;
+        ingress_release_run_cur_cycles_++;
+        ingress_release_run_max_cycles_ = std::max(ingress_release_run_max_cycles_, ingress_release_run_cur_cycles_);
+    } else if (ingress_release_seen_nonempty_) {
+        if (ingress_release_run_cur_cycles_ > 0) {
+            ingress_release_run_count_++;
+            ingress_release_run_sum_cycles_ += ingress_release_run_cur_cycles_;
+            ingress_release_run_sq_sum_cycles_ += static_cast<long double>(ingress_release_run_cur_cycles_) *
+                                                  static_cast<long double>(ingress_release_run_cur_cycles_);
+            ingress_release_run_cur_cycles_ = 0;
+        }
+        ingress_release_gap_cur_cycles_++;
+        ingress_release_gap_max_cycles_ = std::max(ingress_release_gap_max_cycles_, ingress_release_gap_cur_cycles_);
     }
     ingress_release_burst_max_pkts_ = std::max(ingress_release_burst_max_pkts_, burst_pkts);
     ingress_release_burst_max_bytes_ = std::max(ingress_release_burst_max_bytes_, burst_bytes);

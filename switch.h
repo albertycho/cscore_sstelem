@@ -92,6 +92,11 @@ private:
     std::vector<PortState> node_ports_;
     std::vector<PortState> pool_ports_;
     uint64_t replicated_count_ = 0;
+    uint64_t route_blocked_to_node_ = 0;
+    uint64_t route_blocked_to_pool_ = 0;
+    uint64_t route_blocked_replicated_write_ = 0;
+    uint64_t route_send_fail_to_node_ = 0;
+    uint64_t route_send_fail_to_pool_ = 0;
     uint64_t tick_count_ = 0;
     std::chrono::steady_clock::time_point wall_start_{};
     std::chrono::steady_clock::duration active_time_{};
