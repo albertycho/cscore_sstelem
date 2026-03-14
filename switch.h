@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <array>
 #include <vector>
 #include <chrono>
 
@@ -97,6 +98,13 @@ private:
     uint64_t route_blocked_replicated_write_ = 0;
     uint64_t route_send_fail_to_node_ = 0;
     uint64_t route_send_fail_to_pool_ = 0;
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_attempt_to_node_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_attempt_to_pool_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_blocked_to_node_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_blocked_to_pool_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_send_fail_to_node_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_send_fail_to_pool_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_replicated_clones_by_class_{};
     uint64_t tick_count_ = 0;
     std::chrono::steady_clock::time_point wall_start_{};
     std::chrono::steady_clock::duration active_time_{};

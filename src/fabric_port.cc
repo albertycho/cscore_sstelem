@@ -153,6 +153,20 @@ void FabricPort::configure(SST::Link* link,
     egress_wait_sum_cycles_ = 0;
     egress_wait_samples_ = 0;
     egress_wait_max_cycles_ = 0;
+    egress_occ_sum_bytes_ = 0;
+    egress_occ_sq_sum_bytes_ = 0.0L;
+    egress_occ_nonempty_cycles_ = 0;
+    egress_occ_max_bytes_ = 0;
+    egress_blocked_cycles_ = 0;
+    egress_blocked_occ_sum_bytes_ = 0;
+    egress_blocked_occ_max_bytes_ = 0;
+    egress_send_burst_max_pkts_ = 0;
+    egress_send_burst_max_bytes_ = 0;
+    egress_send_nonempty_cycles_ = 0;
+    egress_send_burst_sum_pkts_ = 0;
+    egress_send_burst_sum_bytes_ = 0;
+    egress_send_burst_sq_sum_pkts_ = 0.0L;
+    egress_send_burst_sq_sum_bytes_ = 0.0L;
     ingress_arrival_burst_cycle_ = std::numeric_limits<uint64_t>::max();
     ingress_arrival_burst_pkts_cur_ = 0;
     ingress_arrival_burst_bytes_cur_ = 0;
@@ -214,6 +228,33 @@ void FabricPort::configure(SST::Link* link,
     rx_bytes_by_class_.fill(0);
     tx_packets_by_class_.fill(0);
     rx_packets_by_class_.fill(0);
+    ingress_arrival_empty_packets_by_class_.fill(0);
+    ingress_arrival_nonempty_packets_by_class_.fill(0);
+    ingress_arrival_empty_bytes_by_class_.fill(0);
+    ingress_arrival_nonempty_bytes_by_class_.fill(0);
+    ingress_nonempty_pre_occ_sum_bytes_by_class_.fill(0);
+    ingress_nonempty_pre_occ_max_bytes_by_class_.fill(0);
+    ingress_release_after_empty_packets_by_class_.fill(0);
+    ingress_release_after_nonempty_packets_by_class_.fill(0);
+    ingress_wait_after_empty_sum_cycles_by_class_.fill(0);
+    ingress_wait_after_nonempty_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_empty_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_nonempty_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_empty_max_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_nonempty_max_cycles_by_class_.fill(0);
+    ingress_wait_sum_cycles_by_class_.fill(0);
+    ingress_wait_samples_by_class_.fill(0);
+    ingress_wait_max_cycles_by_class_.fill(0);
+    ingress_queue_wait_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_samples_by_class_.fill(0);
+    ingress_queue_wait_max_cycles_by_class_.fill(0);
+    egress_wait_sum_cycles_by_class_.fill(0);
+    egress_wait_samples_by_class_.fill(0);
+    egress_wait_max_cycles_by_class_.fill(0);
+    egress_queue_bytes_by_class_.fill(0);
+    egress_occ_sum_bytes_by_class_.fill(0);
+    egress_occ_max_bytes_by_class_.fill(0);
+    egress_blocked_cycles_by_class_.fill(0);
 }
 
 bool FabricPort::send(csEvent* item) {
@@ -230,6 +271,7 @@ bool FabricPort::send(csEvent* item) {
         (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
     egress_queue_.push_back(EgressEntry{item, enqueue_cycle});
     egress_queue_bytes_ += static_cast<int64_t>(bytes);
+    egress_queue_bytes_by_class_[traffic_class_index(classify_event(item))] += bytes;
     return true;
 }
 
@@ -238,6 +280,18 @@ void FabricPort::tick(uint64_t cycle) {
         last_tick_cycle_ = cycle;
         tick_ingress();
         drain_egress();
+        const auto egress_occ = static_cast<uint64_t>(std::max<int64_t>(egress_queue_bytes_, 0));
+        egress_occ_sum_bytes_ += egress_occ;
+        egress_occ_sq_sum_bytes_ += static_cast<long double>(egress_occ) * static_cast<long double>(egress_occ);
+        egress_occ_max_bytes_ = std::max(egress_occ_max_bytes_, egress_occ);
+        if (egress_occ > 0) {
+            egress_occ_nonempty_cycles_++;
+        }
+        for (std::size_t idx = 0; idx < static_cast<std::size_t>(TrafficClass::Count); ++idx) {
+            egress_occ_sum_bytes_by_class_[idx] += egress_queue_bytes_by_class_[idx];
+            egress_occ_max_bytes_by_class_[idx] =
+                std::max(egress_occ_max_bytes_by_class_[idx], egress_queue_bytes_by_class_[idx]);
+        }
         const auto occ = ingress_ ? static_cast<uint64_t>(ingress_->occupancy()) : 0;
         ingress_occ_sum_bytes_ += occ;
         ingress_occ_sq_sum_bytes_ += static_cast<long double>(occ) * static_cast<long double>(occ);
@@ -330,10 +384,15 @@ void FabricPort::handle_event(SST::Event* ev) {
     }
 
     record_rx(cevent);
+    const auto cls = classify_event(cevent);
+    const uint64_t bytes = event_bytes(cevent);
+    const uint64_t pre_enqueue_occ_bytes = ingress_ ? static_cast<uint64_t>(ingress_->occupancy()) : 0;
     record_ingress_arrival((last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_,
-                           event_bytes(cevent));
+                           bytes);
+    record_conditional_ingress_arrival(cls, bytes, pre_enqueue_occ_bytes);
     if (!ingress_) {
-        ingress_wait_samples_++;
+        record_ingress_wait(cls, 0, 0);
+        record_conditional_ingress_release(cls, pre_enqueue_occ_bytes > 0, 0, 0);
         push_ready(cevent);
         return;
     }
@@ -343,7 +402,12 @@ void FabricPort::handle_event(SST::Event* ev) {
     }
     const uint64_t enqueue_cycle =
         (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
-    ingress_enqueue_cycle_[cevent] = enqueue_cycle;
+    ingress_enqueue_cycle_[cevent] = IngressArrivalMeta{
+        enqueue_cycle,
+        pre_enqueue_occ_bytes,
+        cls,
+        pre_enqueue_occ_bytes > 0
+    };
 }
 
 void FabricPort::reset_ingress_utilization() {
@@ -444,6 +508,32 @@ uint64_t FabricPort::ready_retry_count() const {
     return ready_retry_count_;
 }
 
+double FabricPort::ingress_wait_avg_cycles(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (ingress_wait_samples_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_wait_sum_cycles_by_class_[idx]) /
+           static_cast<double>(ingress_wait_samples_by_class_[idx]);
+}
+
+uint64_t FabricPort::ingress_wait_max_cycles(TrafficClass cls) const {
+    return ingress_wait_max_cycles_by_class_[traffic_class_index(cls)];
+}
+
+double FabricPort::ingress_queue_wait_avg_cycles(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (ingress_queue_wait_samples_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_queue_wait_sum_cycles_by_class_[idx]) /
+           static_cast<double>(ingress_queue_wait_samples_by_class_[idx]);
+}
+
+uint64_t FabricPort::ingress_queue_wait_max_cycles(TrafficClass cls) const {
+    return ingress_queue_wait_max_cycles_by_class_[traffic_class_index(cls)];
+}
+
 double FabricPort::egress_wait_avg_cycles() const {
     if (egress_wait_samples_ == 0) {
         return 0.0;
@@ -453,6 +543,93 @@ double FabricPort::egress_wait_avg_cycles() const {
 
 uint64_t FabricPort::egress_wait_max_cycles() const {
     return egress_wait_max_cycles_;
+}
+
+double FabricPort::egress_occ_avg_bytes() const {
+    if (tick_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_occ_sum_bytes_) / static_cast<double>(tick_samples_);
+}
+
+double FabricPort::egress_occ_stddev_bytes() const {
+    return safe_stddev(egress_occ_sq_sum_bytes_,
+                       static_cast<long double>(egress_occ_sum_bytes_),
+                       tick_samples_);
+}
+
+uint64_t FabricPort::egress_occ_max_bytes() const {
+    return egress_occ_max_bytes_;
+}
+
+double FabricPort::egress_occ_nonempty_frac() const {
+    if (tick_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_occ_nonempty_cycles_) / static_cast<double>(tick_samples_);
+}
+
+uint64_t FabricPort::egress_blocked_cycles() const {
+    return egress_blocked_cycles_;
+}
+
+double FabricPort::egress_blocked_nonempty_frac() const {
+    if (tick_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_blocked_cycles_) / static_cast<double>(tick_samples_);
+}
+
+double FabricPort::egress_blocked_avg_occ_bytes() const {
+    if (egress_blocked_cycles_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_blocked_occ_sum_bytes_) / static_cast<double>(egress_blocked_cycles_);
+}
+
+uint64_t FabricPort::egress_blocked_max_occ_bytes() const {
+    return egress_blocked_occ_max_bytes_;
+}
+
+uint64_t FabricPort::egress_send_burst_max_pkts() const {
+    return egress_send_burst_max_pkts_;
+}
+
+uint64_t FabricPort::egress_send_burst_max_bytes() const {
+    return egress_send_burst_max_bytes_;
+}
+
+double FabricPort::egress_send_burst_avg_pkts() const {
+    if (egress_send_nonempty_cycles_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_send_burst_sum_pkts_) / static_cast<double>(egress_send_nonempty_cycles_);
+}
+
+double FabricPort::egress_send_burst_avg_bytes() const {
+    if (egress_send_nonempty_cycles_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_send_burst_sum_bytes_) / static_cast<double>(egress_send_nonempty_cycles_);
+}
+
+double FabricPort::egress_send_burst_stddev_pkts() const {
+    return safe_stddev(egress_send_burst_sq_sum_pkts_,
+                       static_cast<long double>(egress_send_burst_sum_pkts_),
+                       egress_send_nonempty_cycles_);
+}
+
+double FabricPort::egress_send_burst_stddev_bytes() const {
+    return safe_stddev(egress_send_burst_sq_sum_bytes_,
+                       static_cast<long double>(egress_send_burst_sum_bytes_),
+                       egress_send_nonempty_cycles_);
+}
+
+double FabricPort::egress_send_nonempty_frac() const {
+    if (tick_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_send_nonempty_cycles_) / static_cast<double>(tick_samples_);
 }
 
 uint64_t FabricPort::ingress_arrival_burst_max_pkts() const {
@@ -723,6 +900,119 @@ uint64_t FabricPort::rx_packets(TrafficClass cls) const {
     return rx_packets_by_class_[static_cast<std::size_t>(cls)];
 }
 
+double FabricPort::egress_wait_avg_cycles(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (egress_wait_samples_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_wait_sum_cycles_by_class_[idx]) /
+           static_cast<double>(egress_wait_samples_by_class_[idx]);
+}
+
+uint64_t FabricPort::egress_wait_max_cycles(TrafficClass cls) const {
+    return egress_wait_max_cycles_by_class_[traffic_class_index(cls)];
+}
+
+double FabricPort::egress_occ_avg_bytes(TrafficClass cls) const {
+    if (tick_samples_ == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(egress_occ_sum_bytes_by_class_[traffic_class_index(cls)]) /
+           static_cast<double>(tick_samples_);
+}
+
+uint64_t FabricPort::egress_occ_max_bytes(TrafficClass cls) const {
+    return egress_occ_max_bytes_by_class_[traffic_class_index(cls)];
+}
+
+uint64_t FabricPort::egress_blocked_cycles(TrafficClass cls) const {
+    return egress_blocked_cycles_by_class_[traffic_class_index(cls)];
+}
+
+uint64_t FabricPort::ingress_arrival_empty_packets(TrafficClass cls) const {
+    return ingress_arrival_empty_packets_by_class_[traffic_class_index(cls)];
+}
+
+uint64_t FabricPort::ingress_arrival_nonempty_packets(TrafficClass cls) const {
+    return ingress_arrival_nonempty_packets_by_class_[traffic_class_index(cls)];
+}
+
+double FabricPort::ingress_arrival_nonempty_packet_frac(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    const uint64_t total =
+        ingress_arrival_empty_packets_by_class_[idx] + ingress_arrival_nonempty_packets_by_class_[idx];
+    if (total == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_arrival_nonempty_packets_by_class_[idx]) /
+           static_cast<double>(total);
+}
+
+double FabricPort::ingress_nonempty_arrival_pre_occ_avg_bytes(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (ingress_arrival_nonempty_packets_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_nonempty_pre_occ_sum_bytes_by_class_[idx]) /
+           static_cast<double>(ingress_arrival_nonempty_packets_by_class_[idx]);
+}
+
+uint64_t FabricPort::ingress_nonempty_arrival_pre_occ_max_bytes(TrafficClass cls) const {
+    return ingress_nonempty_pre_occ_max_bytes_by_class_[traffic_class_index(cls)];
+}
+
+uint64_t FabricPort::ingress_release_after_empty_arrival_packets(TrafficClass cls) const {
+    return ingress_release_after_empty_packets_by_class_[traffic_class_index(cls)];
+}
+
+uint64_t FabricPort::ingress_release_after_nonempty_arrival_packets(TrafficClass cls) const {
+    return ingress_release_after_nonempty_packets_by_class_[traffic_class_index(cls)];
+}
+
+double FabricPort::ingress_wait_after_empty_arrival_avg_cycles(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (ingress_release_after_empty_packets_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_wait_after_empty_sum_cycles_by_class_[idx]) /
+           static_cast<double>(ingress_release_after_empty_packets_by_class_[idx]);
+}
+
+double FabricPort::ingress_wait_after_nonempty_arrival_avg_cycles(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (ingress_release_after_nonempty_packets_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_wait_after_nonempty_sum_cycles_by_class_[idx]) /
+           static_cast<double>(ingress_release_after_nonempty_packets_by_class_[idx]);
+}
+
+double FabricPort::ingress_queue_wait_after_empty_arrival_avg_cycles(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (ingress_release_after_empty_packets_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_queue_wait_after_empty_sum_cycles_by_class_[idx]) /
+           static_cast<double>(ingress_release_after_empty_packets_by_class_[idx]);
+}
+
+double FabricPort::ingress_queue_wait_after_nonempty_arrival_avg_cycles(TrafficClass cls) const {
+    const auto idx = traffic_class_index(cls);
+    if (ingress_release_after_nonempty_packets_by_class_[idx] == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ingress_queue_wait_after_nonempty_sum_cycles_by_class_[idx]) /
+           static_cast<double>(ingress_release_after_nonempty_packets_by_class_[idx]);
+}
+
+uint64_t FabricPort::ingress_queue_wait_after_empty_arrival_max_cycles(TrafficClass cls) const {
+    return ingress_queue_wait_after_empty_max_cycles_by_class_[traffic_class_index(cls)];
+}
+
+uint64_t FabricPort::ingress_queue_wait_after_nonempty_arrival_max_cycles(TrafficClass cls) const {
+    return ingress_queue_wait_after_nonempty_max_cycles_by_class_[traffic_class_index(cls)];
+}
+
 bool FabricPort::can_receive(uint64_t cycle) {
     tick(cycle);
     if (last_deliver_cycle_ == cycle) {
@@ -740,30 +1030,38 @@ void FabricPort::tick_ingress() {
     for (auto& item : ready) {
         uint64_t wait_cycles = 0;
         auto it = ingress_enqueue_cycle_.find(item);
+        TrafficClass cls = classify_event(item);
+        bool saw_nonempty_queue = false;
         if (it != ingress_enqueue_cycle_.end()) {
-            const uint64_t enqueue_cycle = it->second;
+            const auto enqueue = it->second;
+            const uint64_t enqueue_cycle = enqueue.enqueue_cycle;
+            cls = enqueue.cls;
+            saw_nonempty_queue = enqueue.saw_nonempty_queue;
             if (last_tick_cycle_ != std::numeric_limits<uint64_t>::max() && last_tick_cycle_ >= enqueue_cycle) {
                 wait_cycles = last_tick_cycle_ - enqueue_cycle;
             }
             ingress_enqueue_cycle_.erase(it);
         }
-        ingress_wait_sum_cycles_ += wait_cycles;
-        ingress_wait_samples_++;
-        ingress_wait_max_cycles_ = std::max(ingress_wait_max_cycles_, wait_cycles);
         const uint64_t service_floor = ingress_service_floor_cycles(item);
         const uint64_t queue_wait = wait_cycles > service_floor ? (wait_cycles - service_floor) : 0;
-        ingress_queue_wait_sum_cycles_ += queue_wait;
-        ingress_queue_wait_samples_++;
-        ingress_queue_wait_max_cycles_ = std::max(ingress_queue_wait_max_cycles_, queue_wait);
+        record_ingress_wait(cls, wait_cycles, queue_wait);
+        record_conditional_ingress_release(cls, saw_nonempty_queue, wait_cycles, queue_wait);
         push_ready(item);
     }
 }
 
 void FabricPort::drain_egress() {
+    uint64_t sent_pkts = 0;
+    uint64_t sent_bytes = 0;
     while (!egress_queue_.empty()) {
         EgressEntry entry = egress_queue_.front();
         csEvent* ev = entry.ev;
         if (!try_consume_credit(egress_credits_, credit_bytes(ev))) {
+            egress_blocked_cycles_++;
+            const auto occ_bytes = static_cast<uint64_t>(std::max<int64_t>(egress_queue_bytes_, 0));
+            egress_blocked_occ_sum_bytes_ += occ_bytes;
+            egress_blocked_occ_max_bytes_ = std::max(egress_blocked_occ_max_bytes_, occ_bytes);
+            egress_blocked_cycles_by_class_[traffic_class_index(classify_event(ev))]++;
             break;
         }
         uint64_t wait_cycles = 0;
@@ -773,10 +1071,30 @@ void FabricPort::drain_egress() {
         egress_wait_sum_cycles_ += wait_cycles;
         egress_wait_samples_++;
         egress_wait_max_cycles_ = std::max(egress_wait_max_cycles_, wait_cycles);
+        const auto cls = classify_event(ev);
+        const auto idx = traffic_class_index(cls);
+        egress_wait_sum_cycles_by_class_[idx] += wait_cycles;
+        egress_wait_samples_by_class_[idx]++;
+        egress_wait_max_cycles_by_class_[idx] = std::max(egress_wait_max_cycles_by_class_[idx], wait_cycles);
         link_->send(ev);
         record_tx(ev);
+        sent_pkts++;
+        sent_bytes += event_bytes(ev);
         egress_queue_.pop_front();
         egress_queue_bytes_ = std::max<int64_t>(egress_queue_bytes_ - static_cast<int64_t>(event_bytes(ev)), 0);
+        egress_queue_bytes_by_class_[idx] =
+            egress_queue_bytes_by_class_[idx] >= event_bytes(ev)
+                ? egress_queue_bytes_by_class_[idx] - event_bytes(ev)
+                : 0;
+    }
+    if (sent_pkts > 0) {
+        egress_send_nonempty_cycles_++;
+        egress_send_burst_sum_pkts_ += sent_pkts;
+        egress_send_burst_sum_bytes_ += sent_bytes;
+        egress_send_burst_sq_sum_pkts_ += static_cast<long double>(sent_pkts) * static_cast<long double>(sent_pkts);
+        egress_send_burst_sq_sum_bytes_ += static_cast<long double>(sent_bytes) * static_cast<long double>(sent_bytes);
+        egress_send_burst_max_pkts_ = std::max(egress_send_burst_max_pkts_, sent_pkts);
+        egress_send_burst_max_bytes_ = std::max(egress_send_burst_max_bytes_, sent_bytes);
     }
 }
 
@@ -913,6 +1231,59 @@ void FabricPort::record_ingress_arrival(uint64_t cycle, uint64_t bytes) {
     ingress_arrival_burst_bytes_cur_ += bytes;
     ingress_arrival_burst_max_pkts_ = std::max(ingress_arrival_burst_max_pkts_, ingress_arrival_burst_pkts_cur_);
     ingress_arrival_burst_max_bytes_ = std::max(ingress_arrival_burst_max_bytes_, ingress_arrival_burst_bytes_cur_);
+}
+
+void FabricPort::record_ingress_wait(TrafficClass cls, uint64_t wait_cycles, uint64_t queue_wait_cycles) {
+    ingress_wait_sum_cycles_ += wait_cycles;
+    ingress_wait_samples_++;
+    ingress_wait_max_cycles_ = std::max(ingress_wait_max_cycles_, wait_cycles);
+    ingress_queue_wait_sum_cycles_ += queue_wait_cycles;
+    ingress_queue_wait_samples_++;
+    ingress_queue_wait_max_cycles_ = std::max(ingress_queue_wait_max_cycles_, queue_wait_cycles);
+    const auto idx = traffic_class_index(cls);
+    ingress_wait_sum_cycles_by_class_[idx] += wait_cycles;
+    ingress_wait_samples_by_class_[idx]++;
+    ingress_wait_max_cycles_by_class_[idx] = std::max(ingress_wait_max_cycles_by_class_[idx], wait_cycles);
+    ingress_queue_wait_sum_cycles_by_class_[idx] += queue_wait_cycles;
+    ingress_queue_wait_samples_by_class_[idx]++;
+    ingress_queue_wait_max_cycles_by_class_[idx] =
+        std::max(ingress_queue_wait_max_cycles_by_class_[idx], queue_wait_cycles);
+}
+
+void FabricPort::record_conditional_ingress_arrival(TrafficClass cls,
+                                                    uint64_t bytes,
+                                                    uint64_t pre_enqueue_occ_bytes) {
+    const auto idx = traffic_class_index(cls);
+    if (pre_enqueue_occ_bytes > 0) {
+        ingress_arrival_nonempty_packets_by_class_[idx]++;
+        ingress_arrival_nonempty_bytes_by_class_[idx] += bytes;
+        ingress_nonempty_pre_occ_sum_bytes_by_class_[idx] += pre_enqueue_occ_bytes;
+        ingress_nonempty_pre_occ_max_bytes_by_class_[idx] =
+            std::max(ingress_nonempty_pre_occ_max_bytes_by_class_[idx], pre_enqueue_occ_bytes);
+    } else {
+        ingress_arrival_empty_packets_by_class_[idx]++;
+        ingress_arrival_empty_bytes_by_class_[idx] += bytes;
+    }
+}
+
+void FabricPort::record_conditional_ingress_release(TrafficClass cls,
+                                                    bool saw_nonempty_queue,
+                                                    uint64_t wait_cycles,
+                                                    uint64_t queue_wait_cycles) {
+    const auto idx = traffic_class_index(cls);
+    if (saw_nonempty_queue) {
+        ingress_release_after_nonempty_packets_by_class_[idx]++;
+        ingress_wait_after_nonempty_sum_cycles_by_class_[idx] += wait_cycles;
+        ingress_queue_wait_after_nonempty_sum_cycles_by_class_[idx] += queue_wait_cycles;
+        ingress_queue_wait_after_nonempty_max_cycles_by_class_[idx] =
+            std::max(ingress_queue_wait_after_nonempty_max_cycles_by_class_[idx], queue_wait_cycles);
+    } else {
+        ingress_release_after_empty_packets_by_class_[idx]++;
+        ingress_wait_after_empty_sum_cycles_by_class_[idx] += wait_cycles;
+        ingress_queue_wait_after_empty_sum_cycles_by_class_[idx] += queue_wait_cycles;
+        ingress_queue_wait_after_empty_max_cycles_by_class_[idx] =
+            std::max(ingress_queue_wait_after_empty_max_cycles_by_class_[idx], queue_wait_cycles);
+    }
 }
 
 void FabricPort::record_ingress_release(const std::vector<csEvent*>& ready) {

@@ -92,8 +92,27 @@ public:
     double ready_wait_avg_cycles() const;
     uint64_t ready_wait_max_cycles() const;
     uint64_t ready_retry_count() const;
+    double ingress_wait_avg_cycles(TrafficClass cls) const;
+    uint64_t ingress_wait_max_cycles(TrafficClass cls) const;
+    double ingress_queue_wait_avg_cycles(TrafficClass cls) const;
+    uint64_t ingress_queue_wait_max_cycles(TrafficClass cls) const;
     double egress_wait_avg_cycles() const;
     uint64_t egress_wait_max_cycles() const;
+    double egress_occ_avg_bytes() const;
+    double egress_occ_stddev_bytes() const;
+    uint64_t egress_occ_max_bytes() const;
+    double egress_occ_nonempty_frac() const;
+    uint64_t egress_blocked_cycles() const;
+    double egress_blocked_nonempty_frac() const;
+    double egress_blocked_avg_occ_bytes() const;
+    uint64_t egress_blocked_max_occ_bytes() const;
+    uint64_t egress_send_burst_max_pkts() const;
+    uint64_t egress_send_burst_max_bytes() const;
+    double egress_send_burst_avg_pkts() const;
+    double egress_send_burst_avg_bytes() const;
+    double egress_send_burst_stddev_pkts() const;
+    double egress_send_burst_stddev_bytes() const;
+    double egress_send_nonempty_frac() const;
     uint64_t ingress_arrival_burst_max_pkts() const;
     uint64_t ingress_arrival_burst_max_bytes() const;
     double ingress_arrival_burst_avg_pkts() const;
@@ -136,6 +155,24 @@ public:
     uint64_t rx_bytes(TrafficClass cls) const;
     uint64_t tx_packets(TrafficClass cls) const;
     uint64_t rx_packets(TrafficClass cls) const;
+    double egress_wait_avg_cycles(TrafficClass cls) const;
+    uint64_t egress_wait_max_cycles(TrafficClass cls) const;
+    double egress_occ_avg_bytes(TrafficClass cls) const;
+    uint64_t egress_occ_max_bytes(TrafficClass cls) const;
+    uint64_t egress_blocked_cycles(TrafficClass cls) const;
+    uint64_t ingress_arrival_empty_packets(TrafficClass cls) const;
+    uint64_t ingress_arrival_nonempty_packets(TrafficClass cls) const;
+    double ingress_arrival_nonempty_packet_frac(TrafficClass cls) const;
+    double ingress_nonempty_arrival_pre_occ_avg_bytes(TrafficClass cls) const;
+    uint64_t ingress_nonempty_arrival_pre_occ_max_bytes(TrafficClass cls) const;
+    uint64_t ingress_release_after_empty_arrival_packets(TrafficClass cls) const;
+    uint64_t ingress_release_after_nonempty_arrival_packets(TrafficClass cls) const;
+    double ingress_wait_after_empty_arrival_avg_cycles(TrafficClass cls) const;
+    double ingress_wait_after_nonempty_arrival_avg_cycles(TrafficClass cls) const;
+    double ingress_queue_wait_after_empty_arrival_avg_cycles(TrafficClass cls) const;
+    double ingress_queue_wait_after_nonempty_arrival_avg_cycles(TrafficClass cls) const;
+    uint64_t ingress_queue_wait_after_empty_arrival_max_cycles(TrafficClass cls) const;
+    uint64_t ingress_queue_wait_after_nonempty_arrival_max_cycles(TrafficClass cls) const;
 
 private:
     bool can_receive(uint64_t cycle);
@@ -150,6 +187,15 @@ private:
     void record_tx(const csEvent* item);
     void record_ingress_arrival(uint64_t cycle, uint64_t bytes);
     void record_ingress_release(const std::vector<csEvent*>& ready);
+    void record_ingress_wait(TrafficClass cls, uint64_t wait_cycles, uint64_t queue_wait_cycles);
+    void record_conditional_ingress_arrival(TrafficClass cls, uint64_t bytes, uint64_t pre_enqueue_occ_bytes);
+    void record_conditional_ingress_release(TrafficClass cls,
+                                            bool saw_nonempty_queue,
+                                            uint64_t wait_cycles,
+                                            uint64_t queue_wait_cycles);
+    static constexpr std::size_t traffic_class_index(TrafficClass cls) {
+        return static_cast<std::size_t>(cls);
+    }
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
@@ -164,9 +210,15 @@ private:
         csEvent* ev = nullptr;
         uint64_t enqueue_cycle = 0;
     };
+    struct IngressArrivalMeta {
+        uint64_t enqueue_cycle = 0;
+        uint64_t pre_enqueue_occ_bytes = 0;
+        TrafficClass cls = TrafficClass::OtherReq;
+        bool saw_nonempty_queue = false;
+    };
     std::deque<EgressEntry> egress_queue_;
     std::deque<csEvent*> ready_;
-    std::unordered_map<csEvent*, uint64_t> ingress_enqueue_cycle_;
+    std::unordered_map<csEvent*, IngressArrivalMeta> ingress_enqueue_cycle_;
     std::unordered_map<csEvent*, uint64_t> ready_enqueue_cycle_;
     uint64_t last_tick_cycle_ = std::numeric_limits<uint64_t>::max();
     uint64_t last_deliver_cycle_ = std::numeric_limits<uint64_t>::max();
@@ -186,6 +238,20 @@ private:
     uint64_t egress_wait_sum_cycles_ = 0;
     uint64_t egress_wait_samples_ = 0;
     uint64_t egress_wait_max_cycles_ = 0;
+    uint64_t egress_occ_sum_bytes_ = 0;
+    long double egress_occ_sq_sum_bytes_ = 0.0L;
+    uint64_t egress_occ_nonempty_cycles_ = 0;
+    uint64_t egress_occ_max_bytes_ = 0;
+    uint64_t egress_blocked_cycles_ = 0;
+    uint64_t egress_blocked_occ_sum_bytes_ = 0;
+    uint64_t egress_blocked_occ_max_bytes_ = 0;
+    uint64_t egress_send_burst_max_pkts_ = 0;
+    uint64_t egress_send_burst_max_bytes_ = 0;
+    uint64_t egress_send_nonempty_cycles_ = 0;
+    uint64_t egress_send_burst_sum_pkts_ = 0;
+    uint64_t egress_send_burst_sum_bytes_ = 0;
+    long double egress_send_burst_sq_sum_pkts_ = 0.0L;
+    long double egress_send_burst_sq_sum_bytes_ = 0.0L;
     uint64_t ingress_arrival_burst_cycle_ = std::numeric_limits<uint64_t>::max();
     uint64_t ingress_arrival_burst_pkts_cur_ = 0;
     uint64_t ingress_arrival_burst_bytes_cur_ = 0;
@@ -247,6 +313,33 @@ private:
     std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> rx_bytes_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> tx_packets_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> rx_packets_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_arrival_empty_packets_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_arrival_nonempty_packets_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_arrival_empty_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_arrival_nonempty_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_nonempty_pre_occ_sum_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_nonempty_pre_occ_max_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_release_after_empty_packets_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_release_after_nonempty_packets_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_wait_after_empty_sum_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_wait_after_nonempty_sum_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_after_empty_sum_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_after_nonempty_sum_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_after_empty_max_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_after_nonempty_max_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_wait_sum_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_wait_samples_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_wait_max_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_sum_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_samples_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_max_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_wait_sum_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_wait_samples_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_wait_max_cycles_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_queue_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_occ_sum_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_occ_max_bytes_by_class_{};
+    std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_blocked_cycles_by_class_{};
 
     bool egress_queue_full(uint64_t bytes) const;
 };

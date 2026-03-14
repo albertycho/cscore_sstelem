@@ -35,6 +35,26 @@ csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
     return out;
 }
 
+FabricPort::TrafficClass classify_fabric_event(const csEvent& ev) {
+    if (is_control_event(ev)) {
+        return FabricPort::TrafficClass::OtherReq;
+    }
+    if (ev.payload.size() > 10) {
+        const auto type = static_cast<access_type>(ev.payload[10]);
+        if (type == access_type::LOAD || type == access_type::RFO) {
+            return FabricPort::TrafficClass::DemandReq;
+        }
+        if (type == access_type::WRITE) {
+            return FabricPort::TrafficClass::WriteReq;
+        }
+        return FabricPort::TrafficClass::OtherReq;
+    }
+    if (ev.payload.size() > 8) {
+        return FabricPort::TrafficClass::Response;
+    }
+    return FabricPort::TrafficClass::OtherReq;
+}
+
 double parse_clock_ghz(std::string clock_str) {
     clock_str.erase(
         std::remove_if(clock_str.begin(), clock_str.end(), [](unsigned char c) { return std::isspace(c); }),
@@ -145,6 +165,13 @@ void Switch::setup() {
     route_blocked_replicated_write_ = 0;
     route_send_fail_to_node_ = 0;
     route_send_fail_to_pool_ = 0;
+    route_attempt_to_node_by_class_.fill(0);
+    route_attempt_to_pool_by_class_.fill(0);
+    route_blocked_to_node_by_class_.fill(0);
+    route_blocked_to_pool_by_class_.fill(0);
+    route_send_fail_to_node_by_class_.fill(0);
+    route_send_fail_to_pool_by_class_.fill(0);
+    route_replicated_clones_by_class_.fill(0);
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
@@ -206,17 +233,22 @@ bool Switch::try_route_event(csEvent* ev)
         return true;
     }
     const uint64_t dst = ev->payload[1];
+    const auto cls = classify_fabric_event(*ev);
+    const auto cls_idx = static_cast<std::size_t>(cls);
     if (dst < static_cast<uint64_t>(num_nodes_)) {
         const auto idx = static_cast<size_t>(dst);
         if (idx >= node_ports_.size()) {
             throw std::runtime_error("Switch: dst node id out of range for configured ports.");
         }
+        route_attempt_to_node_by_class_[cls_idx]++;
         if (!node_ports_[idx].port.can_send(ev)) {
             route_blocked_to_node_++;
+            route_blocked_to_node_by_class_[cls_idx]++;
             return false;
         }
         if (!node_ports_[idx].port.send(ev)) {
             route_send_fail_to_node_++;
+            route_send_fail_to_node_by_class_[cls_idx]++;
             delete ev;
         }
         return true;
@@ -231,6 +263,7 @@ bool Switch::try_route_event(csEvent* ev)
             for (const auto& pool : pool_ports_) {
                 if (!pool.port.can_send(ev)) {
                     route_blocked_replicated_write_++;
+                    route_blocked_to_pool_by_class_[cls_idx]++;
                     return false;
                 }
             }
@@ -238,8 +271,11 @@ bool Switch::try_route_event(csEvent* ev)
                 const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
                 auto* clone = clone_event_with_dst(*ev, pool_dst);
                 replicated_count_++;
+                route_attempt_to_pool_by_class_[cls_idx]++;
+                route_replicated_clones_by_class_[cls_idx]++;
                 if (!pool_ports_[static_cast<size_t>(p)].port.send(clone)) {
                     route_send_fail_to_pool_++;
+                    route_send_fail_to_pool_by_class_[cls_idx]++;
                     delete clone;
                 }
             }
@@ -249,15 +285,19 @@ bool Switch::try_route_event(csEvent* ev)
         std::size_t pick = pick_pool_index(true, ev);
         if (pick >= pool_ports_.size()) {
             route_blocked_to_pool_++;
+            route_blocked_to_pool_by_class_[cls_idx]++;
             return false;
         }
+        route_attempt_to_pool_by_class_[cls_idx]++;
         if (!pool_ports_[pick].port.can_send(ev)) {
             route_blocked_to_pool_++;
+            route_blocked_to_pool_by_class_[cls_idx]++;
             return false;
         }
         ev->payload[1] = pool_node_id_base_ + pick;
         if (!pool_ports_[pick].port.send(ev)) {
             route_send_fail_to_pool_++;
+            route_send_fail_to_pool_by_class_[cls_idx]++;
             delete ev;
         }
         return true;
@@ -330,6 +370,13 @@ void Switch::reset_stats_and_broadcast()
     route_blocked_replicated_write_ = 0;
     route_send_fail_to_node_ = 0;
     route_send_fail_to_pool_ = 0;
+    route_attempt_to_node_by_class_.fill(0);
+    route_attempt_to_pool_by_class_.fill(0);
+    route_blocked_to_node_by_class_.fill(0);
+    route_blocked_to_pool_by_class_.fill(0);
+    route_send_fail_to_node_by_class_.fill(0);
+    route_send_fail_to_pool_by_class_.fill(0);
+    route_replicated_clones_by_class_.fill(0);
     for (int p = 0; p < num_pools_; ++p) {
         const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
         auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
@@ -723,6 +770,12 @@ void Switch::finish()
     const double switch_to_host_gbps = switch_to_host_bpc * clock_ghz;
     const double host_link_total_gbps = host_link_total_bpc * clock_ghz;
     if (lightweight_output_) {
+        static constexpr std::array<std::pair<FabricPort::TrafficClass, const char*>, 4> kTrafficClasses{{
+            {FabricPort::TrafficClass::DemandReq, "demand_req"},
+            {FabricPort::TrafficClass::WriteReq, "write_req"},
+            {FabricPort::TrafficClass::Response, "response"},
+            {FabricPort::TrafficClass::OtherReq, "other_req"},
+        }};
         std::cout << "stat.switch.replicated_messages = " << replicated_count_ << '\n';
         std::cout << "stat.switch.util.node_ingress_avg = " << avg_util(node_ports_) << '\n';
         std::cout << "stat.switch.util.pool_ingress_avg = " << avg_util(pool_ports_) << '\n';
@@ -829,40 +882,55 @@ void Switch::finish()
         std::cout << "stat.switch.route.blocked_replicated_write = " << route_blocked_replicated_write_ << '\n';
         std::cout << "stat.switch.route.send_fail_to_node = " << route_send_fail_to_node_ << '\n';
         std::cout << "stat.switch.route.send_fail_to_pool = " << route_send_fail_to_pool_ << '\n';
-        std::cout << "stat.switch.fabric.node_rx_bytes.demand_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.node_rx_bytes.write_req = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.node_rx_bytes.response = " << sum_rx_bytes_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
-        std::cout << "stat.switch.fabric.node_tx_bytes.demand_req = " << sum_tx_bytes_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.node_tx_bytes.write_req = " << sum_tx_bytes_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.node_tx_bytes.response = " << sum_tx_bytes_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
-        std::cout << "stat.switch.fabric.pool_rx_bytes.demand_req = " << sum_rx_bytes_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_rx_bytes.write_req = " << sum_rx_bytes_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_rx_bytes.response = " << sum_rx_bytes_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
-        std::cout << "stat.switch.fabric.pool_tx_bytes.demand_req = " << sum_tx_bytes_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_tx_bytes.write_req = " << sum_tx_bytes_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_tx_bytes.response = " << sum_tx_bytes_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
-        std::cout << "stat.switch.fabric.node_rx_pkts.demand_req = " << sum_rx_pkts_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.node_rx_pkts.write_req = " << sum_rx_pkts_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.node_rx_pkts.response = " << sum_rx_pkts_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
-        std::cout << "stat.switch.fabric.node_tx_pkts.demand_req = " << sum_tx_pkts_class(node_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.node_tx_pkts.write_req = " << sum_tx_pkts_class(node_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.node_tx_pkts.response = " << sum_tx_pkts_class(node_ports_, FabricPort::TrafficClass::Response) << '\n';
-        std::cout << "stat.switch.fabric.pool_rx_pkts.demand_req = " << sum_rx_pkts_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_rx_pkts.write_req = " << sum_rx_pkts_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_rx_pkts.response = " << sum_rx_pkts_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
-        std::cout << "stat.switch.fabric.pool_tx_pkts.demand_req = " << sum_tx_pkts_class(pool_ports_, FabricPort::TrafficClass::DemandReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_tx_pkts.write_req = " << sum_tx_pkts_class(pool_ports_, FabricPort::TrafficClass::WriteReq) << '\n';
-        std::cout << "stat.switch.fabric.pool_tx_pkts.response = " << sum_tx_pkts_class(pool_ports_, FabricPort::TrafficClass::Response) << '\n';
+        for (const auto& [cls, cls_name] : kTrafficClasses) {
+            const auto idx = static_cast<std::size_t>(cls);
+            std::cout << "stat.switch.route.attempt_to_node." << cls_name << " = " << route_attempt_to_node_by_class_[idx] << '\n';
+            std::cout << "stat.switch.route.attempt_to_pool." << cls_name << " = " << route_attempt_to_pool_by_class_[idx] << '\n';
+            std::cout << "stat.switch.route.blocked_to_node." << cls_name << " = " << route_blocked_to_node_by_class_[idx] << '\n';
+            std::cout << "stat.switch.route.blocked_to_pool." << cls_name << " = " << route_blocked_to_pool_by_class_[idx] << '\n';
+            std::cout << "stat.switch.route.send_fail_to_node." << cls_name << " = " << route_send_fail_to_node_by_class_[idx] << '\n';
+            std::cout << "stat.switch.route.send_fail_to_pool." << cls_name << " = " << route_send_fail_to_pool_by_class_[idx] << '\n';
+            std::cout << "stat.switch.route.replicated_clones." << cls_name << " = " << route_replicated_clones_by_class_[idx] << '\n';
+            std::cout << "stat.switch.fabric.node_rx_bytes." << cls_name << " = " << sum_rx_bytes_class(node_ports_, cls) << '\n';
+            std::cout << "stat.switch.fabric.node_tx_bytes." << cls_name << " = " << sum_tx_bytes_class(node_ports_, cls) << '\n';
+            std::cout << "stat.switch.fabric.pool_rx_bytes." << cls_name << " = " << sum_rx_bytes_class(pool_ports_, cls) << '\n';
+            std::cout << "stat.switch.fabric.pool_tx_bytes." << cls_name << " = " << sum_tx_bytes_class(pool_ports_, cls) << '\n';
+            std::cout << "stat.switch.fabric.node_rx_pkts." << cls_name << " = " << sum_rx_pkts_class(node_ports_, cls) << '\n';
+            std::cout << "stat.switch.fabric.node_tx_pkts." << cls_name << " = " << sum_tx_pkts_class(node_ports_, cls) << '\n';
+            std::cout << "stat.switch.fabric.pool_rx_pkts." << cls_name << " = " << sum_rx_pkts_class(pool_ports_, cls) << '\n';
+            std::cout << "stat.switch.fabric.pool_tx_pkts." << cls_name << " = " << sum_tx_pkts_class(pool_ports_, cls) << '\n';
+        }
         std::cout << "stat.switch.bw.host_to_switch_gbps = " << host_to_switch_gbps << '\n';
         std::cout << "stat.switch.bw.switch_to_host_gbps = " << switch_to_host_gbps << '\n';
         std::cout << "stat.switch.bw.host_link_total_gbps = " << host_link_total_gbps << '\n';
         auto print_port_stats = [](const std::string& prefix, const FabricPort& port) {
+            static constexpr std::array<std::pair<FabricPort::TrafficClass, const char*>, 4> kPortClasses{{
+                {FabricPort::TrafficClass::DemandReq, "demand_req"},
+                {FabricPort::TrafficClass::WriteReq, "write_req"},
+                {FabricPort::TrafficClass::Response, "response"},
+                {FabricPort::TrafficClass::OtherReq, "other_req"},
+            }};
             std::cout << prefix << "ingress_wait_avg_cycles = " << port.ingress_wait_avg_cycles() << '\n';
             std::cout << prefix << "ingress_wait_max_cycles = " << port.ingress_wait_max_cycles() << '\n';
             std::cout << prefix << "egress_wait_avg_cycles = " << port.egress_wait_avg_cycles() << '\n';
             std::cout << prefix << "egress_wait_max_cycles = " << port.egress_wait_max_cycles() << '\n';
             std::cout << prefix << "ingress_queue_wait_avg_cycles = " << port.ingress_queue_wait_avg_cycles() << '\n';
             std::cout << prefix << "ingress_queue_wait_max_cycles = " << port.ingress_queue_wait_max_cycles() << '\n';
+            std::cout << prefix << "egress_occ_avg_bytes = " << port.egress_occ_avg_bytes() << '\n';
+            std::cout << prefix << "egress_occ_stddev_bytes = " << port.egress_occ_stddev_bytes() << '\n';
+            std::cout << prefix << "egress_occ_max_bytes = " << port.egress_occ_max_bytes() << '\n';
+            std::cout << prefix << "egress_occ_nonempty_frac = " << port.egress_occ_nonempty_frac() << '\n';
+            std::cout << prefix << "egress_blocked_cycles = " << port.egress_blocked_cycles() << '\n';
+            std::cout << prefix << "egress_blocked_nonempty_frac = " << port.egress_blocked_nonempty_frac() << '\n';
+            std::cout << prefix << "egress_blocked_avg_occ_bytes = " << port.egress_blocked_avg_occ_bytes() << '\n';
+            std::cout << prefix << "egress_blocked_max_occ_bytes = " << port.egress_blocked_max_occ_bytes() << '\n';
+            std::cout << prefix << "egress_send_burst_max_pkts = " << port.egress_send_burst_max_pkts() << '\n';
+            std::cout << prefix << "egress_send_burst_max_bytes = " << port.egress_send_burst_max_bytes() << '\n';
+            std::cout << prefix << "egress_send_burst_avg_pkts = " << port.egress_send_burst_avg_pkts() << '\n';
+            std::cout << prefix << "egress_send_burst_avg_bytes = " << port.egress_send_burst_avg_bytes() << '\n';
+            std::cout << prefix << "egress_send_burst_stddev_pkts = " << port.egress_send_burst_stddev_pkts() << '\n';
+            std::cout << prefix << "egress_send_burst_stddev_bytes = " << port.egress_send_burst_stddev_bytes() << '\n';
+            std::cout << prefix << "egress_send_nonempty_frac = " << port.egress_send_nonempty_frac() << '\n';
             std::cout << prefix << "ingress_arrival_burst_avg_bytes = " << port.ingress_arrival_burst_avg_bytes() << '\n';
             std::cout << prefix << "ingress_arrival_nonempty_frac = " << port.ingress_arrival_nonempty_frac() << '\n';
             std::cout << prefix << "ingress_arrival_run_max_cycles = " << port.ingress_arrival_run_max_cycles() << '\n';
@@ -883,12 +951,34 @@ void Switch::finish()
             std::cout << prefix << "ingress_occ_run_avg_cycles = " << port.ingress_occ_run_avg_cycles() << '\n';
             std::cout << prefix << "ingress_occ_gap_max_cycles = " << port.ingress_occ_gap_max_cycles() << '\n';
             std::cout << prefix << "ingress_occ_gap_avg_cycles = " << port.ingress_occ_gap_avg_cycles() << '\n';
-            std::cout << prefix << "rx_bytes.demand_req = " << port.rx_bytes(FabricPort::TrafficClass::DemandReq) << '\n';
-            std::cout << prefix << "rx_bytes.write_req = " << port.rx_bytes(FabricPort::TrafficClass::WriteReq) << '\n';
-            std::cout << prefix << "rx_bytes.response = " << port.rx_bytes(FabricPort::TrafficClass::Response) << '\n';
-            std::cout << prefix << "tx_bytes.demand_req = " << port.tx_bytes(FabricPort::TrafficClass::DemandReq) << '\n';
-            std::cout << prefix << "tx_bytes.write_req = " << port.tx_bytes(FabricPort::TrafficClass::WriteReq) << '\n';
-            std::cout << prefix << "tx_bytes.response = " << port.tx_bytes(FabricPort::TrafficClass::Response) << '\n';
+            for (const auto& [cls, cls_name] : kPortClasses) {
+                std::cout << prefix << "ingress_wait_avg_cycles." << cls_name << " = " << port.ingress_wait_avg_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_wait_max_cycles." << cls_name << " = " << port.ingress_wait_max_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_queue_wait_avg_cycles." << cls_name << " = " << port.ingress_queue_wait_avg_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_queue_wait_max_cycles." << cls_name << " = " << port.ingress_queue_wait_max_cycles(cls) << '\n';
+                std::cout << prefix << "egress_wait_avg_cycles." << cls_name << " = " << port.egress_wait_avg_cycles(cls) << '\n';
+                std::cout << prefix << "egress_wait_max_cycles." << cls_name << " = " << port.egress_wait_max_cycles(cls) << '\n';
+                std::cout << prefix << "egress_occ_avg_bytes." << cls_name << " = " << port.egress_occ_avg_bytes(cls) << '\n';
+                std::cout << prefix << "egress_occ_max_bytes." << cls_name << " = " << port.egress_occ_max_bytes(cls) << '\n';
+                std::cout << prefix << "egress_blocked_cycles." << cls_name << " = " << port.egress_blocked_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_arrival_empty_packets." << cls_name << " = " << port.ingress_arrival_empty_packets(cls) << '\n';
+                std::cout << prefix << "ingress_arrival_nonempty_packets." << cls_name << " = " << port.ingress_arrival_nonempty_packets(cls) << '\n';
+                std::cout << prefix << "ingress_arrival_nonempty_packet_frac." << cls_name << " = " << port.ingress_arrival_nonempty_packet_frac(cls) << '\n';
+                std::cout << prefix << "ingress_nonempty_arrival_pre_occ_avg_bytes." << cls_name << " = " << port.ingress_nonempty_arrival_pre_occ_avg_bytes(cls) << '\n';
+                std::cout << prefix << "ingress_nonempty_arrival_pre_occ_max_bytes." << cls_name << " = " << port.ingress_nonempty_arrival_pre_occ_max_bytes(cls) << '\n';
+                std::cout << prefix << "ingress_release_after_empty_arrival_packets." << cls_name << " = " << port.ingress_release_after_empty_arrival_packets(cls) << '\n';
+                std::cout << prefix << "ingress_release_after_nonempty_arrival_packets." << cls_name << " = " << port.ingress_release_after_nonempty_arrival_packets(cls) << '\n';
+                std::cout << prefix << "ingress_wait_after_empty_arrival_avg_cycles." << cls_name << " = " << port.ingress_wait_after_empty_arrival_avg_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_wait_after_nonempty_arrival_avg_cycles." << cls_name << " = " << port.ingress_wait_after_nonempty_arrival_avg_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_queue_wait_after_empty_arrival_avg_cycles." << cls_name << " = " << port.ingress_queue_wait_after_empty_arrival_avg_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_queue_wait_after_nonempty_arrival_avg_cycles." << cls_name << " = " << port.ingress_queue_wait_after_nonempty_arrival_avg_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_queue_wait_after_empty_arrival_max_cycles." << cls_name << " = " << port.ingress_queue_wait_after_empty_arrival_max_cycles(cls) << '\n';
+                std::cout << prefix << "ingress_queue_wait_after_nonempty_arrival_max_cycles." << cls_name << " = " << port.ingress_queue_wait_after_nonempty_arrival_max_cycles(cls) << '\n';
+                std::cout << prefix << "rx_bytes." << cls_name << " = " << port.rx_bytes(cls) << '\n';
+                std::cout << prefix << "tx_bytes." << cls_name << " = " << port.tx_bytes(cls) << '\n';
+                std::cout << prefix << "rx_pkts." << cls_name << " = " << port.rx_packets(cls) << '\n';
+                std::cout << prefix << "tx_pkts." << cls_name << " = " << port.tx_packets(cls) << '\n';
+            }
         };
         for (std::size_t i = 0; i < node_ports_.size(); ++i) {
             print_port_stats("stat.switch.port.node." + std::to_string(i) + ".", node_ports_[i].port);
