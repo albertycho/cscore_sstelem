@@ -52,6 +52,7 @@ public:
     using lat_bw_queue_type = lat_bw_queue<channel_type::request_type>;
     using latency_function_type = lat_bw_queue_type::latency_function_type;
     static constexpr std::size_t kDiagClassCount = 4;
+    static constexpr std::size_t kDiagBucketCount = 6;
 
     enum class RequestDiagClass : std::size_t {
         Load = 0,
@@ -73,6 +74,11 @@ public:
         std::array<uint64_t, kDiagClassCount> ahead_pkts_max{};
         std::array<uint64_t, kDiagClassCount> ahead_bytes_sum{};
         std::array<uint64_t, kDiagClassCount> ahead_bytes_max{};
+        std::array<uint64_t, kDiagBucketCount> queue_wait_bucket_counts{};
+        std::array<uint64_t, kDiagBucketCount> service_bucket_counts{};
+        std::array<uint64_t, kDiagBucketCount> total_bucket_counts{};
+        std::array<uint64_t, kDiagBucketCount> ahead_total_pkts_bucket_counts{};
+        std::array<uint64_t, kDiagBucketCount> ahead_total_bytes_bucket_counts{};
     };
 
     struct QueueDiagStats {
@@ -97,6 +103,18 @@ public:
         uint64_t complete_burst_max_pkts = 0;
         std::array<uint64_t, kDiagClassCount> complete_burst_sum_pkts_by_class{};
         std::array<uint64_t, kDiagClassCount> complete_burst_max_pkts_by_class{};
+        std::array<uint64_t, kDiagBucketCount> occ_bucket_counts{};
+        std::array<uint64_t, kDiagBucketCount> enqueue_burst_bucket_counts{};
+        std::array<uint64_t, kDiagBucketCount> complete_burst_bucket_counts{};
+        uint64_t episode_count = 0;
+        uint64_t episode_sum_cycles = 0;
+        uint64_t episode_max_cycles = 0;
+        uint64_t episode_sum_peak_occ_bytes = 0;
+        uint64_t episode_max_peak_occ_bytes = 0;
+        uint64_t episode_sum_enqueue_pkts = 0;
+        uint64_t episode_max_enqueue_pkts = 0;
+        uint64_t episode_sum_complete_pkts = 0;
+        uint64_t episode_max_complete_pkts = 0;
     };
 
     MY_MEMORY_CONTROLLER();
@@ -117,6 +135,12 @@ public:
         return request_diag_stats_[static_cast<std::size_t>(cls)];
     }
     static const char* request_diag_class_name(RequestDiagClass cls);
+    static std::size_t cycle_bucket_index(uint64_t cycles);
+    static std::size_t byte_bucket_index(uint64_t bytes);
+    static std::size_t count_bucket_index(uint64_t count);
+    static const char* cycle_bucket_name(std::size_t idx);
+    static const char* byte_bucket_name(std::size_t idx);
+    static const char* count_bucket_name(std::size_t idx);
 
 private:
     struct RequestDiagState {
@@ -141,6 +165,11 @@ private:
     std::unordered_map<uint64_t, RequestDiagState> request_diag_state_;
     std::array<RequestDiagStats, kDiagClassCount> request_diag_stats_{};
     QueueDiagStats queue_diag_stats_{};
+    bool queue_episode_active_ = false;
+    uint64_t queue_episode_cycles_ = 0;
+    uint64_t queue_episode_peak_occ_bytes_ = 0;
+    uint64_t queue_episode_enqueue_pkts_ = 0;
+    uint64_t queue_episode_complete_pkts_ = 0;
     //champsim::data::bytes channel_width;
     champsim::data::bytes size_ = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES};
 
@@ -167,6 +196,11 @@ public:
         request_diag_state_.clear();
         request_diag_stats_.fill(RequestDiagStats{});
         queue_diag_stats_ = QueueDiagStats{};
+        queue_episode_active_ = false;
+        queue_episode_cycles_ = 0;
+        queue_episode_peak_occ_bytes_ = 0;
+        queue_episode_enqueue_pkts_ = 0;
+        queue_episode_complete_pkts_ = 0;
     }
 
 };

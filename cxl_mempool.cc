@@ -223,6 +223,7 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
         }
     }
     const uint64_t returned_before = static_cast<uint64_t>(mem_channel_.returned.size());
+    const uint64_t pending_before_send = static_cast<uint64_t>(pending_.size());
     returned_occ_stats_.samples++;
     returned_occ_stats_.sum += returned_before;
     returned_occ_stats_.sq_sum += static_cast<long double>(returned_before) * static_cast<long double>(returned_before);
@@ -234,9 +235,9 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
         returned_burst_stats_.max_pkts = std::max(returned_burst_stats_.max_pkts, returned_before);
     }
     pending_occ_stats_.samples++;
-    pending_occ_stats_.sum += static_cast<uint64_t>(pending_.size());
-    pending_occ_stats_.sq_sum += static_cast<long double>(pending_.size()) * static_cast<long double>(pending_.size());
-    pending_occ_stats_.max = std::max<uint64_t>(pending_occ_stats_.max, pending_.size());
+    pending_occ_stats_.sum += pending_before_send;
+    pending_occ_stats_.sq_sum += static_cast<long double>(pending_before_send) * static_cast<long double>(pending_before_send);
+    pending_occ_stats_.max = std::max<uint64_t>(pending_occ_stats_.max, pending_before_send);
     uint64_t sent_this_cycle = 0;
     std::array<bool, MAX_CXL_PORTS> ready_src_seen{};
     std::array<bool, MAX_CXL_PORTS> sent_dst_seen{};
@@ -289,6 +290,86 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
         response_blocked_sum_pkts_ += static_cast<uint64_t>(mem_channel_.returned.size());
         response_blocked_max_pkts_ = std::max<uint64_t>(response_blocked_max_pkts_, mem_channel_.returned.size());
     }
+    if (pending_before_send > 0) {
+        if (!pending_episode_active_) {
+            pending_episode_state_ = PendingEpisodeState{};
+            pending_episode_active_ = true;
+        }
+        pending_episode_state_.cycles++;
+        pending_episode_state_.peak_occ = std::max(pending_episode_state_.peak_occ, pending_before_send);
+        pending_episode_state_.accepted += request_accepted_this_tick_;
+        pending_episode_state_.sent += sent_this_cycle;
+        pending_episode_state_.max_pending_distinct_src =
+            std::max(pending_episode_state_.max_pending_distinct_src, pending_distinct_src);
+        pending_episode_state_.max_ready_distinct_src =
+            std::max(pending_episode_state_.max_ready_distinct_src, ready_distinct_src);
+        pending_episode_state_.max_sent_distinct_dst =
+            std::max(pending_episode_state_.max_sent_distinct_dst, sent_distinct_dst);
+        if (pending_.empty()) {
+            pending_episode_stats_.count++;
+            pending_episode_stats_.sum_cycles += pending_episode_state_.cycles;
+            pending_episode_stats_.max_cycles =
+                std::max(pending_episode_stats_.max_cycles, pending_episode_state_.cycles);
+            pending_episode_stats_.sum_peak_occ += pending_episode_state_.peak_occ;
+            pending_episode_stats_.max_peak_occ =
+                std::max(pending_episode_stats_.max_peak_occ, pending_episode_state_.peak_occ);
+            pending_episode_stats_.sum_accepted += pending_episode_state_.accepted;
+            pending_episode_stats_.max_accepted =
+                std::max(pending_episode_stats_.max_accepted, pending_episode_state_.accepted);
+            pending_episode_stats_.sum_sent += pending_episode_state_.sent;
+            pending_episode_stats_.max_sent =
+                std::max(pending_episode_stats_.max_sent, pending_episode_state_.sent);
+            pending_episode_stats_.sum_pending_distinct_src += pending_episode_state_.max_pending_distinct_src;
+            pending_episode_stats_.max_pending_distinct_src =
+                std::max(pending_episode_stats_.max_pending_distinct_src,
+                         pending_episode_state_.max_pending_distinct_src);
+            pending_episode_stats_.sum_ready_distinct_src += pending_episode_state_.max_ready_distinct_src;
+            pending_episode_stats_.max_ready_distinct_src =
+                std::max(pending_episode_stats_.max_ready_distinct_src,
+                         pending_episode_state_.max_ready_distinct_src);
+            pending_episode_stats_.sum_sent_distinct_dst += pending_episode_state_.max_sent_distinct_dst;
+            pending_episode_stats_.max_sent_distinct_dst =
+                std::max(pending_episode_stats_.max_sent_distinct_dst,
+                         pending_episode_state_.max_sent_distinct_dst);
+            pending_episode_state_ = PendingEpisodeState{};
+            pending_episode_active_ = false;
+        }
+    }
+    if (returned_before > 0) {
+        if (!returned_episode_active_) {
+            returned_episode_state_ = ReturnedEpisodeState{};
+            returned_episode_active_ = true;
+        }
+        returned_episode_state_.cycles++;
+        returned_episode_state_.peak_occ = std::max(returned_episode_state_.peak_occ, returned_before);
+        returned_episode_state_.sent += sent_this_cycle;
+        returned_episode_state_.max_ready_distinct_src =
+            std::max(returned_episode_state_.max_ready_distinct_src, ready_distinct_now);
+        returned_episode_state_.max_sent_distinct_dst =
+            std::max(returned_episode_state_.max_sent_distinct_dst, sent_distinct_dst);
+        if (mem_channel_.returned.empty()) {
+            returned_episode_stats_.count++;
+            returned_episode_stats_.sum_cycles += returned_episode_state_.cycles;
+            returned_episode_stats_.max_cycles =
+                std::max(returned_episode_stats_.max_cycles, returned_episode_state_.cycles);
+            returned_episode_stats_.sum_peak_occ += returned_episode_state_.peak_occ;
+            returned_episode_stats_.max_peak_occ =
+                std::max(returned_episode_stats_.max_peak_occ, returned_episode_state_.peak_occ);
+            returned_episode_stats_.sum_sent += returned_episode_state_.sent;
+            returned_episode_stats_.max_sent =
+                std::max(returned_episode_stats_.max_sent, returned_episode_state_.sent);
+            returned_episode_stats_.sum_ready_distinct_src += returned_episode_state_.max_ready_distinct_src;
+            returned_episode_stats_.max_ready_distinct_src =
+                std::max(returned_episode_stats_.max_ready_distinct_src,
+                         returned_episode_state_.max_ready_distinct_src);
+            returned_episode_stats_.sum_sent_distinct_dst += returned_episode_state_.max_sent_distinct_dst;
+            returned_episode_stats_.max_sent_distinct_dst =
+                std::max(returned_episode_stats_.max_sent_distinct_dst,
+                         returned_episode_state_.max_sent_distinct_dst);
+            returned_episode_state_ = ReturnedEpisodeState{};
+            returned_episode_active_ = false;
+        }
+    }
     if (heartbeat_period_ > 0 && (tick_count_ % heartbeat_period_ == 0)) {
         const auto prefix = std::string("stat.pool.") + std::to_string(pool_node_id_) + ".heartbeat.";
         std::cout << prefix << "cycle = " << tick_count_ << '\n';
@@ -339,7 +420,17 @@ void CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
 
     if (request.src_node < MAX_CXL_PORTS) {
         const auto cls = diag_class_index(request.type);
-        source_diag_[static_cast<std::size_t>(request.src_node)].request_enqueued_by_class[cls]++;
+        auto& diag = source_diag_[static_cast<std::size_t>(request.src_node)];
+        diag.request_enqueued_by_class[cls]++;
+        if (diag.saw_request_enqueue_by_class[cls] && tick_count_ >= diag.last_request_enqueue_cycle_by_class[cls]) {
+            const uint64_t gap = tick_count_ - diag.last_request_enqueue_cycle_by_class[cls];
+            auto& gap_stats = diag.request_enqueue_gap_by_class[cls];
+            gap_stats.samples++;
+            gap_stats.sum_cycles += gap;
+            gap_stats.max_cycles = std::max(gap_stats.max_cycles, gap);
+        }
+        diag.saw_request_enqueue_by_class[cls] = true;
+        diag.last_request_enqueue_cycle_by_class[cls] = tick_count_;
     }
 
     auto& pool_queue = mem_channel_.PQ;
@@ -352,6 +443,8 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
     std::array<bool, MAX_CXL_PORTS> blocked_src_seen{};
     uint64_t accepted_distinct_src = 0;
     uint64_t blocked_distinct_src = 0;
+    uint64_t accepted_total = 0;
+    uint64_t blocked_total = 0;
     auto classify_req_diag_from_event = [](const csEvent* ev) {
         if (!ev || ev->payload.size() <= 10) {
             return static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Other);
@@ -371,6 +464,7 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
                 blocked_src_seen[src] = true;
                 source_diag_[static_cast<std::size_t>(src)].request_blocked_by_class[cls_idx]++;
             }
+            blocked_total++;
             return false;
         }
         sst_request req = convert_event_to_request(*ev);
@@ -382,6 +476,7 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
         }
         delete ev;
         enqueue_mem_request(req);
+        accepted_total++;
         return true;
     };
 
@@ -396,6 +491,8 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
     }
     record_distinct_count(request_accept_distinct_src_stats_, accepted_distinct_src);
     record_distinct_count(request_blocked_distinct_src_stats_, blocked_distinct_src);
+    request_accepted_this_tick_ = accepted_total;
+    request_blocked_this_tick_ = blocked_total;
 }
 
 CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
@@ -599,6 +696,14 @@ void CXLMemoryPool::reset_stats() {
     ready_distinct_src_stats_ = DistinctCountStats{};
     response_ready_distinct_src_stats_ = DistinctCountStats{};
     response_sent_distinct_dst_stats_ = DistinctCountStats{};
+    pending_episode_stats_ = PendingEpisodeStats{};
+    pending_episode_state_ = PendingEpisodeState{};
+    returned_episode_stats_ = ReturnedEpisodeStats{};
+    returned_episode_state_ = ReturnedEpisodeState{};
+    pending_episode_active_ = false;
+    returned_episode_active_ = false;
+    request_accepted_this_tick_ = 0;
+    request_blocked_this_tick_ = 0;
     for_each_port([](FabricPort& port) { port.reset_ingress_utilization(); });
 }
 
@@ -650,6 +755,16 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
                 ? (tick_count_ - pending.enqueue_cycle)
                 : 0;
             const auto cls = diag_class_index(pending.type);
+            if (diag.saw_response_ready_by_class[cls] &&
+                tick_count_ >= diag.last_response_ready_cycle_by_class[cls]) {
+                const uint64_t gap = tick_count_ - diag.last_response_ready_cycle_by_class[cls];
+                auto& gap_stats = diag.response_ready_gap_by_class[cls];
+                gap_stats.samples++;
+                gap_stats.sum_cycles += gap;
+                gap_stats.max_cycles = std::max(gap_stats.max_cycles, gap);
+            }
+            diag.saw_response_ready_by_class[cls] = true;
+            diag.last_response_ready_cycle_by_class[cls] = tick_count_;
             diag.mem_ready_sum_cycles_by_class[cls] += mem_ready_cycles;
             diag.mem_ready_samples_by_class[cls]++;
             diag.mem_ready_max_cycles_by_class[cls] =
@@ -720,6 +835,16 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
     if (route.src_node < MAX_CXL_PORTS) {
         auto& diag = source_diag_[static_cast<std::size_t>(route.src_node)];
         diag.response_sent_by_class[cls_idx]++;
+        if (diag.saw_response_sent_by_class[cls_idx] &&
+            tick_count_ >= diag.last_response_sent_cycle_by_class[cls_idx]) {
+            const uint64_t gap = tick_count_ - diag.last_response_sent_cycle_by_class[cls_idx];
+            auto& gap_stats = diag.response_sent_gap_by_class[cls_idx];
+            gap_stats.samples++;
+            gap_stats.sum_cycles += gap;
+            gap_stats.max_cycles = std::max(gap_stats.max_cycles, gap);
+        }
+        diag.saw_response_sent_by_class[cls_idx] = true;
+        diag.last_response_sent_cycle_by_class[cls_idx] = tick_count_;
         diag.response_wait_sum_cycles_by_class[cls_idx] += response_wait;
         diag.response_wait_samples_by_class[cls_idx]++;
         diag.response_wait_max_cycles_by_class[cls_idx] =
@@ -776,6 +901,23 @@ void CXLMemoryPool::finish() {
                 std::cout << prefix << "memq." << name << ".ahead_bytes_max." << kAheadNames[i] << " = "
                           << diag.ahead_bytes_max[i] << '\n';
             }
+            for (std::size_t i = 0; i < MY_MEMORY_CONTROLLER::kDiagBucketCount; ++i) {
+                std::cout << prefix << "memq." << name << ".queue_wait_bucket."
+                          << MY_MEMORY_CONTROLLER::cycle_bucket_name(i) << " = "
+                          << diag.queue_wait_bucket_counts[i] << '\n';
+                std::cout << prefix << "memq." << name << ".service_bucket."
+                          << MY_MEMORY_CONTROLLER::cycle_bucket_name(i) << " = "
+                          << diag.service_bucket_counts[i] << '\n';
+                std::cout << prefix << "memq." << name << ".total_bucket."
+                          << MY_MEMORY_CONTROLLER::cycle_bucket_name(i) << " = "
+                          << diag.total_bucket_counts[i] << '\n';
+                std::cout << prefix << "memq." << name << ".ahead_total_pkts_bucket."
+                          << MY_MEMORY_CONTROLLER::count_bucket_name(i) << " = "
+                          << diag.ahead_total_pkts_bucket_counts[i] << '\n';
+                std::cout << prefix << "memq." << name << ".ahead_total_bytes_bucket."
+                          << MY_MEMORY_CONTROLLER::byte_bucket_name(i) << " = "
+                          << diag.ahead_total_bytes_bucket_counts[i] << '\n';
+            }
         };
         print_diag("demand", demand_diag);
         static constexpr std::array<const char*, MY_MEMORY_CONTROLLER::kDiagClassCount> kDiagNames = {"load", "rfo", "write", "other"};
@@ -815,6 +957,49 @@ void CXLMemoryPool::finish() {
                                  queue_diag.complete_burst_nonempty_cycles)
                   << '\n';
         std::cout << prefix << "memq.complete_burst_max_pkts = " << queue_diag.complete_burst_max_pkts << '\n';
+        std::cout << prefix << "memq.queue_episode.count = " << queue_diag.episode_count << '\n';
+        std::cout << prefix << "memq.queue_episode.avg_cycles = "
+                  << (queue_diag.episode_count > 0
+                          ? static_cast<double>(queue_diag.episode_sum_cycles) /
+                                static_cast<double>(queue_diag.episode_count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "memq.queue_episode.max_cycles = " << queue_diag.episode_max_cycles << '\n';
+        std::cout << prefix << "memq.queue_episode.avg_peak_occ_bytes = "
+                  << (queue_diag.episode_count > 0
+                          ? static_cast<double>(queue_diag.episode_sum_peak_occ_bytes) /
+                                static_cast<double>(queue_diag.episode_count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "memq.queue_episode.max_peak_occ_bytes = "
+                  << queue_diag.episode_max_peak_occ_bytes << '\n';
+        std::cout << prefix << "memq.queue_episode.avg_enqueue_pkts = "
+                  << (queue_diag.episode_count > 0
+                          ? static_cast<double>(queue_diag.episode_sum_enqueue_pkts) /
+                                static_cast<double>(queue_diag.episode_count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "memq.queue_episode.max_enqueue_pkts = "
+                  << queue_diag.episode_max_enqueue_pkts << '\n';
+        std::cout << prefix << "memq.queue_episode.avg_complete_pkts = "
+                  << (queue_diag.episode_count > 0
+                          ? static_cast<double>(queue_diag.episode_sum_complete_pkts) /
+                                static_cast<double>(queue_diag.episode_count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "memq.queue_episode.max_complete_pkts = "
+                  << queue_diag.episode_max_complete_pkts << '\n';
+        for (std::size_t i = 0; i < MY_MEMORY_CONTROLLER::kDiagBucketCount; ++i) {
+            std::cout << prefix << "memq.queue_occ_bucket."
+                      << MY_MEMORY_CONTROLLER::byte_bucket_name(i) << " = "
+                      << queue_diag.occ_bucket_counts[i] << '\n';
+            std::cout << prefix << "memq.enqueue_burst_bucket."
+                      << MY_MEMORY_CONTROLLER::count_bucket_name(i) << " = "
+                      << queue_diag.enqueue_burst_bucket_counts[i] << '\n';
+            std::cout << prefix << "memq.complete_burst_bucket."
+                      << MY_MEMORY_CONTROLLER::count_bucket_name(i) << " = "
+                      << queue_diag.complete_burst_bucket_counts[i] << '\n';
+        }
         for (std::size_t i = 0; i < kDiagNames.size(); ++i) {
             std::cout << prefix << "memq.queue_occ_avg_bytes." << kDiagNames[i] << " = "
                       << (queue_diag.occ_samples > 0
@@ -937,6 +1122,97 @@ void CXLMemoryPool::finish() {
         print_distinct("pending.ready_src", ready_distinct_src_stats_);
         print_distinct("response.ready_src", response_ready_distinct_src_stats_);
         print_distinct("response.sent_dst", response_sent_distinct_dst_stats_);
+        std::cout << prefix << "pending_episode.count = " << pending_episode_stats_.count << '\n';
+        std::cout << prefix << "pending_episode.avg_cycles = "
+                  << (pending_episode_stats_.count > 0
+                          ? static_cast<double>(pending_episode_stats_.sum_cycles) /
+                                static_cast<double>(pending_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "pending_episode.max_cycles = " << pending_episode_stats_.max_cycles << '\n';
+        std::cout << prefix << "pending_episode.avg_peak_occ = "
+                  << (pending_episode_stats_.count > 0
+                          ? static_cast<double>(pending_episode_stats_.sum_peak_occ) /
+                                static_cast<double>(pending_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "pending_episode.max_peak_occ = " << pending_episode_stats_.max_peak_occ << '\n';
+        std::cout << prefix << "pending_episode.avg_accepted = "
+                  << (pending_episode_stats_.count > 0
+                          ? static_cast<double>(pending_episode_stats_.sum_accepted) /
+                                static_cast<double>(pending_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "pending_episode.max_accepted = " << pending_episode_stats_.max_accepted << '\n';
+        std::cout << prefix << "pending_episode.avg_sent = "
+                  << (pending_episode_stats_.count > 0
+                          ? static_cast<double>(pending_episode_stats_.sum_sent) /
+                                static_cast<double>(pending_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "pending_episode.max_sent = " << pending_episode_stats_.max_sent << '\n';
+        std::cout << prefix << "pending_episode.avg_pending_distinct_src = "
+                  << (pending_episode_stats_.count > 0
+                          ? static_cast<double>(pending_episode_stats_.sum_pending_distinct_src) /
+                                static_cast<double>(pending_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "pending_episode.max_pending_distinct_src = "
+                  << pending_episode_stats_.max_pending_distinct_src << '\n';
+        std::cout << prefix << "pending_episode.avg_ready_distinct_src = "
+                  << (pending_episode_stats_.count > 0
+                          ? static_cast<double>(pending_episode_stats_.sum_ready_distinct_src) /
+                                static_cast<double>(pending_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "pending_episode.max_ready_distinct_src = "
+                  << pending_episode_stats_.max_ready_distinct_src << '\n';
+        std::cout << prefix << "pending_episode.avg_sent_distinct_dst = "
+                  << (pending_episode_stats_.count > 0
+                          ? static_cast<double>(pending_episode_stats_.sum_sent_distinct_dst) /
+                                static_cast<double>(pending_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "pending_episode.max_sent_distinct_dst = "
+                  << pending_episode_stats_.max_sent_distinct_dst << '\n';
+        std::cout << prefix << "response.returned_episode.count = " << returned_episode_stats_.count << '\n';
+        std::cout << prefix << "response.returned_episode.avg_cycles = "
+                  << (returned_episode_stats_.count > 0
+                          ? static_cast<double>(returned_episode_stats_.sum_cycles) /
+                                static_cast<double>(returned_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "response.returned_episode.max_cycles = " << returned_episode_stats_.max_cycles << '\n';
+        std::cout << prefix << "response.returned_episode.avg_peak_occ = "
+                  << (returned_episode_stats_.count > 0
+                          ? static_cast<double>(returned_episode_stats_.sum_peak_occ) /
+                                static_cast<double>(returned_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "response.returned_episode.max_peak_occ = " << returned_episode_stats_.max_peak_occ << '\n';
+        std::cout << prefix << "response.returned_episode.avg_sent = "
+                  << (returned_episode_stats_.count > 0
+                          ? static_cast<double>(returned_episode_stats_.sum_sent) /
+                                static_cast<double>(returned_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "response.returned_episode.max_sent = " << returned_episode_stats_.max_sent << '\n';
+        std::cout << prefix << "response.returned_episode.avg_ready_distinct_src = "
+                  << (returned_episode_stats_.count > 0
+                          ? static_cast<double>(returned_episode_stats_.sum_ready_distinct_src) /
+                                static_cast<double>(returned_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "response.returned_episode.max_ready_distinct_src = "
+                  << returned_episode_stats_.max_ready_distinct_src << '\n';
+        std::cout << prefix << "response.returned_episode.avg_sent_distinct_dst = "
+                  << (returned_episode_stats_.count > 0
+                          ? static_cast<double>(returned_episode_stats_.sum_sent_distinct_dst) /
+                                static_cast<double>(returned_episode_stats_.count)
+                          : 0.0)
+                  << '\n';
+        std::cout << prefix << "response.returned_episode.max_sent_distinct_dst = "
+                  << returned_episode_stats_.max_sent_distinct_dst << '\n';
         static constexpr std::array<const char*, MY_MEMORY_CONTROLLER::kDiagClassCount> kNodeDiagNames = {"load", "rfo", "write", "other"};
         for (std::size_t src = 0; src < MAX_CXL_PORTS; ++src) {
             const auto& diag = source_diag_[src];
@@ -1003,6 +1279,30 @@ void CXLMemoryPool::finish() {
                                   : 0.0)
                           << '\n';
                 std::cout << node_prefix << "response_wait_max_cycles." << cls_name << " = " << diag.response_wait_max_cycles_by_class[cls] << '\n';
+                std::cout << node_prefix << "request_enqueue_gap_avg_cycles." << cls_name << " = "
+                          << (diag.request_enqueue_gap_by_class[cls].samples > 0
+                                  ? static_cast<double>(diag.request_enqueue_gap_by_class[cls].sum_cycles) /
+                                        static_cast<double>(diag.request_enqueue_gap_by_class[cls].samples)
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "request_enqueue_gap_max_cycles." << cls_name << " = "
+                          << diag.request_enqueue_gap_by_class[cls].max_cycles << '\n';
+                std::cout << node_prefix << "response_ready_gap_avg_cycles." << cls_name << " = "
+                          << (diag.response_ready_gap_by_class[cls].samples > 0
+                                  ? static_cast<double>(diag.response_ready_gap_by_class[cls].sum_cycles) /
+                                        static_cast<double>(diag.response_ready_gap_by_class[cls].samples)
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "response_ready_gap_max_cycles." << cls_name << " = "
+                          << diag.response_ready_gap_by_class[cls].max_cycles << '\n';
+                std::cout << node_prefix << "response_sent_gap_avg_cycles." << cls_name << " = "
+                          << (diag.response_sent_gap_by_class[cls].samples > 0
+                                  ? static_cast<double>(diag.response_sent_gap_by_class[cls].sum_cycles) /
+                                        static_cast<double>(diag.response_sent_gap_by_class[cls].samples)
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "response_sent_gap_max_cycles." << cls_name << " = "
+                          << diag.response_sent_gap_by_class[cls].max_cycles << '\n';
                 std::cout << node_prefix << "total_turnaround_avg_cycles." << cls_name << " = "
                           << (diag.total_turnaround_samples_by_class[cls] > 0
                                   ? static_cast<double>(diag.total_turnaround_sum_cycles_by_class[cls]) /

@@ -109,6 +109,7 @@ long MY_MEMORY_CONTROLLER::operate()
     queue_diag_stats_.occ_sum_bytes += occ_total_bytes;
     queue_diag_stats_.occ_sq_sum_bytes += static_cast<long double>(occ_total_bytes) * static_cast<long double>(occ_total_bytes);
     queue_diag_stats_.occ_max_bytes = std::max(queue_diag_stats_.occ_max_bytes, occ_total_bytes);
+    queue_diag_stats_.occ_bucket_counts[byte_bucket_index(occ_total_bytes)]++;
     if (occ_total_bytes > 0) {
         queue_diag_stats_.occ_nonempty_cycles++;
     }
@@ -127,6 +128,7 @@ long MY_MEMORY_CONTROLLER::operate()
             static_cast<long double>(enqueued_total) * static_cast<long double>(enqueued_total);
         queue_diag_stats_.enqueue_burst_max_pkts =
             std::max(queue_diag_stats_.enqueue_burst_max_pkts, enqueued_total);
+        queue_diag_stats_.enqueue_burst_bucket_counts[count_bucket_index(enqueued_total)]++;
         for (std::size_t cls = 0; cls < kDiagClassCount; ++cls) {
             queue_diag_stats_.enqueue_burst_sum_pkts_by_class[cls] += enqueued_by_class[cls];
             queue_diag_stats_.enqueue_burst_max_pkts_by_class[cls] =
@@ -140,11 +142,44 @@ long MY_MEMORY_CONTROLLER::operate()
             static_cast<long double>(completed_total) * static_cast<long double>(completed_total);
         queue_diag_stats_.complete_burst_max_pkts =
             std::max(queue_diag_stats_.complete_burst_max_pkts, completed_total);
+        queue_diag_stats_.complete_burst_bucket_counts[count_bucket_index(completed_total)]++;
         for (std::size_t cls = 0; cls < kDiagClassCount; ++cls) {
             queue_diag_stats_.complete_burst_sum_pkts_by_class[cls] += completed_by_class[cls];
             queue_diag_stats_.complete_burst_max_pkts_by_class[cls] =
                 std::max(queue_diag_stats_.complete_burst_max_pkts_by_class[cls], completed_by_class[cls]);
         }
+    }
+    if (occ_total_bytes > 0) {
+        if (!queue_episode_active_) {
+            queue_episode_active_ = true;
+            queue_episode_cycles_ = 0;
+            queue_episode_peak_occ_bytes_ = 0;
+            queue_episode_enqueue_pkts_ = 0;
+            queue_episode_complete_pkts_ = 0;
+        }
+        queue_episode_cycles_++;
+        queue_episode_peak_occ_bytes_ = std::max(queue_episode_peak_occ_bytes_, occ_total_bytes);
+        queue_episode_enqueue_pkts_ += enqueued_total;
+        queue_episode_complete_pkts_ += completed_total;
+    } else if (queue_episode_active_) {
+        queue_diag_stats_.episode_count++;
+        queue_diag_stats_.episode_sum_cycles += queue_episode_cycles_;
+        queue_diag_stats_.episode_max_cycles =
+            std::max(queue_diag_stats_.episode_max_cycles, queue_episode_cycles_);
+        queue_diag_stats_.episode_sum_peak_occ_bytes += queue_episode_peak_occ_bytes_;
+        queue_diag_stats_.episode_max_peak_occ_bytes =
+            std::max(queue_diag_stats_.episode_max_peak_occ_bytes, queue_episode_peak_occ_bytes_);
+        queue_diag_stats_.episode_sum_enqueue_pkts += queue_episode_enqueue_pkts_;
+        queue_diag_stats_.episode_max_enqueue_pkts =
+            std::max(queue_diag_stats_.episode_max_enqueue_pkts, queue_episode_enqueue_pkts_);
+        queue_diag_stats_.episode_sum_complete_pkts += queue_episode_complete_pkts_;
+        queue_diag_stats_.episode_max_complete_pkts =
+            std::max(queue_diag_stats_.episode_max_complete_pkts, queue_episode_complete_pkts_);
+        queue_episode_active_ = false;
+        queue_episode_cycles_ = 0;
+        queue_episode_peak_occ_bytes_ = 0;
+        queue_episode_enqueue_pkts_ = 0;
+        queue_episode_complete_pkts_ = 0;
     }
 
     return progress;
@@ -180,6 +215,13 @@ MY_MEMORY_CONTROLLER::RequestDiagStats MY_MEMORY_CONTROLLER::demand_diag_stats()
             out.ahead_bytes_sum[i] += in.ahead_bytes_sum[i];
             out.ahead_bytes_max[i] = std::max(out.ahead_bytes_max[i], in.ahead_bytes_max[i]);
         }
+        for (std::size_t i = 0; i < kDiagBucketCount; ++i) {
+            out.queue_wait_bucket_counts[i] += in.queue_wait_bucket_counts[i];
+            out.service_bucket_counts[i] += in.service_bucket_counts[i];
+            out.total_bucket_counts[i] += in.total_bucket_counts[i];
+            out.ahead_total_pkts_bucket_counts[i] += in.ahead_total_pkts_bucket_counts[i];
+            out.ahead_total_bytes_bucket_counts[i] += in.ahead_total_bytes_bucket_counts[i];
+        }
     };
     merge(request_diag_stats_[static_cast<std::size_t>(RequestDiagClass::Load)]);
     merge(request_diag_stats_[static_cast<std::size_t>(RequestDiagClass::Rfo)]);
@@ -199,6 +241,60 @@ const char* MY_MEMORY_CONTROLLER::request_diag_class_name(RequestDiagClass cls)
     default:
         return "other";
     }
+}
+
+std::size_t MY_MEMORY_CONTROLLER::cycle_bucket_index(uint64_t cycles)
+{
+    if (cycles == 0) return 0;
+    if (cycles <= 63) return 1;
+    if (cycles <= 255) return 2;
+    if (cycles <= 1023) return 3;
+    if (cycles <= 4095) return 4;
+    return 5;
+}
+
+std::size_t MY_MEMORY_CONTROLLER::byte_bucket_index(uint64_t bytes)
+{
+    if (bytes == 0) return 0;
+    if (bytes <= 64) return 1;
+    if (bytes <= 256) return 2;
+    if (bytes <= 1024) return 3;
+    if (bytes <= 4096) return 4;
+    return 5;
+}
+
+std::size_t MY_MEMORY_CONTROLLER::count_bucket_index(uint64_t count)
+{
+    if (count == 0) return 0;
+    if (count == 1) return 1;
+    if (count <= 2) return 2;
+    if (count <= 4) return 3;
+    if (count <= 8) return 4;
+    return 5;
+}
+
+const char* MY_MEMORY_CONTROLLER::cycle_bucket_name(std::size_t idx)
+{
+    static constexpr std::array<const char*, kDiagBucketCount> kNames{
+        "0", "1_63", "64_255", "256_1023", "1024_4095", "4096_plus"
+    };
+    return idx < kNames.size() ? kNames[idx] : "unknown";
+}
+
+const char* MY_MEMORY_CONTROLLER::byte_bucket_name(std::size_t idx)
+{
+    static constexpr std::array<const char*, kDiagBucketCount> kNames{
+        "0", "1_64", "65_256", "257_1024", "1025_4096", "4097_plus"
+    };
+    return idx < kNames.size() ? kNames[idx] : "unknown";
+}
+
+const char* MY_MEMORY_CONTROLLER::count_bucket_name(std::size_t idx)
+{
+    static constexpr std::array<const char*, kDiagBucketCount> kNames{
+        "0", "1", "2", "3_4", "5_8", "9_plus"
+    };
+    return idx < kNames.size() ? kNames[idx] : "unknown";
 }
 
 MY_MEMORY_CONTROLLER::RequestDiagClass
@@ -286,12 +382,21 @@ void MY_MEMORY_CONTROLLER::observe_completion(channel_type::request_type& req, i
     stats.service_max_cycles = std::max(stats.service_max_cycles, service_wait);
     stats.total_sum_cycles += total_wait;
     stats.total_max_cycles = std::max(stats.total_max_cycles, total_wait);
+    stats.queue_wait_bucket_counts[cycle_bucket_index(queue_wait)]++;
+    stats.service_bucket_counts[cycle_bucket_index(service_wait)]++;
+    stats.total_bucket_counts[cycle_bucket_index(total_wait)]++;
+    uint64_t ahead_total_pkts = 0;
+    uint64_t ahead_total_bytes = 0;
     for (std::size_t i = 0; i < kDiagClassCount; ++i) {
         stats.ahead_pkts_sum[i] += state.ahead_pkts[i];
         stats.ahead_pkts_max[i] = std::max(stats.ahead_pkts_max[i], state.ahead_pkts[i]);
         stats.ahead_bytes_sum[i] += state.ahead_bytes[i];
         stats.ahead_bytes_max[i] = std::max(stats.ahead_bytes_max[i], state.ahead_bytes[i]);
+        ahead_total_pkts += state.ahead_pkts[i];
+        ahead_total_bytes += state.ahead_bytes[i];
     }
+    stats.ahead_total_pkts_bucket_counts[count_bucket_index(ahead_total_pkts)]++;
+    stats.ahead_total_bytes_bucket_counts[byte_bucket_index(ahead_total_bytes)]++;
     request_diag_state_.erase(it);
 }
 // namespace champsim

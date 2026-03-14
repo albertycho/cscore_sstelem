@@ -11,6 +11,7 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <sst/core/link.h>
@@ -200,6 +201,7 @@ private:
                                             uint64_t src,
                                             uint64_t dst,
                                             bool saw_nonempty_queue,
+                                            uint64_t bytes,
                                             uint64_t wait_cycles,
                                             uint64_t queue_wait_cycles);
     static std::size_t byte_bucket_index(uint64_t bytes);
@@ -234,6 +236,49 @@ private:
     };
     struct PeerDiag {
         std::array<PeerClassDiag, static_cast<std::size_t>(TrafficClass::Count)> classes{};
+    };
+    struct EpisodeDiag {
+        uint64_t count = 0;
+        uint64_t sum_cycles = 0;
+        uint64_t max_cycles = 0;
+        uint64_t sum_peak_occ_bytes = 0;
+        uint64_t max_peak_occ_bytes = 0;
+        uint64_t sum_arrival_pkts = 0;
+        uint64_t max_arrival_pkts = 0;
+        uint64_t sum_arrival_bytes = 0;
+        uint64_t max_arrival_bytes = 0;
+        uint64_t sum_release_pkts = 0;
+        uint64_t max_release_pkts = 0;
+        uint64_t sum_release_bytes = 0;
+        uint64_t max_release_bytes = 0;
+        uint64_t sum_wait_cycles = 0;
+        uint64_t max_wait_cycles = 0;
+        uint64_t sum_queue_wait_cycles = 0;
+        uint64_t max_queue_wait_cycles = 0;
+        uint64_t sum_src_distinct = 0;
+        uint64_t max_src_distinct = 0;
+        uint64_t sum_dst_distinct = 0;
+        uint64_t max_dst_distinct = 0;
+        std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> sum_arrival_pkts_by_class{};
+        std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> max_arrival_pkts_by_class{};
+        std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> sum_release_pkts_by_class{};
+        std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> max_release_pkts_by_class{};
+    };
+    struct EpisodeState {
+        uint64_t cycles = 0;
+        uint64_t peak_occ_bytes = 0;
+        uint64_t arrival_pkts = 0;
+        uint64_t arrival_bytes = 0;
+        uint64_t release_pkts = 0;
+        uint64_t release_bytes = 0;
+        uint64_t total_wait_cycles = 0;
+        uint64_t max_wait_cycles = 0;
+        uint64_t total_queue_wait_cycles = 0;
+        uint64_t max_queue_wait_cycles = 0;
+        std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> arrival_pkts_by_class{};
+        std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> release_pkts_by_class{};
+        std::unordered_set<uint64_t> srcs{};
+        std::unordered_set<uint64_t> dsts{};
     };
 
     SST::Link* link_ = nullptr;
@@ -389,6 +434,9 @@ private:
     std::unordered_map<uint64_t, PeerDiag> rx_by_dst_peer_{};
     std::unordered_map<uint64_t, PeerDiag> tx_by_src_peer_{};
     std::unordered_map<uint64_t, PeerDiag> tx_by_dst_peer_{};
+    EpisodeDiag ingress_episode_diag_{};
+    EpisodeState ingress_episode_state_{};
+    bool ingress_episode_active_ = false;
 
     bool egress_queue_full(uint64_t bytes) const;
 };

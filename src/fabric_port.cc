@@ -307,6 +307,9 @@ void FabricPort::configure(SST::Link* link,
     egress_occ_sum_bytes_by_class_.fill(0);
     egress_occ_max_bytes_by_class_.fill(0);
     egress_blocked_cycles_by_class_.fill(0);
+    ingress_episode_diag_ = EpisodeDiag{};
+    ingress_episode_state_ = EpisodeState{};
+    ingress_episode_active_ = false;
 }
 
 bool FabricPort::send(csEvent* item) {
@@ -373,6 +376,57 @@ void FabricPort::tick(uint64_t cycle) {
             }
             ingress_occ_gap_cur_cycles_++;
             ingress_occ_gap_max_cycles_ = std::max(ingress_occ_gap_max_cycles_, ingress_occ_gap_cur_cycles_);
+        }
+        if (ingress_episode_active_) {
+            if (occ > 0) {
+                ingress_episode_state_.cycles++;
+                ingress_episode_state_.peak_occ_bytes =
+                    std::max(ingress_episode_state_.peak_occ_bytes, occ);
+            } else {
+                ingress_episode_diag_.count++;
+                ingress_episode_diag_.sum_cycles += ingress_episode_state_.cycles;
+                ingress_episode_diag_.max_cycles =
+                    std::max(ingress_episode_diag_.max_cycles, ingress_episode_state_.cycles);
+                ingress_episode_diag_.sum_peak_occ_bytes += ingress_episode_state_.peak_occ_bytes;
+                ingress_episode_diag_.max_peak_occ_bytes =
+                    std::max(ingress_episode_diag_.max_peak_occ_bytes, ingress_episode_state_.peak_occ_bytes);
+                ingress_episode_diag_.sum_arrival_pkts += ingress_episode_state_.arrival_pkts;
+                ingress_episode_diag_.max_arrival_pkts =
+                    std::max(ingress_episode_diag_.max_arrival_pkts, ingress_episode_state_.arrival_pkts);
+                ingress_episode_diag_.sum_arrival_bytes += ingress_episode_state_.arrival_bytes;
+                ingress_episode_diag_.max_arrival_bytes =
+                    std::max(ingress_episode_diag_.max_arrival_bytes, ingress_episode_state_.arrival_bytes);
+                ingress_episode_diag_.sum_release_pkts += ingress_episode_state_.release_pkts;
+                ingress_episode_diag_.max_release_pkts =
+                    std::max(ingress_episode_diag_.max_release_pkts, ingress_episode_state_.release_pkts);
+                ingress_episode_diag_.sum_release_bytes += ingress_episode_state_.release_bytes;
+                ingress_episode_diag_.max_release_bytes =
+                    std::max(ingress_episode_diag_.max_release_bytes, ingress_episode_state_.release_bytes);
+                ingress_episode_diag_.sum_wait_cycles += ingress_episode_state_.total_wait_cycles;
+                ingress_episode_diag_.max_wait_cycles =
+                    std::max(ingress_episode_diag_.max_wait_cycles, ingress_episode_state_.max_wait_cycles);
+                ingress_episode_diag_.sum_queue_wait_cycles += ingress_episode_state_.total_queue_wait_cycles;
+                ingress_episode_diag_.max_queue_wait_cycles =
+                    std::max(ingress_episode_diag_.max_queue_wait_cycles, ingress_episode_state_.max_queue_wait_cycles);
+                ingress_episode_diag_.sum_src_distinct += static_cast<uint64_t>(ingress_episode_state_.srcs.size());
+                ingress_episode_diag_.max_src_distinct =
+                    std::max<uint64_t>(ingress_episode_diag_.max_src_distinct, ingress_episode_state_.srcs.size());
+                ingress_episode_diag_.sum_dst_distinct += static_cast<uint64_t>(ingress_episode_state_.dsts.size());
+                ingress_episode_diag_.max_dst_distinct =
+                    std::max<uint64_t>(ingress_episode_diag_.max_dst_distinct, ingress_episode_state_.dsts.size());
+                for (std::size_t idx = 0; idx < static_cast<std::size_t>(TrafficClass::Count); ++idx) {
+                    ingress_episode_diag_.sum_arrival_pkts_by_class[idx] += ingress_episode_state_.arrival_pkts_by_class[idx];
+                    ingress_episode_diag_.max_arrival_pkts_by_class[idx] =
+                        std::max(ingress_episode_diag_.max_arrival_pkts_by_class[idx],
+                                 ingress_episode_state_.arrival_pkts_by_class[idx]);
+                    ingress_episode_diag_.sum_release_pkts_by_class[idx] += ingress_episode_state_.release_pkts_by_class[idx];
+                    ingress_episode_diag_.max_release_pkts_by_class[idx] =
+                        std::max(ingress_episode_diag_.max_release_pkts_by_class[idx],
+                                 ingress_episode_state_.release_pkts_by_class[idx]);
+                }
+                ingress_episode_state_ = EpisodeState{};
+                ingress_episode_active_ = false;
+            }
         }
         tick_samples_++;
         ready_occ_sum_ += static_cast<uint64_t>(ready_.size());
@@ -448,7 +502,7 @@ void FabricPort::handle_event(SST::Event* ev) {
     record_conditional_ingress_arrival(cls, bytes, pre_enqueue_occ_bytes, src, dst);
     if (!ingress_) {
         record_ingress_wait(cls, 0, 0);
-        record_conditional_ingress_release(cls, src, dst, pre_enqueue_occ_bytes > 0, 0, 0);
+        record_conditional_ingress_release(cls, src, dst, pre_enqueue_occ_bytes > 0, bytes, 0, 0);
         push_ready(cevent);
         return;
     }
@@ -1079,6 +1133,78 @@ void FabricPort::emit_deep_diagnostics(std::ostream& os, const std::string& pref
            << ready_occ_bucket_counts_[i] << '\n';
     }
 
+    os << prefix << "ingress_episode.count = " << ingress_episode_diag_.count << '\n';
+    os << prefix << "ingress_episode.avg_cycles = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_cycles) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_cycles = " << ingress_episode_diag_.max_cycles << '\n';
+    os << prefix << "ingress_episode.avg_peak_occ_bytes = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_peak_occ_bytes) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_peak_occ_bytes = " << ingress_episode_diag_.max_peak_occ_bytes << '\n';
+    os << prefix << "ingress_episode.avg_arrival_pkts = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_arrival_pkts) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_arrival_pkts = " << ingress_episode_diag_.max_arrival_pkts << '\n';
+    os << prefix << "ingress_episode.avg_arrival_bytes = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_arrival_bytes) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_arrival_bytes = " << ingress_episode_diag_.max_arrival_bytes << '\n';
+    os << prefix << "ingress_episode.avg_release_pkts = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_release_pkts) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_release_pkts = " << ingress_episode_diag_.max_release_pkts << '\n';
+    os << prefix << "ingress_episode.avg_release_bytes = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_release_bytes) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_release_bytes = " << ingress_episode_diag_.max_release_bytes << '\n';
+    os << prefix << "ingress_episode.avg_wait_cycles = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_wait_cycles) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_wait_cycles = " << ingress_episode_diag_.max_wait_cycles << '\n';
+    os << prefix << "ingress_episode.avg_queue_wait_cycles = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_queue_wait_cycles) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_queue_wait_cycles = " << ingress_episode_diag_.max_queue_wait_cycles << '\n';
+    os << prefix << "ingress_episode.avg_src_distinct = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_src_distinct) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_src_distinct = " << ingress_episode_diag_.max_src_distinct << '\n';
+    os << prefix << "ingress_episode.avg_dst_distinct = "
+       << (ingress_episode_diag_.count > 0
+               ? static_cast<double>(ingress_episode_diag_.sum_dst_distinct) /
+                     static_cast<double>(ingress_episode_diag_.count)
+               : 0.0)
+       << '\n';
+    os << prefix << "ingress_episode.max_dst_distinct = " << ingress_episode_diag_.max_dst_distinct << '\n';
+
     static constexpr std::array<std::pair<TrafficClass, const char*>, 4> kClasses{{
         {TrafficClass::DemandReq, "demand_req"},
         {TrafficClass::WriteReq, "write_req"},
@@ -1088,6 +1214,22 @@ void FabricPort::emit_deep_diagnostics(std::ostream& os, const std::string& pref
 
     for (const auto& [cls, cls_name] : kClasses) {
         const auto idx = traffic_class_index(cls);
+        os << prefix << "ingress_episode.avg_arrival_pkts." << cls_name << " = "
+           << (ingress_episode_diag_.count > 0
+                   ? static_cast<double>(ingress_episode_diag_.sum_arrival_pkts_by_class[idx]) /
+                         static_cast<double>(ingress_episode_diag_.count)
+                   : 0.0)
+           << '\n';
+        os << prefix << "ingress_episode.max_arrival_pkts." << cls_name << " = "
+           << ingress_episode_diag_.max_arrival_pkts_by_class[idx] << '\n';
+        os << prefix << "ingress_episode.avg_release_pkts." << cls_name << " = "
+           << (ingress_episode_diag_.count > 0
+                   ? static_cast<double>(ingress_episode_diag_.sum_release_pkts_by_class[idx]) /
+                         static_cast<double>(ingress_episode_diag_.count)
+                   : 0.0)
+           << '\n';
+        os << prefix << "ingress_episode.max_release_pkts." << cls_name << " = "
+           << ingress_episode_diag_.max_release_pkts_by_class[idx] << '\n';
         for (std::size_t b = 0; b < kDiagBucketCount; ++b) {
             os << prefix << "ingress_pre_occ_bucket." << cls_name << '.'
                << byte_bucket_name(b) << " = "
@@ -1205,7 +1347,7 @@ void FabricPort::tick_ingress() {
         const uint64_t service_floor = ingress_service_floor_cycles(item);
         const uint64_t queue_wait = wait_cycles > service_floor ? (wait_cycles - service_floor) : 0;
         record_ingress_wait(cls, wait_cycles, queue_wait);
-        record_conditional_ingress_release(cls, src, dst, saw_nonempty_queue, wait_cycles, queue_wait);
+        record_conditional_ingress_release(cls, src, dst, saw_nonempty_queue, event_bytes(item), wait_cycles, queue_wait);
         push_ready(item);
     }
 }
@@ -1429,6 +1571,17 @@ void FabricPort::record_conditional_ingress_arrival(TrafficClass cls,
                                                     uint64_t pre_enqueue_occ_bytes,
                                                     uint64_t src,
                                                     uint64_t dst) {
+    if (!ingress_episode_active_) {
+        ingress_episode_state_ = EpisodeState{};
+        ingress_episode_active_ = true;
+    }
+    ingress_episode_state_.arrival_pkts++;
+    ingress_episode_state_.arrival_bytes += bytes;
+    ingress_episode_state_.arrival_pkts_by_class[traffic_class_index(cls)]++;
+    ingress_episode_state_.srcs.insert(src);
+    ingress_episode_state_.dsts.insert(dst);
+    ingress_episode_state_.peak_occ_bytes =
+        std::max(ingress_episode_state_.peak_occ_bytes, pre_enqueue_occ_bytes + bytes);
     const auto idx = traffic_class_index(cls);
     ingress_pre_occ_bucket_counts_by_class_[idx][byte_bucket_index(pre_enqueue_occ_bytes)]++;
     auto& src_diag = rx_by_src_peer_[src].classes[idx];
@@ -1463,8 +1616,24 @@ void FabricPort::record_conditional_ingress_release(TrafficClass cls,
                                                     uint64_t src,
                                                     uint64_t dst,
                                                     bool saw_nonempty_queue,
+                                                    uint64_t bytes,
                                                     uint64_t wait_cycles,
                                                     uint64_t queue_wait_cycles) {
+    if (!ingress_episode_active_) {
+        ingress_episode_state_ = EpisodeState{};
+        ingress_episode_active_ = true;
+    }
+    ingress_episode_state_.release_pkts++;
+    ingress_episode_state_.release_bytes += bytes;
+    ingress_episode_state_.release_pkts_by_class[traffic_class_index(cls)]++;
+    ingress_episode_state_.srcs.insert(src);
+    ingress_episode_state_.dsts.insert(dst);
+    ingress_episode_state_.total_wait_cycles += wait_cycles;
+    ingress_episode_state_.max_wait_cycles =
+        std::max(ingress_episode_state_.max_wait_cycles, wait_cycles);
+    ingress_episode_state_.total_queue_wait_cycles += queue_wait_cycles;
+    ingress_episode_state_.max_queue_wait_cycles =
+        std::max(ingress_episode_state_.max_queue_wait_cycles, queue_wait_cycles);
     const auto idx = traffic_class_index(cls);
     ingress_queue_wait_bucket_counts_by_class_[idx][cycle_bucket_index(queue_wait_cycles)]++;
     auto update_peer = [&](PeerClassDiag& diag) {

@@ -94,6 +94,57 @@ private:
         long double sq_sum = 0.0L;
         uint64_t max = 0;
     };
+    struct GapStats {
+        uint64_t samples = 0;
+        uint64_t sum_cycles = 0;
+        uint64_t max_cycles = 0;
+    };
+    struct PendingEpisodeStats {
+        uint64_t count = 0;
+        uint64_t sum_cycles = 0;
+        uint64_t max_cycles = 0;
+        uint64_t sum_peak_occ = 0;
+        uint64_t max_peak_occ = 0;
+        uint64_t sum_accepted = 0;
+        uint64_t max_accepted = 0;
+        uint64_t sum_sent = 0;
+        uint64_t max_sent = 0;
+        uint64_t sum_pending_distinct_src = 0;
+        uint64_t max_pending_distinct_src = 0;
+        uint64_t sum_ready_distinct_src = 0;
+        uint64_t max_ready_distinct_src = 0;
+        uint64_t sum_sent_distinct_dst = 0;
+        uint64_t max_sent_distinct_dst = 0;
+    };
+    struct PendingEpisodeState {
+        uint64_t cycles = 0;
+        uint64_t peak_occ = 0;
+        uint64_t accepted = 0;
+        uint64_t sent = 0;
+        uint64_t max_pending_distinct_src = 0;
+        uint64_t max_ready_distinct_src = 0;
+        uint64_t max_sent_distinct_dst = 0;
+    };
+    struct ReturnedEpisodeStats {
+        uint64_t count = 0;
+        uint64_t sum_cycles = 0;
+        uint64_t max_cycles = 0;
+        uint64_t sum_peak_occ = 0;
+        uint64_t max_peak_occ = 0;
+        uint64_t sum_sent = 0;
+        uint64_t max_sent = 0;
+        uint64_t sum_ready_distinct_src = 0;
+        uint64_t max_ready_distinct_src = 0;
+        uint64_t sum_sent_distinct_dst = 0;
+        uint64_t max_sent_distinct_dst = 0;
+    };
+    struct ReturnedEpisodeState {
+        uint64_t cycles = 0;
+        uint64_t peak_occ = 0;
+        uint64_t sent = 0;
+        uint64_t max_ready_distinct_src = 0;
+        uint64_t max_sent_distinct_dst = 0;
+    };
 
     bool clock_tick(SST::Cycle_t current);
     void enqueue_mem_request(const sst_request& request);
@@ -199,6 +250,15 @@ private:
         std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> pending_occ_max_by_class{};
         std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> ready_occ_sum_by_class{};
         std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> ready_occ_max_by_class{};
+        std::array<GapStats, MY_MEMORY_CONTROLLER::kDiagClassCount> request_enqueue_gap_by_class{};
+        std::array<GapStats, MY_MEMORY_CONTROLLER::kDiagClassCount> response_ready_gap_by_class{};
+        std::array<GapStats, MY_MEMORY_CONTROLLER::kDiagClassCount> response_sent_gap_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> last_request_enqueue_cycle_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> last_response_ready_cycle_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> last_response_sent_cycle_by_class{};
+        std::array<bool, MY_MEMORY_CONTROLLER::kDiagClassCount> saw_request_enqueue_by_class{};
+        std::array<bool, MY_MEMORY_CONTROLLER::kDiagClassCount> saw_response_ready_by_class{};
+        std::array<bool, MY_MEMORY_CONTROLLER::kDiagClassCount> saw_response_sent_by_class{};
         uint64_t pending_occ_sum = 0;
         uint64_t pending_occ_max = 0;
         uint64_t ready_occ_sum = 0;
@@ -234,6 +294,14 @@ private:
     DistinctCountStats ready_distinct_src_stats_{};
     DistinctCountStats response_ready_distinct_src_stats_{};
     DistinctCountStats response_sent_distinct_dst_stats_{};
+    PendingEpisodeStats pending_episode_stats_{};
+    PendingEpisodeState pending_episode_state_{};
+    ReturnedEpisodeStats returned_episode_stats_{};
+    ReturnedEpisodeState returned_episode_state_{};
+    bool pending_episode_active_ = false;
+    bool returned_episode_active_ = false;
+    uint64_t request_accepted_this_tick_ = 0;
+    uint64_t request_blocked_this_tick_ = 0;
     uint64_t tick_count_ = 0;
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
