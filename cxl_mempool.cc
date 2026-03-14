@@ -451,7 +451,13 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
         }
         return diag_class_index(static_cast<access_type>(ev->payload[10]));
     };
-    auto handle_event = [this, &accepted_src_seen, &blocked_src_seen, &accepted_distinct_src, classify_req_diag_from_event](csEvent* ev) {
+    auto handle_event = [this,
+                         &accepted_src_seen,
+                         &blocked_src_seen,
+                         &accepted_distinct_src,
+                         &accepted_total,
+                         &blocked_total,
+                         classify_req_diag_from_event](csEvent* ev) {
         if (is_reset_event(*ev)) {
             reset_stats();
             delete ev;
