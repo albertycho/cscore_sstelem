@@ -68,6 +68,7 @@ private:
         uint32_t src_node = std::numeric_limits<uint32_t>::max();
         uint32_t dst_node = std::numeric_limits<uint32_t>::max();
         access_type type = access_type::LOAD;
+        uint64_t enqueue_cycle = 0;
         uint64_t response_ready_cycle = std::numeric_limits<uint64_t>::max();
     };
 
@@ -174,6 +175,41 @@ private:
 
     std::string clock_frequency_;
     static constexpr int MAX_CXL_PORTS = 64;
+    struct DistinctCountStats {
+        uint64_t nonempty_cycles = 0;
+        uint64_t sum = 0;
+        uint64_t max = 0;
+    };
+    struct SourceDiag {
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> request_enqueued_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> request_blocked_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> response_ready_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> response_sent_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> response_blocked_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> response_wait_sum_cycles_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> response_wait_samples_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> response_wait_max_cycles_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> total_turnaround_sum_cycles_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> total_turnaround_samples_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> total_turnaround_max_cycles_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> mem_ready_sum_cycles_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> mem_ready_samples_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> mem_ready_max_cycles_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> pending_occ_sum_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> pending_occ_max_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> ready_occ_sum_by_class{};
+        std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount> ready_occ_max_by_class{};
+        uint64_t pending_occ_sum = 0;
+        uint64_t pending_occ_max = 0;
+        uint64_t ready_occ_sum = 0;
+        uint64_t ready_occ_max = 0;
+        uint64_t pending_age_sum_cycles = 0;
+        uint64_t pending_age_samples = 0;
+        uint64_t pending_age_max_cycles = 0;
+        uint64_t ready_age_sum_cycles = 0;
+        uint64_t ready_age_samples = 0;
+        uint64_t ready_age_max_cycles = 0;
+    };
     FabricPort switch_port_;
     std::array<FabricPort, MAX_CXL_PORTS> core_ports_{};
     std::array<bool, MAX_CXL_PORTS> core_port_connected_{};
@@ -191,6 +227,13 @@ private:
     uint64_t response_blocked_max_pkts_ = 0;
     QueueOccStats returned_occ_stats_{};
     QueueOccStats pending_occ_stats_{};
+    std::array<SourceDiag, MAX_CXL_PORTS> source_diag_{};
+    DistinctCountStats request_accept_distinct_src_stats_{};
+    DistinctCountStats request_blocked_distinct_src_stats_{};
+    DistinctCountStats pending_distinct_src_stats_{};
+    DistinctCountStats ready_distinct_src_stats_{};
+    DistinctCountStats response_ready_distinct_src_stats_{};
+    DistinctCountStats response_sent_distinct_dst_stats_{};
     uint64_t tick_count_ = 0;
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;

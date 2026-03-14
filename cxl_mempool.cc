@@ -54,6 +54,29 @@ double safe_stddev(long double sq_sum, long double sum, uint64_t count) {
     const long double variance = std::max<long double>(sq_sum / static_cast<long double>(count) - mean * mean, 0.0L);
     return std::sqrt(static_cast<double>(variance));
 }
+
+template <typename T>
+void record_distinct_count(T& stats, uint64_t count) {
+    if (count == 0) {
+        return;
+    }
+    stats.nonempty_cycles++;
+    stats.sum += count;
+    stats.max = std::max(stats.max, count);
+}
+
+std::size_t diag_class_index(access_type type) {
+    switch (type) {
+    case access_type::LOAD:
+        return static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Load);
+    case access_type::RFO:
+        return static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Rfo);
+    case access_type::WRITE:
+        return static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Write);
+    default:
+        return static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Other);
+    }
+}
 } // namespace
 
 CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
@@ -144,6 +167,61 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
     ++tick_count_;
     poll_ports(tick_count_);
     mem_ctrl_.operate();
+    std::array<uint64_t, MAX_CXL_PORTS> pending_counts{};
+    std::array<uint64_t, MAX_CXL_PORTS> ready_counts{};
+    std::array<std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount>, MAX_CXL_PORTS> pending_counts_by_class{};
+    std::array<std::array<uint64_t, MY_MEMORY_CONTROLLER::kDiagClassCount>, MAX_CXL_PORTS> ready_counts_by_class{};
+    uint64_t pending_distinct_src = 0;
+    uint64_t ready_distinct_src = 0;
+    for (const auto& [tag, req] : pending_) {
+        if (req.src_node >= MAX_CXL_PORTS) {
+            continue;
+        }
+        const auto src = static_cast<std::size_t>(req.src_node);
+        const auto cls = diag_class_index(req.type);
+        if (pending_counts[src]++ == 0) {
+            pending_distinct_src++;
+        }
+        if (cls < MY_MEMORY_CONTROLLER::kDiagClassCount) {
+            pending_counts_by_class[src][cls]++;
+        }
+        auto& diag = source_diag_[src];
+        const uint64_t pending_age = tick_count_ >= req.enqueue_cycle ? (tick_count_ - req.enqueue_cycle) : 0;
+        diag.pending_age_sum_cycles += pending_age;
+        diag.pending_age_samples++;
+        diag.pending_age_max_cycles = std::max(diag.pending_age_max_cycles, pending_age);
+        if (req.response_ready_cycle != std::numeric_limits<uint64_t>::max()) {
+            if (ready_counts[src]++ == 0) {
+                ready_distinct_src++;
+            }
+            if (cls < MY_MEMORY_CONTROLLER::kDiagClassCount) {
+                ready_counts_by_class[src][cls]++;
+            }
+            const uint64_t ready_age = tick_count_ >= req.response_ready_cycle
+                ? (tick_count_ - req.response_ready_cycle)
+                : 0;
+            diag.ready_age_sum_cycles += ready_age;
+            diag.ready_age_samples++;
+            diag.ready_age_max_cycles = std::max(diag.ready_age_max_cycles, ready_age);
+        }
+    }
+    record_distinct_count(pending_distinct_src_stats_, pending_distinct_src);
+    record_distinct_count(ready_distinct_src_stats_, ready_distinct_src);
+    for (std::size_t src = 0; src < MAX_CXL_PORTS; ++src) {
+        auto& diag = source_diag_[src];
+        diag.pending_occ_sum += pending_counts[src];
+        diag.pending_occ_max = std::max(diag.pending_occ_max, pending_counts[src]);
+        diag.ready_occ_sum += ready_counts[src];
+        diag.ready_occ_max = std::max(diag.ready_occ_max, ready_counts[src]);
+        for (std::size_t cls = 0; cls < MY_MEMORY_CONTROLLER::kDiagClassCount; ++cls) {
+            diag.pending_occ_sum_by_class[cls] += pending_counts_by_class[src][cls];
+            diag.pending_occ_max_by_class[cls] =
+                std::max(diag.pending_occ_max_by_class[cls], pending_counts_by_class[src][cls]);
+            diag.ready_occ_sum_by_class[cls] += ready_counts_by_class[src][cls];
+            diag.ready_occ_max_by_class[cls] =
+                std::max(diag.ready_occ_max_by_class[cls], ready_counts_by_class[src][cls]);
+        }
+    }
     const uint64_t returned_before = static_cast<uint64_t>(mem_channel_.returned.size());
     returned_occ_stats_.samples++;
     returned_occ_stats_.sum += returned_before;
@@ -160,15 +238,46 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
     pending_occ_stats_.sq_sum += static_cast<long double>(pending_.size()) * static_cast<long double>(pending_.size());
     pending_occ_stats_.max = std::max<uint64_t>(pending_occ_stats_.max, pending_.size());
     uint64_t sent_this_cycle = 0;
+    std::array<bool, MAX_CXL_PORTS> ready_src_seen{};
+    std::array<bool, MAX_CXL_PORTS> sent_dst_seen{};
+    uint64_t ready_distinct_now = 0;
+    uint64_t sent_distinct_dst = 0;
+    for (const auto& response : mem_channel_.returned) {
+        if (response.instr_depend_on_me.empty()) {
+            continue;
+        }
+        const auto it = pending_.find(response.instr_depend_on_me.front());
+        if (it == pending_.end()) {
+            continue;
+        }
+        const auto src = it->second.src_node;
+        if (src < MAX_CXL_PORTS && !ready_src_seen[src]) {
+            ready_src_seen[src] = true;
+            ready_distinct_now++;
+        }
+    }
     while (!mem_channel_.returned.empty()) {
         const auto& response = mem_channel_.returned.front();
+        uint32_t response_dst = std::numeric_limits<uint32_t>::max();
+        if (!response.instr_depend_on_me.empty()) {
+            const auto it = pending_.find(response.instr_depend_on_me.front());
+            if (it != pending_.end()) {
+                response_dst = it->second.src_node;
+            }
+        }
         if (!try_send_response(response)) {
             break;
         }
         mem_channel_.returned.pop_front();
         ++total_completed_;
         ++sent_this_cycle;
+        if (response_dst < MAX_CXL_PORTS && !sent_dst_seen[response_dst]) {
+            sent_dst_seen[response_dst] = true;
+            sent_distinct_dst++;
+        }
     }
+    record_distinct_count(response_ready_distinct_src_stats_, ready_distinct_now);
+    record_distinct_count(response_sent_distinct_dst_stats_, sent_distinct_dst);
     if (sent_this_cycle > 0) {
         sent_burst_stats_.nonempty_cycles++;
         sent_burst_stats_.sum_pkts += sent_this_cycle;
@@ -223,8 +332,14 @@ void CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
             request.src_node,
             request.dst_node,
             request.type,
+            tick_count_,
             std::numeric_limits<uint64_t>::max()
         };
+    }
+
+    if (request.src_node < MAX_CXL_PORTS) {
+        const auto cls = diag_class_index(request.type);
+        source_diag_[static_cast<std::size_t>(request.src_node)].request_enqueued_by_class[cls]++;
     }
 
     auto& pool_queue = mem_channel_.PQ;
@@ -233,16 +348,38 @@ void CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
 }
 
 void CXLMemoryPool::poll_ports(uint64_t cycle) {
-    auto handle_event = [this](csEvent* ev) {
+    std::array<bool, MAX_CXL_PORTS> accepted_src_seen{};
+    std::array<bool, MAX_CXL_PORTS> blocked_src_seen{};
+    uint64_t accepted_distinct_src = 0;
+    uint64_t blocked_distinct_src = 0;
+    auto classify_req_diag_from_event = [](const csEvent* ev) {
+        if (!ev || ev->payload.size() <= 10) {
+            return static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Other);
+        }
+        return diag_class_index(static_cast<access_type>(ev->payload[10]));
+    };
+    auto handle_event = [this, &accepted_src_seen, &blocked_src_seen, &accepted_distinct_src, classify_req_diag_from_event](csEvent* ev) {
         if (is_reset_event(*ev)) {
             reset_stats();
             delete ev;
             return true;
         }
+        const auto cls_idx = classify_req_diag_from_event(ev);
+        const uint32_t src = (!ev->payload.empty()) ? static_cast<uint32_t>(ev->payload[0]) : std::numeric_limits<uint32_t>::max();
         if (mem_channel_.pq_occupancy() >= mem_channel_.pq_size()) {
+            if (src < MAX_CXL_PORTS) {
+                blocked_src_seen[src] = true;
+                source_diag_[static_cast<std::size_t>(src)].request_blocked_by_class[cls_idx]++;
+            }
             return false;
         }
         sst_request req = convert_event_to_request(*ev);
+        if (req.src_node < MAX_CXL_PORTS) {
+            if (!accepted_src_seen[req.src_node]) {
+                accepted_src_seen[req.src_node] = true;
+                accepted_distinct_src++;
+            }
+        }
         delete ev;
         enqueue_mem_request(req);
         return true;
@@ -252,6 +389,13 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
         port.tick(cycle);
         port.try_receive(cycle, handle_event);
     });
+    for (std::size_t src = 0; src < MAX_CXL_PORTS; ++src) {
+        if (blocked_src_seen[src]) {
+            blocked_distinct_src++;
+        }
+    }
+    record_distinct_count(request_accept_distinct_src_stats_, accepted_distinct_src);
+    record_distinct_count(request_blocked_distinct_src_stats_, blocked_distinct_src);
 }
 
 CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
@@ -448,6 +592,13 @@ void CXLMemoryPool::reset_stats() {
     response_blocked_max_pkts_ = 0;
     returned_occ_stats_ = QueueOccStats{};
     pending_occ_stats_ = QueueOccStats{};
+    source_diag_.fill(SourceDiag{});
+    request_accept_distinct_src_stats_ = DistinctCountStats{};
+    request_blocked_distinct_src_stats_ = DistinctCountStats{};
+    pending_distinct_src_stats_ = DistinctCountStats{};
+    ready_distinct_src_stats_ = DistinctCountStats{};
+    response_ready_distinct_src_stats_ = DistinctCountStats{};
+    response_sent_distinct_dst_stats_ = DistinctCountStats{};
     for_each_port([](FabricPort& port) { port.reset_ingress_utilization(); });
 }
 
@@ -492,6 +643,18 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
     auto& pending = pending_it->second;
     if (pending.response_ready_cycle == std::numeric_limits<uint64_t>::max()) {
         pending.response_ready_cycle = tick_count_;
+        if (pending.src_node < MAX_CXL_PORTS) {
+            auto& diag = source_diag_[static_cast<std::size_t>(pending.src_node)];
+            diag.response_ready_by_class[diag_class_index(pending.type)]++;
+            const uint64_t mem_ready_cycles = tick_count_ >= pending.enqueue_cycle
+                ? (tick_count_ - pending.enqueue_cycle)
+                : 0;
+            const auto cls = diag_class_index(pending.type);
+            diag.mem_ready_sum_cycles_by_class[cls] += mem_ready_cycles;
+            diag.mem_ready_samples_by_class[cls]++;
+            diag.mem_ready_max_cycles_by_class[cls] =
+                std::max(diag.mem_ready_max_cycles_by_class[cls], mem_ready_cycles);
+        }
     }
     const OutstandingRequest route = pending;
     std::size_t cls_idx = static_cast<std::size_t>(MY_MEMORY_CONTROLLER::RequestDiagClass::Other);
@@ -518,6 +681,9 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
     }
     if (!target_port->can_send(64)) {
         resp_stats.can_send_blocked++;
+        if (route.src_node < MAX_CXL_PORTS) {
+            source_diag_[static_cast<std::size_t>(route.src_node)].response_blocked_by_class[cls_idx]++;
+        }
         return false;
     }
 
@@ -536,6 +702,9 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
     auto* ev = convert_response_to_event(out);
     if (!target_port->send(ev)) {
         resp_stats.send_failed++;
+        if (route.src_node < MAX_CXL_PORTS) {
+            source_diag_[static_cast<std::size_t>(route.src_node)].response_blocked_by_class[cls_idx]++;
+        }
         delete ev;
         return false;
     }
@@ -543,9 +712,23 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& re
         (route.response_ready_cycle != std::numeric_limits<uint64_t>::max() && tick_count_ >= route.response_ready_cycle)
             ? (tick_count_ - route.response_ready_cycle)
             : 0;
+    const uint64_t total_turnaround =
+        tick_count_ >= route.enqueue_cycle ? (tick_count_ - route.enqueue_cycle) : 0;
     resp_stats.completed++;
     resp_stats.wait_sum_cycles += response_wait;
     resp_stats.wait_max_cycles = std::max(resp_stats.wait_max_cycles, response_wait);
+    if (route.src_node < MAX_CXL_PORTS) {
+        auto& diag = source_diag_[static_cast<std::size_t>(route.src_node)];
+        diag.response_sent_by_class[cls_idx]++;
+        diag.response_wait_sum_cycles_by_class[cls_idx] += response_wait;
+        diag.response_wait_samples_by_class[cls_idx]++;
+        diag.response_wait_max_cycles_by_class[cls_idx] =
+            std::max(diag.response_wait_max_cycles_by_class[cls_idx], response_wait);
+        diag.total_turnaround_sum_cycles_by_class[cls_idx] += total_turnaround;
+        diag.total_turnaround_samples_by_class[cls_idx]++;
+        diag.total_turnaround_max_cycles_by_class[cls_idx] =
+            std::max(diag.total_turnaround_max_cycles_by_class[cls_idx], total_turnaround);
+    }
     pending_.erase(pending_it);
     return true;
 }
@@ -735,6 +918,100 @@ void CXLMemoryPool::finish() {
         std::cout << prefix << "response.pending_occ_avg = " << pending_occ_avg << '\n';
         std::cout << prefix << "response.pending_occ_stddev = " << pending_occ_stddev << '\n';
         std::cout << prefix << "response.pending_occ_max = " << pending_occ_stats_.max << '\n';
+        auto print_distinct = [&](const std::string& name, const DistinctCountStats& stats) {
+            std::cout << prefix << name << ".distinct_avg = "
+                      << (stats.nonempty_cycles > 0
+                              ? static_cast<double>(stats.sum) / static_cast<double>(stats.nonempty_cycles)
+                              : 0.0)
+                      << '\n';
+            std::cout << prefix << name << ".distinct_max = " << stats.max << '\n';
+            std::cout << prefix << name << ".nonempty_frac = "
+                      << (tick_count_ > 0
+                              ? static_cast<double>(stats.nonempty_cycles) / static_cast<double>(tick_count_)
+                              : 0.0)
+                      << '\n';
+        };
+        print_distinct("request.accept_src", request_accept_distinct_src_stats_);
+        print_distinct("request.blocked_src", request_blocked_distinct_src_stats_);
+        print_distinct("pending.src", pending_distinct_src_stats_);
+        print_distinct("pending.ready_src", ready_distinct_src_stats_);
+        print_distinct("response.ready_src", response_ready_distinct_src_stats_);
+        print_distinct("response.sent_dst", response_sent_distinct_dst_stats_);
+        static constexpr std::array<const char*, MY_MEMORY_CONTROLLER::kDiagClassCount> kNodeDiagNames = {"load", "rfo", "write", "other"};
+        for (std::size_t src = 0; src < MAX_CXL_PORTS; ++src) {
+            const auto& diag = source_diag_[src];
+            bool any = diag.pending_occ_max > 0 || diag.ready_occ_max > 0;
+            for (std::size_t cls = 0; cls < MY_MEMORY_CONTROLLER::kDiagClassCount; ++cls) {
+                any = any || diag.request_enqueued_by_class[cls] > 0 || diag.request_blocked_by_class[cls] > 0 ||
+                    diag.response_ready_by_class[cls] > 0 || diag.response_sent_by_class[cls] > 0 ||
+                    diag.response_blocked_by_class[cls] > 0;
+            }
+            if (!any) {
+                continue;
+            }
+            const auto node_prefix = prefix + "node." + std::to_string(src) + ".";
+            std::cout << node_prefix << "pending_occ_avg = "
+                      << (tick_count_ > 0 ? static_cast<double>(diag.pending_occ_sum) / static_cast<double>(tick_count_) : 0.0)
+                      << '\n';
+            std::cout << node_prefix << "pending_occ_max = " << diag.pending_occ_max << '\n';
+            std::cout << node_prefix << "ready_occ_avg = "
+                      << (tick_count_ > 0 ? static_cast<double>(diag.ready_occ_sum) / static_cast<double>(tick_count_) : 0.0)
+                      << '\n';
+            std::cout << node_prefix << "ready_occ_max = " << diag.ready_occ_max << '\n';
+            std::cout << node_prefix << "pending_age_avg_cycles = "
+                      << (diag.pending_age_samples > 0
+                              ? static_cast<double>(diag.pending_age_sum_cycles) / static_cast<double>(diag.pending_age_samples)
+                              : 0.0)
+                      << '\n';
+            std::cout << node_prefix << "pending_age_max_cycles = " << diag.pending_age_max_cycles << '\n';
+            std::cout << node_prefix << "ready_age_avg_cycles = "
+                      << (diag.ready_age_samples > 0
+                              ? static_cast<double>(diag.ready_age_sum_cycles) / static_cast<double>(diag.ready_age_samples)
+                              : 0.0)
+                      << '\n';
+            std::cout << node_prefix << "ready_age_max_cycles = " << diag.ready_age_max_cycles << '\n';
+            for (std::size_t cls = 0; cls < MY_MEMORY_CONTROLLER::kDiagClassCount; ++cls) {
+                const auto* cls_name = kNodeDiagNames[cls];
+                std::cout << node_prefix << "request_enqueued." << cls_name << " = " << diag.request_enqueued_by_class[cls] << '\n';
+                std::cout << node_prefix << "request_blocked." << cls_name << " = " << diag.request_blocked_by_class[cls] << '\n';
+                std::cout << node_prefix << "response_ready." << cls_name << " = " << diag.response_ready_by_class[cls] << '\n';
+                std::cout << node_prefix << "response_sent." << cls_name << " = " << diag.response_sent_by_class[cls] << '\n';
+                std::cout << node_prefix << "response_blocked." << cls_name << " = " << diag.response_blocked_by_class[cls] << '\n';
+                std::cout << node_prefix << "pending_occ_avg." << cls_name << " = "
+                          << (tick_count_ > 0
+                                  ? static_cast<double>(diag.pending_occ_sum_by_class[cls]) / static_cast<double>(tick_count_)
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "pending_occ_max." << cls_name << " = " << diag.pending_occ_max_by_class[cls] << '\n';
+                std::cout << node_prefix << "ready_occ_avg." << cls_name << " = "
+                          << (tick_count_ > 0
+                                  ? static_cast<double>(diag.ready_occ_sum_by_class[cls]) / static_cast<double>(tick_count_)
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "ready_occ_max." << cls_name << " = " << diag.ready_occ_max_by_class[cls] << '\n';
+                std::cout << node_prefix << "mem_ready_avg_cycles." << cls_name << " = "
+                          << (diag.mem_ready_samples_by_class[cls] > 0
+                                  ? static_cast<double>(diag.mem_ready_sum_cycles_by_class[cls]) /
+                                        static_cast<double>(diag.mem_ready_samples_by_class[cls])
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "mem_ready_max_cycles." << cls_name << " = " << diag.mem_ready_max_cycles_by_class[cls] << '\n';
+                std::cout << node_prefix << "response_wait_avg_cycles." << cls_name << " = "
+                          << (diag.response_wait_samples_by_class[cls] > 0
+                                  ? static_cast<double>(diag.response_wait_sum_cycles_by_class[cls]) /
+                                        static_cast<double>(diag.response_wait_samples_by_class[cls])
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "response_wait_max_cycles." << cls_name << " = " << diag.response_wait_max_cycles_by_class[cls] << '\n';
+                std::cout << node_prefix << "total_turnaround_avg_cycles." << cls_name << " = "
+                          << (diag.total_turnaround_samples_by_class[cls] > 0
+                                  ? static_cast<double>(diag.total_turnaround_sum_cycles_by_class[cls]) /
+                                        static_cast<double>(diag.total_turnaround_samples_by_class[cls])
+                                  : 0.0)
+                          << '\n';
+                std::cout << node_prefix << "total_turnaround_max_cycles." << cls_name << " = " << diag.total_turnaround_max_cycles_by_class[cls] << '\n';
+            }
+        }
         std::cout << prefix << "fabric.ingress_wait_avg_cycles = " << stats.ingress_wait_avg_cycles << '\n';
         std::cout << prefix << "fabric.egress_wait_avg_cycles = " << stats.egress_wait_avg_cycles << '\n';
         std::cout << prefix << "fabric.ingress_wait_max_cycles = " << stats.ingress_wait_max_cycles << '\n';
@@ -867,6 +1144,7 @@ void CXLMemoryPool::finish() {
                 std::cout << port_prefix << "rx_pkts." << cls_name << " = " << port.rx_packets(cls) << '\n';
                 std::cout << port_prefix << "tx_pkts." << cls_name << " = " << port.tx_packets(cls) << '\n';
             }
+            port.emit_deep_diagnostics(std::cout, port_prefix);
         };
         if (use_switch_port_) {
             print_port_stats(prefix + "port.switch.", switch_port_);

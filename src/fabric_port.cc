@@ -103,6 +103,58 @@ FabricPort::FabricPort()
       egress_credit_cap_(kInfiniteCredits) {}
 FabricPort::~FabricPort() = default;
 
+std::size_t FabricPort::byte_bucket_index(uint64_t bytes) {
+    if (bytes == 0) {
+        return 0;
+    }
+    if (bytes <= 64) {
+        return 1;
+    }
+    if (bytes <= 256) {
+        return 2;
+    }
+    if (bytes <= 1024) {
+        return 3;
+    }
+    if (bytes <= 4096) {
+        return 4;
+    }
+    return 5;
+}
+
+std::size_t FabricPort::cycle_bucket_index(uint64_t cycles) {
+    if (cycles == 0) {
+        return 0;
+    }
+    if (cycles <= 63) {
+        return 1;
+    }
+    if (cycles <= 255) {
+        return 2;
+    }
+    if (cycles <= 1023) {
+        return 3;
+    }
+    if (cycles <= 4095) {
+        return 4;
+    }
+    return 5;
+}
+
+const char* FabricPort::byte_bucket_name(std::size_t idx) {
+    static constexpr std::array<const char*, kDiagBucketCount> kNames{
+        "0", "1_64", "65_256", "257_1024", "1025_4096", "4097_plus"
+    };
+    return idx < kNames.size() ? kNames[idx] : "unknown";
+}
+
+const char* FabricPort::cycle_bucket_name(std::size_t idx) {
+    static constexpr std::array<const char*, kDiagBucketCount> kNames{
+        "0", "1_63", "64_255", "256_1023", "1024_4095", "4096_plus"
+    };
+    return idx < kNames.size() ? kNames[idx] : "unknown";
+}
+
 void FabricPort::configure(SST::Link* link,
                            uint64_t self_id,
                            int64_t bw_cycles,
@@ -287,6 +339,7 @@ void FabricPort::tick(uint64_t cycle) {
         if (egress_occ > 0) {
             egress_occ_nonempty_cycles_++;
         }
+        ready_occ_bucket_counts_[byte_bucket_index(static_cast<uint64_t>(ready_.size()) * kDefaultMsgBytes)]++;
         for (std::size_t idx = 0; idx < static_cast<std::size_t>(TrafficClass::Count); ++idx) {
             egress_occ_sum_bytes_by_class_[idx] += egress_queue_bytes_by_class_[idx];
             egress_occ_max_bytes_by_class_[idx] =
@@ -296,6 +349,7 @@ void FabricPort::tick(uint64_t cycle) {
         ingress_occ_sum_bytes_ += occ;
         ingress_occ_sq_sum_bytes_ += static_cast<long double>(occ) * static_cast<long double>(occ);
         ingress_occ_samples_++;
+        ingress_occ_bucket_counts_[byte_bucket_index(occ)]++;
         ingress_occ_max_bytes_ = std::max(ingress_occ_max_bytes_, occ);
         if (occ > 0) {
             ingress_occ_nonempty_cycles_++;
@@ -386,13 +440,15 @@ void FabricPort::handle_event(SST::Event* ev) {
     record_rx(cevent);
     const auto cls = classify_event(cevent);
     const uint64_t bytes = event_bytes(cevent);
+    const uint64_t src = !cevent->payload.empty() ? cevent->payload[0] : 0;
+    const uint64_t dst = cevent->payload.size() > 1 ? cevent->payload[1] : 0;
     const uint64_t pre_enqueue_occ_bytes = ingress_ ? static_cast<uint64_t>(ingress_->occupancy()) : 0;
     record_ingress_arrival((last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_,
                            bytes);
-    record_conditional_ingress_arrival(cls, bytes, pre_enqueue_occ_bytes);
+    record_conditional_ingress_arrival(cls, bytes, pre_enqueue_occ_bytes, src, dst);
     if (!ingress_) {
         record_ingress_wait(cls, 0, 0);
-        record_conditional_ingress_release(cls, pre_enqueue_occ_bytes > 0, 0, 0);
+        record_conditional_ingress_release(cls, src, dst, pre_enqueue_occ_bytes > 0, 0, 0);
         push_ready(cevent);
         return;
     }
@@ -405,6 +461,8 @@ void FabricPort::handle_event(SST::Event* ev) {
     ingress_enqueue_cycle_[cevent] = IngressArrivalMeta{
         enqueue_cycle,
         pre_enqueue_occ_bytes,
+        src,
+        dst,
         cls,
         pre_enqueue_occ_bytes > 0
     };
@@ -1013,6 +1071,104 @@ uint64_t FabricPort::ingress_queue_wait_after_nonempty_arrival_max_cycles(Traffi
     return ingress_queue_wait_after_nonempty_max_cycles_by_class_[traffic_class_index(cls)];
 }
 
+void FabricPort::emit_deep_diagnostics(std::ostream& os, const std::string& prefix) const {
+    for (std::size_t i = 0; i < kDiagBucketCount; ++i) {
+        os << prefix << "ingress_occ_bucket_bytes." << byte_bucket_name(i) << " = "
+           << ingress_occ_bucket_counts_[i] << '\n';
+        os << prefix << "ready_occ_bucket_bytes." << byte_bucket_name(i) << " = "
+           << ready_occ_bucket_counts_[i] << '\n';
+    }
+
+    static constexpr std::array<std::pair<TrafficClass, const char*>, 4> kClasses{{
+        {TrafficClass::DemandReq, "demand_req"},
+        {TrafficClass::WriteReq, "write_req"},
+        {TrafficClass::Response, "response"},
+        {TrafficClass::OtherReq, "other_req"},
+    }};
+
+    for (const auto& [cls, cls_name] : kClasses) {
+        const auto idx = traffic_class_index(cls);
+        for (std::size_t b = 0; b < kDiagBucketCount; ++b) {
+            os << prefix << "ingress_pre_occ_bucket." << cls_name << '.'
+               << byte_bucket_name(b) << " = "
+               << ingress_pre_occ_bucket_counts_by_class_[idx][b] << '\n';
+            os << prefix << "ingress_queue_wait_bucket." << cls_name << '.'
+               << cycle_bucket_name(b) << " = "
+               << ingress_queue_wait_bucket_counts_by_class_[idx][b] << '\n';
+        }
+    }
+
+    auto emit_peer_map = [&](const std::unordered_map<uint64_t, PeerDiag>& peers,
+                             const std::string& role) {
+        std::vector<uint64_t> ids;
+        ids.reserve(peers.size());
+        for (const auto& entry : peers) {
+            ids.push_back(entry.first);
+        }
+        std::sort(ids.begin(), ids.end());
+        for (uint64_t peer : ids) {
+            const auto it = peers.find(peer);
+            if (it == peers.end()) {
+                continue;
+            }
+            for (const auto& [cls, cls_name] : kClasses) {
+                const auto idx = traffic_class_index(cls);
+                const auto& diag = it->second.classes[idx];
+                if (diag.rx_packets == 0 && diag.tx_packets == 0 && diag.ingress_arrivals == 0 &&
+                    diag.ingress_wait_samples == 0) {
+                    continue;
+                }
+                os << prefix << role << '.' << peer << ".rx_bytes." << cls_name << " = " << diag.rx_bytes << '\n';
+                os << prefix << role << '.' << peer << ".rx_pkts." << cls_name << " = " << diag.rx_packets << '\n';
+                os << prefix << role << '.' << peer << ".tx_bytes." << cls_name << " = " << diag.tx_bytes << '\n';
+                os << prefix << role << '.' << peer << ".tx_pkts." << cls_name << " = " << diag.tx_packets << '\n';
+                os << prefix << role << '.' << peer << ".ingress_arrivals." << cls_name << " = " << diag.ingress_arrivals << '\n';
+                os << prefix << role << '.' << peer << ".ingress_arrival_nonempty_packet_frac." << cls_name << " = "
+                   << (diag.ingress_arrivals > 0
+                           ? static_cast<double>(diag.ingress_nonempty_arrivals) / static_cast<double>(diag.ingress_arrivals)
+                           : 0.0)
+                   << '\n';
+                os << prefix << role << '.' << peer << ".ingress_nonempty_arrival_pre_occ_avg_bytes." << cls_name << " = "
+                   << (diag.ingress_nonempty_arrivals > 0
+                           ? static_cast<double>(diag.ingress_nonempty_pre_occ_sum_bytes) /
+                                 static_cast<double>(diag.ingress_nonempty_arrivals)
+                           : 0.0)
+                   << '\n';
+                os << prefix << role << '.' << peer << ".ingress_nonempty_arrival_pre_occ_max_bytes." << cls_name << " = "
+                   << diag.ingress_nonempty_pre_occ_max_bytes << '\n';
+                os << prefix << role << '.' << peer << ".ingress_wait_avg_cycles." << cls_name << " = "
+                   << (diag.ingress_wait_samples > 0
+                           ? static_cast<double>(diag.ingress_wait_sum_cycles) / static_cast<double>(diag.ingress_wait_samples)
+                           : 0.0)
+                   << '\n';
+                os << prefix << role << '.' << peer << ".ingress_queue_wait_avg_cycles." << cls_name << " = "
+                   << (diag.ingress_queue_wait_samples > 0
+                           ? static_cast<double>(diag.ingress_queue_wait_sum_cycles) /
+                                 static_cast<double>(diag.ingress_queue_wait_samples)
+                           : 0.0)
+                   << '\n';
+                os << prefix << role << '.' << peer << ".ingress_queue_wait_after_nonempty_arrival_avg_cycles." << cls_name << " = "
+                   << (diag.ingress_queue_wait_after_nonempty_samples > 0
+                           ? static_cast<double>(diag.ingress_queue_wait_after_nonempty_sum_cycles) /
+                                 static_cast<double>(diag.ingress_queue_wait_after_nonempty_samples)
+                           : 0.0)
+                   << '\n';
+                for (std::size_t b = 0; b < kDiagBucketCount; ++b) {
+                    os << prefix << role << '.' << peer << ".ingress_pre_occ_bucket." << cls_name << '.'
+                       << byte_bucket_name(b) << " = " << diag.pre_occ_bucket_counts[b] << '\n';
+                    os << prefix << role << '.' << peer << ".ingress_queue_wait_bucket." << cls_name << '.'
+                       << cycle_bucket_name(b) << " = " << diag.queue_wait_bucket_counts[b] << '\n';
+                }
+            }
+        }
+    };
+
+    emit_peer_map(rx_by_src_peer_, "peer_src");
+    emit_peer_map(rx_by_dst_peer_, "peer_dst");
+    emit_peer_map(tx_by_src_peer_, "tx_src");
+    emit_peer_map(tx_by_dst_peer_, "tx_dst");
+}
+
 bool FabricPort::can_receive(uint64_t cycle) {
     tick(cycle);
     if (last_deliver_cycle_ == cycle) {
@@ -1032,10 +1188,14 @@ void FabricPort::tick_ingress() {
         auto it = ingress_enqueue_cycle_.find(item);
         TrafficClass cls = classify_event(item);
         bool saw_nonempty_queue = false;
+        uint64_t src = 0;
+        uint64_t dst = 0;
         if (it != ingress_enqueue_cycle_.end()) {
             const auto enqueue = it->second;
             const uint64_t enqueue_cycle = enqueue.enqueue_cycle;
             cls = enqueue.cls;
+            src = enqueue.src;
+            dst = enqueue.dst;
             saw_nonempty_queue = enqueue.saw_nonempty_queue;
             if (last_tick_cycle_ != std::numeric_limits<uint64_t>::max() && last_tick_cycle_ >= enqueue_cycle) {
                 wait_cycles = last_tick_cycle_ - enqueue_cycle;
@@ -1045,7 +1205,7 @@ void FabricPort::tick_ingress() {
         const uint64_t service_floor = ingress_service_floor_cycles(item);
         const uint64_t queue_wait = wait_cycles > service_floor ? (wait_cycles - service_floor) : 0;
         record_ingress_wait(cls, wait_cycles, queue_wait);
-        record_conditional_ingress_release(cls, saw_nonempty_queue, wait_cycles, queue_wait);
+        record_conditional_ingress_release(cls, src, dst, saw_nonempty_queue, wait_cycles, queue_wait);
         push_ready(item);
     }
 }
@@ -1177,16 +1337,30 @@ void FabricPort::record_rx(const csEvent* item) {
     const auto bytes = event_bytes(item);
     rx_bytes_total_ += bytes;
     const auto cls = classify_event(item);
-    rx_bytes_by_class_[static_cast<std::size_t>(cls)] += bytes;
-    rx_packets_by_class_[static_cast<std::size_t>(cls)]++;
+    const auto idx = static_cast<std::size_t>(cls);
+    rx_bytes_by_class_[idx] += bytes;
+    rx_packets_by_class_[idx]++;
+    const uint64_t src = (item && !item->payload.empty()) ? item->payload[0] : 0;
+    const uint64_t dst = (item && item->payload.size() > 1) ? item->payload[1] : 0;
+    rx_by_src_peer_[src].classes[idx].rx_bytes += bytes;
+    rx_by_src_peer_[src].classes[idx].rx_packets++;
+    rx_by_dst_peer_[dst].classes[idx].rx_bytes += bytes;
+    rx_by_dst_peer_[dst].classes[idx].rx_packets++;
 }
 
 void FabricPort::record_tx(const csEvent* item) {
     const auto bytes = event_bytes(item);
     tx_bytes_total_ += bytes;
     const auto cls = classify_event(item);
-    tx_bytes_by_class_[static_cast<std::size_t>(cls)] += bytes;
-    tx_packets_by_class_[static_cast<std::size_t>(cls)]++;
+    const auto idx = static_cast<std::size_t>(cls);
+    tx_bytes_by_class_[idx] += bytes;
+    tx_packets_by_class_[idx]++;
+    const uint64_t src = (item && !item->payload.empty()) ? item->payload[0] : self_id_;
+    const uint64_t dst = (item && item->payload.size() > 1) ? item->payload[1] : 0;
+    tx_by_src_peer_[src].classes[idx].tx_bytes += bytes;
+    tx_by_src_peer_[src].classes[idx].tx_packets++;
+    tx_by_dst_peer_[dst].classes[idx].tx_bytes += bytes;
+    tx_by_dst_peer_[dst].classes[idx].tx_packets++;
 }
 
 void FabricPort::record_ingress_arrival(uint64_t cycle, uint64_t bytes) {
@@ -1252,25 +1426,64 @@ void FabricPort::record_ingress_wait(TrafficClass cls, uint64_t wait_cycles, uin
 
 void FabricPort::record_conditional_ingress_arrival(TrafficClass cls,
                                                     uint64_t bytes,
-                                                    uint64_t pre_enqueue_occ_bytes) {
+                                                    uint64_t pre_enqueue_occ_bytes,
+                                                    uint64_t src,
+                                                    uint64_t dst) {
     const auto idx = traffic_class_index(cls);
+    ingress_pre_occ_bucket_counts_by_class_[idx][byte_bucket_index(pre_enqueue_occ_bytes)]++;
+    auto& src_diag = rx_by_src_peer_[src].classes[idx];
+    auto& dst_diag = rx_by_dst_peer_[dst].classes[idx];
+    src_diag.ingress_arrivals++;
+    dst_diag.ingress_arrivals++;
     if (pre_enqueue_occ_bytes > 0) {
         ingress_arrival_nonempty_packets_by_class_[idx]++;
         ingress_arrival_nonempty_bytes_by_class_[idx] += bytes;
         ingress_nonempty_pre_occ_sum_bytes_by_class_[idx] += pre_enqueue_occ_bytes;
         ingress_nonempty_pre_occ_max_bytes_by_class_[idx] =
             std::max(ingress_nonempty_pre_occ_max_bytes_by_class_[idx], pre_enqueue_occ_bytes);
+        src_diag.ingress_nonempty_arrivals++;
+        src_diag.ingress_nonempty_pre_occ_sum_bytes += pre_enqueue_occ_bytes;
+        src_diag.ingress_nonempty_pre_occ_max_bytes =
+            std::max(src_diag.ingress_nonempty_pre_occ_max_bytes, pre_enqueue_occ_bytes);
+        src_diag.pre_occ_bucket_counts[byte_bucket_index(pre_enqueue_occ_bytes)]++;
+        dst_diag.ingress_nonempty_arrivals++;
+        dst_diag.ingress_nonempty_pre_occ_sum_bytes += pre_enqueue_occ_bytes;
+        dst_diag.ingress_nonempty_pre_occ_max_bytes =
+            std::max(dst_diag.ingress_nonempty_pre_occ_max_bytes, pre_enqueue_occ_bytes);
+        dst_diag.pre_occ_bucket_counts[byte_bucket_index(pre_enqueue_occ_bytes)]++;
     } else {
         ingress_arrival_empty_packets_by_class_[idx]++;
         ingress_arrival_empty_bytes_by_class_[idx] += bytes;
+        src_diag.pre_occ_bucket_counts[0]++;
+        dst_diag.pre_occ_bucket_counts[0]++;
     }
 }
 
 void FabricPort::record_conditional_ingress_release(TrafficClass cls,
+                                                    uint64_t src,
+                                                    uint64_t dst,
                                                     bool saw_nonempty_queue,
                                                     uint64_t wait_cycles,
                                                     uint64_t queue_wait_cycles) {
     const auto idx = traffic_class_index(cls);
+    ingress_queue_wait_bucket_counts_by_class_[idx][cycle_bucket_index(queue_wait_cycles)]++;
+    auto update_peer = [&](PeerClassDiag& diag) {
+        diag.ingress_wait_sum_cycles += wait_cycles;
+        diag.ingress_wait_samples++;
+        diag.ingress_wait_max_cycles = std::max(diag.ingress_wait_max_cycles, wait_cycles);
+        diag.ingress_queue_wait_sum_cycles += queue_wait_cycles;
+        diag.ingress_queue_wait_samples++;
+        diag.ingress_queue_wait_max_cycles = std::max(diag.ingress_queue_wait_max_cycles, queue_wait_cycles);
+        diag.queue_wait_bucket_counts[cycle_bucket_index(queue_wait_cycles)]++;
+        if (saw_nonempty_queue) {
+            diag.ingress_wait_after_nonempty_sum_cycles += wait_cycles;
+            diag.ingress_wait_after_nonempty_samples++;
+            diag.ingress_queue_wait_after_nonempty_sum_cycles += queue_wait_cycles;
+            diag.ingress_queue_wait_after_nonempty_samples++;
+        }
+    };
+    update_peer(rx_by_src_peer_[src].classes[idx]);
+    update_peer(rx_by_dst_peer_[dst].classes[idx]);
     if (saw_nonempty_queue) {
         ingress_release_after_nonempty_packets_by_class_[idx]++;
         ingress_wait_after_nonempty_sum_cycles_by_class_[idx] += wait_cycles;

@@ -8,6 +8,8 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ostream>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -173,6 +175,7 @@ public:
     double ingress_queue_wait_after_nonempty_arrival_avg_cycles(TrafficClass cls) const;
     uint64_t ingress_queue_wait_after_empty_arrival_max_cycles(TrafficClass cls) const;
     uint64_t ingress_queue_wait_after_nonempty_arrival_max_cycles(TrafficClass cls) const;
+    void emit_deep_diagnostics(std::ostream& os, const std::string& prefix) const;
 
 private:
     bool can_receive(uint64_t cycle);
@@ -188,14 +191,50 @@ private:
     void record_ingress_arrival(uint64_t cycle, uint64_t bytes);
     void record_ingress_release(const std::vector<csEvent*>& ready);
     void record_ingress_wait(TrafficClass cls, uint64_t wait_cycles, uint64_t queue_wait_cycles);
-    void record_conditional_ingress_arrival(TrafficClass cls, uint64_t bytes, uint64_t pre_enqueue_occ_bytes);
+    void record_conditional_ingress_arrival(TrafficClass cls,
+                                            uint64_t bytes,
+                                            uint64_t pre_enqueue_occ_bytes,
+                                            uint64_t src,
+                                            uint64_t dst);
     void record_conditional_ingress_release(TrafficClass cls,
+                                            uint64_t src,
+                                            uint64_t dst,
                                             bool saw_nonempty_queue,
                                             uint64_t wait_cycles,
                                             uint64_t queue_wait_cycles);
+    static std::size_t byte_bucket_index(uint64_t bytes);
+    static std::size_t cycle_bucket_index(uint64_t cycles);
+    static const char* byte_bucket_name(std::size_t idx);
+    static const char* cycle_bucket_name(std::size_t idx);
     static constexpr std::size_t traffic_class_index(TrafficClass cls) {
         return static_cast<std::size_t>(cls);
     }
+    static constexpr std::size_t kDiagBucketCount = 6;
+    struct PeerClassDiag {
+        uint64_t rx_bytes = 0;
+        uint64_t rx_packets = 0;
+        uint64_t tx_bytes = 0;
+        uint64_t tx_packets = 0;
+        uint64_t ingress_arrivals = 0;
+        uint64_t ingress_nonempty_arrivals = 0;
+        uint64_t ingress_nonempty_pre_occ_sum_bytes = 0;
+        uint64_t ingress_nonempty_pre_occ_max_bytes = 0;
+        uint64_t ingress_wait_sum_cycles = 0;
+        uint64_t ingress_wait_samples = 0;
+        uint64_t ingress_wait_max_cycles = 0;
+        uint64_t ingress_queue_wait_sum_cycles = 0;
+        uint64_t ingress_queue_wait_samples = 0;
+        uint64_t ingress_queue_wait_max_cycles = 0;
+        uint64_t ingress_wait_after_nonempty_sum_cycles = 0;
+        uint64_t ingress_wait_after_nonempty_samples = 0;
+        uint64_t ingress_queue_wait_after_nonempty_sum_cycles = 0;
+        uint64_t ingress_queue_wait_after_nonempty_samples = 0;
+        std::array<uint64_t, kDiagBucketCount> pre_occ_bucket_counts{};
+        std::array<uint64_t, kDiagBucketCount> queue_wait_bucket_counts{};
+    };
+    struct PeerDiag {
+        std::array<PeerClassDiag, static_cast<std::size_t>(TrafficClass::Count)> classes{};
+    };
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
@@ -213,6 +252,8 @@ private:
     struct IngressArrivalMeta {
         uint64_t enqueue_cycle = 0;
         uint64_t pre_enqueue_occ_bytes = 0;
+        uint64_t src = 0;
+        uint64_t dst = 0;
         TrafficClass cls = TrafficClass::OtherReq;
         bool saw_nonempty_queue = false;
     };
@@ -229,6 +270,7 @@ private:
     uint64_t ready_occ_sum_ = 0;
     uint64_t ready_occ_samples_ = 0;
     std::size_t ready_occ_max_ = 0;
+    std::array<uint64_t, kDiagBucketCount> ready_occ_bucket_counts_{};
     uint64_t ingress_wait_sum_cycles_ = 0;
     uint64_t ingress_wait_samples_ = 0;
     uint64_t ingress_wait_max_cycles_ = 0;
@@ -306,6 +348,7 @@ private:
     uint64_t ingress_occ_gap_count_ = 0;
     uint64_t ingress_occ_gap_sum_cycles_ = 0;
     long double ingress_occ_gap_sq_sum_cycles_ = 0.0L;
+    std::array<uint64_t, kDiagBucketCount> ingress_occ_bucket_counts_{};
     uint64_t tick_samples_ = 0;
     uint64_t tx_bytes_total_ = 0;
     uint64_t rx_bytes_total_ = 0;
@@ -340,6 +383,12 @@ private:
     std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_occ_sum_bytes_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_occ_max_bytes_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(TrafficClass::Count)> egress_blocked_cycles_by_class_{};
+    std::array<std::array<uint64_t, kDiagBucketCount>, static_cast<std::size_t>(TrafficClass::Count)> ingress_pre_occ_bucket_counts_by_class_{};
+    std::array<std::array<uint64_t, kDiagBucketCount>, static_cast<std::size_t>(TrafficClass::Count)> ingress_queue_wait_bucket_counts_by_class_{};
+    std::unordered_map<uint64_t, PeerDiag> rx_by_src_peer_{};
+    std::unordered_map<uint64_t, PeerDiag> rx_by_dst_peer_{};
+    std::unordered_map<uint64_t, PeerDiag> tx_by_src_peer_{};
+    std::unordered_map<uint64_t, PeerDiag> tx_by_dst_peer_{};
 
     bool egress_queue_full(uint64_t bytes) const;
 };

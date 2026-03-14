@@ -979,6 +979,7 @@ void Switch::finish()
                 std::cout << prefix << "rx_pkts." << cls_name << " = " << port.rx_packets(cls) << '\n';
                 std::cout << prefix << "tx_pkts." << cls_name << " = " << port.tx_packets(cls) << '\n';
             }
+            port.emit_deep_diagnostics(std::cout, prefix);
         };
         for (std::size_t i = 0; i < node_ports_.size(); ++i) {
             print_port_stats("stat.switch.port.node." + std::to_string(i) + ".", node_ports_[i].port);

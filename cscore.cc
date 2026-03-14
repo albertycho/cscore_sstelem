@@ -700,6 +700,7 @@ namespace SST {
                         std::cout << stat_prefix << "rx_pkts." << cls_name << " = " << port.rx_packets(cls) << '\n';
                         std::cout << stat_prefix << "tx_pkts." << cls_name << " = " << port.tx_packets(cls) << '\n';
                     }
+                    port.emit_deep_diagnostics(std::cout, stat_prefix);
                 };
                 std::cout << prefix << "util.dram_avg = " << MYDRAM.queue_average_utilization(0) << '\n';
                 std::cout << prefix << "fabric.ingress_wait_avg_cycles = " << remote_port_.ingress_wait_avg_cycles() << '\n';
