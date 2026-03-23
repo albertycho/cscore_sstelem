@@ -21,6 +21,7 @@ struct Config {
     int cxl_pct = 100;  // percent of mem ops that target CXL
     uint64_t seed = 0x12345678ull;
     double aggregate_peak_gbps = 0.0; // if >0, use as aggregate host-link peak
+    uint64_t num_nodes = 8;
 };
 
 // Fixed parameters (not configurable via CLI)
@@ -29,7 +30,6 @@ constexpr uint64_t kFixedIp = 0x1000ull;
 constexpr double kClockGhz = 2.4;
 // Utilization->probability mapping depends on this assumption.
 constexpr double kIpcAssumed = 0.5;
-constexpr int kNumNodes = 8;
 constexpr int kBwCxlCycles = 25;
 constexpr uint64_t kProbScale = 1'000'000;
 // Stores are write-allocate: each store miss issues an RFO load (8B req + 64B resp).
@@ -109,6 +109,7 @@ static void print_usage(const char* argv0) {
         << "  --load-pct <0-100>\n"
         << "  --cxl-pct <0-100>\n"
         << "  --aggregate-peak-gbps <x>   (optional; if set, mem_pct targets this measured switch aggregate peak)\n"
+        << "  --num-nodes <N>             (optional; node count used for aggregate bandwidth modeling)\n"
         << "  --seed <u64>\n";
 }
 
@@ -157,6 +158,8 @@ static bool parse_args(int argc, char** argv, Config& cfg) {
             if (!parse_i32(value, &cfg.cxl_pct)) return false;
         } else if (key == "aggregate-peak-gbps") {
             if (!parse_f64(value, &cfg.aggregate_peak_gbps)) return false;
+        } else if (key == "num-nodes") {
+            if (!parse_u64(value, &cfg.num_nodes)) return false;
         } else if (key == "seed") {
             if (!parse_u64(value, &cfg.seed)) return false;
         } else {
@@ -227,7 +230,7 @@ int main(int argc, char** argv) {
     const double cxl_frac = static_cast<double>(cxl_pct_clamped) / 100.0;
     const double host_link_peak_bpc_per_dir = 64.0 / static_cast<double>(kBwCxlCycles);
     const double host_link_duplex_peak_bpc_theoretical =
-        static_cast<double>(kNumNodes) * 2.0 * host_link_peak_bpc_per_dir;
+        static_cast<double>(cfg.num_nodes) * 2.0 * host_link_peak_bpc_per_dir;
     const bool using_override_peak = (cfg.aggregate_peak_gbps > 0.0);
     const double host_link_duplex_peak_bpc_system = using_override_peak
         ? (cfg.aggregate_peak_gbps / kClockGhz)
@@ -237,7 +240,7 @@ int main(int argc, char** argv) {
         load_frac * (kReqBytesLoad + kRspBytesLoad) +
         store_frac * (kReqBytesStoreRfo + kRspBytesStoreRfo + (kStoreWritebackFactor * kReqBytesStoreWb));
     const double denom = kIpcAssumed
-        * static_cast<double>(kNumNodes)
+        * static_cast<double>(cfg.num_nodes)
         * cxl_frac
         * bytes_per_cxl_memop_host_links;
     double mem_prob = (denom > 0.0) ? (target_host_link_bpc_system / denom) : 0.0;
@@ -245,7 +248,7 @@ int main(int argc, char** argv) {
     if (mem_prob > 1.0) mem_prob = 1.0;
     const uint64_t mem_threshold = static_cast<uint64_t>(mem_prob * static_cast<double>(kProbScale) + 0.5);
     const double modeled_host_link_bpc_system =
-        mem_prob * kIpcAssumed * static_cast<double>(kNumNodes) * cxl_frac * bytes_per_cxl_memop_host_links;
+        mem_prob * kIpcAssumed * static_cast<double>(cfg.num_nodes) * cxl_frac * bytes_per_cxl_memop_host_links;
     const double modeled_util = (host_link_duplex_peak_bpc_system > 0.0)
         ? (modeled_host_link_bpc_system / host_link_duplex_peak_bpc_system)
         : 0.0;
@@ -321,7 +324,7 @@ int main(int argc, char** argv) {
     std::cout << "main_loop_loads=" << main_loop_load_count
               << " main_loop_stores=" << main_loop_store_count << "\n";
     std::cout << "util_formula ipc=" << kIpcAssumed
-              << " nodes=" << kNumNodes
+              << " nodes=" << cfg.num_nodes
               << " cxl_frac=" << cxl_frac
               << " store_writeback_factor=" << kStoreWritebackFactor
               << " host_link_peak_bpc_per_dir=" << host_link_peak_bpc_per_dir
@@ -354,8 +357,8 @@ int main(int argc, char** argv) {
     const double switch_to_host_bpi = (instrs > 0.0) ? (switch_to_host_bytes / instrs) : 0.0;
     const double host_link_total_bpi = host_to_switch_bpi + switch_to_host_bpi;
 
-    const double host_to_switch_bpc_system = host_to_switch_bpi * kIpcAssumed * static_cast<double>(kNumNodes);
-    const double switch_to_host_bpc_system = switch_to_host_bpi * kIpcAssumed * static_cast<double>(kNumNodes);
+    const double host_to_switch_bpc_system = host_to_switch_bpi * kIpcAssumed * static_cast<double>(cfg.num_nodes);
+    const double switch_to_host_bpc_system = switch_to_host_bpi * kIpcAssumed * static_cast<double>(cfg.num_nodes);
     const double host_link_total_bpc_system = host_to_switch_bpc_system + switch_to_host_bpc_system;
 
     const double host_to_switch_gbps = host_to_switch_bpc_system * kClockGhz;
@@ -363,7 +366,7 @@ int main(int argc, char** argv) {
     const double host_link_total_gbps = host_link_total_bpc_system * kClockGhz;
 
     std::cout << "Projected host-switch BW (main-loop only), IPC=" << kIpcAssumed
-              << " @ " << kClockGhz << "GHz, nodes=" << kNumNodes << "\n";
+              << " @ " << kClockGhz << "GHz, nodes=" << cfg.num_nodes << "\n";
     std::cout << "PROJECTED_HOST_LINK_BW_BPC host_to_switch=" << host_to_switch_bpc_system
               << " switch_to_host=" << switch_to_host_bpc_system
               << " total=" << host_link_total_bpc_system << "\n";

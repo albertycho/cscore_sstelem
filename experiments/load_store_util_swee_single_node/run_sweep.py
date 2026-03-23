@@ -22,7 +22,8 @@ GEN_SRC = REPO_ROOT / "scripts" / "generate_synth_trace.cpp"
 
 MPI_RANKS = 1
 MAX_CORE_BUDGET = 160
-MAX_PARALLEL = max(1, MAX_CORE_BUDGET // MPI_RANKS)
+DEFAULT_MAX_PARALLEL = min(20, max(1, MAX_CORE_BUDGET // max(MPI_RANKS, 1)))
+MAX_PARALLEL = int(os.environ.get("MAX_PARALLEL", DEFAULT_MAX_PARALLEL))
 
 # Sweep space (11x10)
 LOAD_PCTS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
@@ -96,6 +97,7 @@ def generate_trace(out_dir: Path, trace_name: str, load_pct: int, mem_pct: int) 
         "--load-pct", str(load_pct),
         "--cxl-pct", str(CXL_PCT),
         "--aggregate-peak-gbps", str(AGGREGATE_PEAK_GBPS),
+        "--num-nodes", str(NUM_NODES),
         "--seed", hex(SEED),
     ]
     result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True)
