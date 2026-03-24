@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <cstdint>
+#include <numeric>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
+#include <vector>
 #include <cerrno>
 #include <cstring>
 #include <type_traits>
@@ -48,8 +50,10 @@ constexpr uint64_t kCxlBase = 64ull * 1024 * 1024 * 1024;
 constexpr uint64_t kCxlSize = 64ull * 1024 * 1024 * 1024;
 
 // Working set sizes (bytes). If 0, use full region size.
-constexpr uint64_t kLocalWsBytes = 64ull * 1024 * 1024;
-constexpr uint64_t kCxlWsBytes = 64ull * 1024 * 1024;
+// Keep the footprint above the 2 MiB LLC, but small enough to avoid turning
+// page-walk traffic into the dominant bottleneck.
+constexpr uint64_t kLocalWsBytes = 4ull * 1024 * 1024;
+constexpr uint64_t kCxlWsBytes = 4ull * 1024 * 1024;
 
 static_assert(std::is_trivial<input_instr>::value, "input_instr must be trivial");
 static_assert(std::is_standard_layout<input_instr>::value, "input_instr must be standard layout");
@@ -171,21 +175,39 @@ static bool parse_args(int argc, char** argv, Config& cfg) {
     return true;
 }
 
-static uint64_t pick_addr(bool is_cxl, std::mt19937_64& rng, const Config& cfg) {
-    uint64_t base = is_cxl ? kCxlBase : kLocalBase;
-    uint64_t size = is_cxl ? kCxlSize : kLocalSize;
-    uint64_t ws = is_cxl ? kCxlWsBytes : kLocalWsBytes;
-    if (ws == 0 || ws > size) ws = size;
-    if (ws < kLineSize) ws = kLineSize;
+struct AddressDeck {
+    uint64_t base = 0;
+    std::vector<uint64_t> line_indices{};
+    std::size_t cursor = 0;
 
-    uint64_t elems = ws / kLineSize;
-    if (elems == 0) elems = 1;
+    AddressDeck(uint64_t region_base, uint64_t region_size, uint64_t ws_bytes, std::mt19937_64& rng)
+        : base(region_base) {
+        uint64_t ws = ws_bytes;
+        if (ws == 0 || ws > region_size) ws = region_size;
+        if (ws < kLineSize) ws = kLineSize;
 
-    uint64_t idx = static_cast<uint64_t>(rng() % elems);
+        uint64_t elems = ws / kLineSize;
+        if (elems == 0) elems = 1;
 
-    uint64_t addr = base + idx * kLineSize;
-    if (addr == 0) addr = kLineSize;
-    return addr;
+        line_indices.resize(static_cast<std::size_t>(elems));
+        std::iota(line_indices.begin(), line_indices.end(), uint64_t{0});
+        std::shuffle(line_indices.begin(), line_indices.end(), rng);
+    }
+
+    uint64_t next() {
+        if (cursor >= line_indices.size()) {
+            cursor = 0;
+        }
+
+        const uint64_t idx = line_indices[cursor++];
+        uint64_t addr = base + idx * kLineSize;
+        if (addr == 0) addr = kLineSize;
+        return addr;
+    }
+};
+
+static uint64_t pick_addr(bool is_cxl, AddressDeck& local_deck, AddressDeck& cxl_deck) {
+    return is_cxl ? cxl_deck.next() : local_deck.next();
 }
 
 static uint64_t pick_ip(uint64_t instr_idx) {
@@ -218,6 +240,8 @@ int main(int argc, char** argv) {
     }
 
     std::mt19937_64 rng(cfg.seed);
+    AddressDeck local_deck{kLocalBase, kLocalSize, kLocalWsBytes, rng};
+    AddressDeck cxl_deck{kCxlBase, kCxlSize, kCxlWsBytes, rng};
 
     uint64_t main_loop_load_count = 0;
     uint64_t main_loop_store_count = 0;
@@ -266,7 +290,7 @@ int main(int argc, char** argv) {
 
         const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
         const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
-        uint64_t addr = pick_addr(is_cxl, rng, cfg);
+        uint64_t addr = pick_addr(is_cxl, local_deck, cxl_deck);
         if (do_load) {
             instr.source_memory[0] = addr;
         } else {
@@ -291,7 +315,7 @@ int main(int argc, char** argv) {
         if (do_mem) {
             const bool do_load = (static_cast<int>(rng() % 100) < load_pct_clamped);
             const bool is_cxl = (static_cast<int>(rng() % 100) < cxl_pct_clamped);
-            uint64_t addr = pick_addr(is_cxl, rng, cfg);
+            uint64_t addr = pick_addr(is_cxl, local_deck, cxl_deck);
             if (do_load) {
                 instr.source_memory[0] = addr;
                 main_loop_load_count++;
@@ -338,6 +362,9 @@ int main(int argc, char** argv) {
               << " using_override_peak=" << (using_override_peak ? 1 : 0) << "\n";
     std::cout << "local_base=0x" << std::hex << kLocalBase
               << " cxl_base=0x" << kCxlBase << std::dec << "\n";
+    std::cout << "local_ws_bytes=" << kLocalWsBytes
+              << " cxl_ws_bytes=" << kCxlWsBytes
+              << " addr_selection=single_shuffled_line_deck_looping\n";
     std::cout << "line_size=" << kLineSize << "\n";
     std::cout << "fixed_ip=0x" << std::hex << kFixedIp << std::dec << "\n";
 
