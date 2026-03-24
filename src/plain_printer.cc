@@ -125,12 +125,10 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
     hits_value_type total_hits = 0;
     misses_value_type total_misses = 0;
     mshr_merge_value_type total_mshr_merge = 0;
-    mshr_return_value_type total_mshr_return = 0;
     for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
       total_hits += stats.hits.value_or(std::pair<access_type, std::size_t>{type, cpu}, hits_value_type{});
       total_misses += stats.misses.value_or(std::pair<access_type, std::size_t>{type, cpu}, misses_value_type{});
       total_mshr_merge += stats.mshr_merge.value_or(std::pair<access_type, std::size_t>{type, cpu}, mshr_merge_value_type{});
-      total_mshr_return += stats.mshr_return.value_or(std::pair<access_type, std::size_t>{type, cpu}, mshr_return_value_type{});
     }
     fmt::format_string<std::string_view, std::string_view, int, int, int> hitmiss_fmtstr{
         "cpu{}->{} {:<12s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} MSHR_MERGE: {:10d}"};
