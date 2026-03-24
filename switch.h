@@ -106,6 +106,8 @@ private:
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_send_fail_to_pool_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_replicated_clones_by_class_{};
     uint64_t tick_count_ = 0;
+    uint64_t stats_start_tick_ = 0;
+    uint64_t last_cycle_ = 0;
     std::chrono::steady_clock::time_point wall_start_{};
     std::chrono::steady_clock::duration active_time_{};
     uint64_t active_calls_ = 0;

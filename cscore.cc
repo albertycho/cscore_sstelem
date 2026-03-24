@@ -47,6 +47,35 @@ int64_t resolve_dram_bw_cycles(uint64_t cycles_per_req, uint64_t bytes_per_cycle
     return cycles_per_request_from_bw_bytes(bytes_per_cycle);
 }
 
+double parse_clock_ghz(std::string clock_str) {
+    clock_str.erase(
+        std::remove_if(clock_str.begin(), clock_str.end(), [](unsigned char c) { return std::isspace(c); }),
+        clock_str.end());
+    if (clock_str.empty()) {
+        return 0.0;
+    }
+    std::size_t idx = 0;
+    double value = 0.0;
+    try {
+        value = std::stod(clock_str, &idx);
+    } catch (...) {
+        return 0.0;
+    }
+    if (idx >= clock_str.size()) {
+        return 0.0;
+    }
+    std::string unit = clock_str.substr(idx);
+    for (auto& ch : unit) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    if (unit == "ghz") return value;
+    if (unit == "mhz") return value / 1'000.0;
+    if (unit == "khz") return value / 1'000'000.0;
+    if (unit == "hz") return value / 1'000'000'000.0;
+    if (unit == "thz") return value * 1'000.0;
+    return 0.0;
+}
+
 MY_MEMORY_CONTROLLER::latency_function_type select_latency_fn(SST::Params& params, const char* model_key, const char* fixed_key,
                                                                int64_t default_fixed_cycles) {
     auto model = params.find<std::string>(model_key, "fixed");
@@ -501,6 +530,14 @@ namespace SST {
                     for (auto& cpu : cores) {
                         cpu.begin_phase();
                     }
+                    stats_start_cycle_ = heartbeat_count;
+                    remote_port_.reset_stats(heartbeat_count);
+                    if (cxl_port_configured_ && node_id == 0) {
+                        auto* reset_ev = make_reset_util_event(static_cast<uint64_t>(node_id), kControlBroadcast);
+                        if (!remote_port_.send(reset_ev)) {
+                            delete reset_ev;
+                        }
+                    }
                     warmup_done = true;
                 }
 
@@ -640,6 +677,21 @@ namespace SST {
 
             const auto now = std::chrono::steady_clock::now();
             const auto total_sec = std::chrono::duration<double>(now - wall_start_).count();
+            const uint64_t bw_interval_cycles = warmup_done
+                ? (heartbeat_count - stats_start_cycle_)
+                : heartbeat_count;
+            const uint64_t host_to_switch_bytes = remote_port_.tx_bytes_total();
+            const uint64_t switch_to_host_bytes = remote_port_.rx_bytes_total();
+            const uint64_t host_link_total_bytes = host_to_switch_bytes + switch_to_host_bytes;
+            double clock_ghz = parse_clock_ghz(clock_frequency_str);
+            const double bw_interval_cycles_d = static_cast<double>(bw_interval_cycles);
+            const double host_to_switch_gbps = (bw_interval_cycles > 0)
+                ? (static_cast<double>(host_to_switch_bytes) / bw_interval_cycles_d) * clock_ghz
+                : 0.0;
+            const double switch_to_host_gbps = (bw_interval_cycles > 0)
+                ? (static_cast<double>(switch_to_host_bytes) / bw_interval_cycles_d) * clock_ghz
+                : 0.0;
+            const double host_link_total_gbps = host_to_switch_gbps + switch_to_host_gbps;
 
             if (lightweight_output_) {
                 const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".";
@@ -703,6 +755,13 @@ namespace SST {
                     port.emit_deep_diagnostics(std::cout, stat_prefix);
                 };
                 std::cout << prefix << "util.dram_avg = " << MYDRAM.queue_average_utilization(0) << '\n';
+                std::cout << prefix << "bw.interval_cycles = " << bw_interval_cycles << '\n';
+                std::cout << prefix << "bw.host_to_switch_bytes = " << host_to_switch_bytes << '\n';
+                std::cout << prefix << "bw.switch_to_host_bytes = " << switch_to_host_bytes << '\n';
+                std::cout << prefix << "bw.host_link_total_bytes = " << host_link_total_bytes << '\n';
+                std::cout << prefix << "bw.host_to_switch_gbps = " << host_to_switch_gbps << '\n';
+                std::cout << prefix << "bw.switch_to_host_gbps = " << switch_to_host_gbps << '\n';
+                std::cout << prefix << "bw.host_link_total_gbps = " << host_link_total_gbps << '\n';
                 std::cout << prefix << "fabric.ingress_wait_avg_cycles = " << remote_port_.ingress_wait_avg_cycles() << '\n';
                 std::cout << prefix << "fabric.egress_wait_avg_cycles = " << remote_port_.egress_wait_avg_cycles() << '\n';
                 std::cout << prefix << "fabric.ingress_wait_max_cycles = " << remote_port_.ingress_wait_max_cycles() << '\n';

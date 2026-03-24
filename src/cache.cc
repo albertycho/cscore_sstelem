@@ -318,8 +318,10 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     const auto miss_lat_time = current_time - fill_mshr.time_enqueued;
     auto miss_lat_cycles = miss_lat_time / clock_period;
     sim_stats.total_miss_latency_cycles += miss_lat_cycles;
-    if (fill_mshr.remote_is_pool) {
-      sim_stats.pool_demand_miss_latency_sum += miss_lat_cycles;
+    if (fill_mshr.remote_is_pool && fill_mshr.remote_issue_time != champsim::chrono::clock::time_point::max()) {
+      const auto cxl_lat_time = current_time - fill_mshr.remote_issue_time;
+      const auto cxl_lat_cycles = cxl_lat_time / clock_period;
+      sim_stats.pool_demand_miss_latency_sum += cxl_lat_cycles;
       sim_stats.pool_demand_miss_count++;
     }
     if (NAME == "LLC") {

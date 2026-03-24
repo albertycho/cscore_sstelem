@@ -12,7 +12,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
-TRACE_ROOT = Path("/shared/kshan/CXL_sst_traces_single_node")
+TRACE_ROOT = Path("/shared/kshan/CXL_sst_traces")
 OUTPUT_ROOT = SCRIPT_DIR / "logs_iterative"
 CONFIG_PATH = SCRIPT_DIR / "cxl_config.csv"
 SST_BIN = "sst"
@@ -22,10 +22,9 @@ GEN_SRC = REPO_ROOT / "scripts" / "generate_synth_trace.cpp"
 SIM_NO_REP = SCRIPT_DIR / "pool_sweep.py"
 SIM_REP = SCRIPT_DIR / "pool_sweep_replication.py"
 
-MPI_RANKS = 1
+MPI_RANKS = 8
 MAX_CORE_BUDGET = 160
-DEFAULT_MAX_PARALLEL_CASES = min(20, max(1, MAX_CORE_BUDGET // max(MPI_RANKS, 1)))
-MAX_PARALLEL_CASES = int(os.environ.get("MAX_PARALLEL_CASES", DEFAULT_MAX_PARALLEL_CASES))
+MAX_PARALLEL_CASES = max(1, MAX_CORE_BUDGET // MPI_RANKS)
 
 # Per-case sweep space: one curve per load_pct and mode
 LOAD_PCTS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
@@ -156,7 +155,6 @@ def generate_trace(out_dir: Path, trace_name: str, load_pct: int, target_gbps: f
         "--load-pct", str(load_pct),
         "--cxl-pct", str(CXL_PCT),
         "--aggregate-peak-gbps", f"{target_gbps:.6f}",
-        "--num-nodes", str(NUM_NODES),
         "--seed", hex(SEED),
     ]
     result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True)

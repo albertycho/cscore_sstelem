@@ -172,6 +172,8 @@ void Switch::setup() {
     route_send_fail_to_node_by_class_.fill(0);
     route_send_fail_to_pool_by_class_.fill(0);
     route_replicated_clones_by_class_.fill(0);
+    stats_start_tick_ = 0;
+    last_cycle_ = 0;
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
@@ -179,6 +181,7 @@ bool Switch::clock_tick(SST::Cycle_t cycle)
     ScopedTimer timer(active_time_, active_calls_);
     ++tick_count_;
     const auto cycle_u = static_cast<uint64_t>(cycle);
+    last_cycle_ = cycle_u;
     for_each_port([&](PortState& port) {
         port.port.tick(cycle_u);
         try_receive_and_route(port, cycle_u);
@@ -364,7 +367,7 @@ std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
 
 void Switch::reset_stats_and_broadcast()
 {
-    for_each_port([](PortState& port) { port.port.reset_ingress_utilization(); });
+    for_each_port([this](PortState& port) { port.port.reset_stats(last_cycle_); });
     route_blocked_to_node_ = 0;
     route_blocked_to_pool_ = 0;
     route_blocked_replicated_write_ = 0;
@@ -377,6 +380,7 @@ void Switch::reset_stats_and_broadcast()
     route_send_fail_to_node_by_class_.fill(0);
     route_send_fail_to_pool_by_class_.fill(0);
     route_replicated_clones_by_class_.fill(0);
+    stats_start_tick_ = tick_count_;
     for (int p = 0; p < num_pools_; ++p) {
         const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
         auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
@@ -755,7 +759,8 @@ void Switch::finish()
     };
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
-    const double ticks = tick_count_ > 0 ? static_cast<double>(tick_count_) : 1.0;
+    const auto stats_ticks_u = std::max<uint64_t>(tick_count_ - stats_start_tick_, 1);
+    const double ticks = static_cast<double>(stats_ticks_u);
     const uint64_t host_to_switch_bytes = sum_rx_bytes(node_ports_);
     const uint64_t switch_to_host_bytes = sum_tx_bytes(node_ports_);
     const uint64_t host_link_total_bytes = host_to_switch_bytes + switch_to_host_bytes;
@@ -763,9 +768,6 @@ void Switch::finish()
     const double switch_to_host_bpc = static_cast<double>(switch_to_host_bytes) / ticks;
     const double host_link_total_bpc = static_cast<double>(host_link_total_bytes) / ticks;
     double clock_ghz = parse_clock_ghz(clock_frequency_);
-    if (clock_ghz <= 0.0) {
-        clock_ghz = 2.4; // fallback to default switch clock
-    }
     const double host_to_switch_gbps = host_to_switch_bpc * clock_ghz;
     const double switch_to_host_gbps = switch_to_host_bpc * clock_ghz;
     const double host_link_total_gbps = host_link_total_bpc * clock_ghz;

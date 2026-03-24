@@ -78,7 +78,7 @@ public:
 
     void handle_event(SST::Event* ev);
 
-    void reset_ingress_utilization();
+    void reset_stats(uint64_t cycle);
     bool can_send() const;
     bool can_send(uint64_t bytes) const;
     bool can_send(const csEvent* item) const;

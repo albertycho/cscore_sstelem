@@ -17,7 +17,9 @@ MY_MEMORY_CONTROLLER::MY_MEMORY_CONTROLLER(champsim::chrono::picoseconds mc_peri
                 ? (64.0 / static_cast<double>(bw_cycles_per_req))
                 : 0.0),
             /*latency_function=*/std::forward<latency_function_type>(latency_function),
-            /*bw_cost_fn=*/[](const channel_type::request_type&) { return 64.0; },
+            /*bw_cost_fn=*/[](const channel_type::request_type& req) {
+                return static_cast<double>(std::max<uint16_t>(req.msg_bytes, 1));
+            },
             /*max_pending_bytes=*/0,
             /*class_count=*/kDiagClassCount,
             /*classify_fn=*/[](const channel_type::request_type& req) {

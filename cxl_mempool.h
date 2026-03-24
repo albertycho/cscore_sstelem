@@ -303,6 +303,7 @@ private:
     uint64_t request_accepted_this_tick_ = 0;
     uint64_t request_blocked_this_tick_ = 0;
     uint64_t tick_count_ = 0;
+    uint64_t stats_start_tick_ = 0;
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
     uint64_t heartbeat_period_ = 1000;

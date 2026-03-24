@@ -160,6 +160,7 @@ void CXLMemoryPool::setup() {
     wall_start_ = std::chrono::steady_clock::now();
     active_time_ = std::chrono::steady_clock::duration{};
     active_calls_ = 0;
+    stats_start_tick_ = 0;
 }
 
 bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
@@ -398,6 +399,7 @@ void CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
     channel_req.type = request.type;
     channel_req.pf_metadata = request.pf_metadata;
     channel_req.cpu = request.cpu;
+    channel_req.msg_bytes = static_cast<uint16_t>(request.msg_bytes);
     channel_req.address = champsim::address{request.address};
     channel_req.v_address = champsim::address{request.v_address};
     channel_req.data = champsim::address{request.data};
@@ -710,7 +712,8 @@ void CXLMemoryPool::reset_stats() {
     returned_episode_active_ = false;
     request_accepted_this_tick_ = 0;
     request_blocked_this_tick_ = 0;
-    for_each_port([](FabricPort& port) { port.reset_ingress_utilization(); });
+    stats_start_tick_ = tick_count_;
+    for_each_port([this](FabricPort& port) { port.reset_stats(tick_count_); });
 }
 
 void CXLMemoryPool::for_each_port(const std::function<void(FabricPort&)>& fn) {
@@ -868,6 +871,8 @@ void CXLMemoryPool::finish() {
     const auto now = std::chrono::steady_clock::now();
     const auto sec = std::chrono::duration<double>(now - wall_start_).count();
     const auto stats = request_link_stats();
+    const auto stats_ticks_u = std::max<uint64_t>(tick_count_ - stats_start_tick_, 1);
+    const double stats_ticks = static_cast<double>(stats_ticks_u);
 
     if (lightweight_output_) {
         const auto prefix = std::string("stat.pool.") + std::to_string(pool_node_id_) + ".";
@@ -1090,13 +1095,13 @@ void CXLMemoryPool::finish() {
         std::cout << prefix << "response.returned_burst_avg_pkts = " << returned_burst_avg << '\n';
         std::cout << prefix << "response.returned_burst_stddev_pkts = " << returned_burst_stddev << '\n';
         std::cout << prefix << "response.returned_nonempty_frac = "
-                  << (tick_count_ > 0 ? static_cast<double>(returned_burst_stats_.nonempty_cycles) / static_cast<double>(tick_count_) : 0.0)
+                  << (static_cast<double>(returned_burst_stats_.nonempty_cycles) / stats_ticks)
                   << '\n';
         std::cout << prefix << "response.sent_burst_max_pkts = " << sent_burst_stats_.max_pkts << '\n';
         std::cout << prefix << "response.sent_burst_avg_pkts = " << sent_burst_avg << '\n';
         std::cout << prefix << "response.sent_burst_stddev_pkts = " << sent_burst_stddev << '\n';
         std::cout << prefix << "response.sent_nonempty_frac = "
-                  << (tick_count_ > 0 ? static_cast<double>(sent_burst_stats_.nonempty_cycles) / static_cast<double>(tick_count_) : 0.0)
+                  << (static_cast<double>(sent_burst_stats_.nonempty_cycles) / stats_ticks)
                   << '\n';
         std::cout << prefix << "response.blocked_cycles = " << response_blocked_cycles_ << '\n';
         std::cout << prefix << "response.blocked_avg_pending_pkts = "
@@ -1117,9 +1122,7 @@ void CXLMemoryPool::finish() {
                       << '\n';
             std::cout << prefix << name << ".distinct_max = " << stats.max << '\n';
             std::cout << prefix << name << ".nonempty_frac = "
-                      << (tick_count_ > 0
-                              ? static_cast<double>(stats.nonempty_cycles) / static_cast<double>(tick_count_)
-                              : 0.0)
+                      << (static_cast<double>(stats.nonempty_cycles) / stats_ticks)
                       << '\n';
         };
         print_distinct("request.accept_src", request_accept_distinct_src_stats_);
@@ -1233,11 +1236,11 @@ void CXLMemoryPool::finish() {
             }
             const auto node_prefix = prefix + "node." + std::to_string(src) + ".";
             std::cout << node_prefix << "pending_occ_avg = "
-                      << (tick_count_ > 0 ? static_cast<double>(diag.pending_occ_sum) / static_cast<double>(tick_count_) : 0.0)
+                      << (static_cast<double>(diag.pending_occ_sum) / stats_ticks)
                       << '\n';
             std::cout << node_prefix << "pending_occ_max = " << diag.pending_occ_max << '\n';
             std::cout << node_prefix << "ready_occ_avg = "
-                      << (tick_count_ > 0 ? static_cast<double>(diag.ready_occ_sum) / static_cast<double>(tick_count_) : 0.0)
+                      << (static_cast<double>(diag.ready_occ_sum) / stats_ticks)
                       << '\n';
             std::cout << node_prefix << "ready_occ_max = " << diag.ready_occ_max << '\n';
             std::cout << node_prefix << "pending_age_avg_cycles = "
@@ -1260,15 +1263,11 @@ void CXLMemoryPool::finish() {
                 std::cout << node_prefix << "response_sent." << cls_name << " = " << diag.response_sent_by_class[cls] << '\n';
                 std::cout << node_prefix << "response_blocked." << cls_name << " = " << diag.response_blocked_by_class[cls] << '\n';
                 std::cout << node_prefix << "pending_occ_avg." << cls_name << " = "
-                          << (tick_count_ > 0
-                                  ? static_cast<double>(diag.pending_occ_sum_by_class[cls]) / static_cast<double>(tick_count_)
-                                  : 0.0)
+                          << (static_cast<double>(diag.pending_occ_sum_by_class[cls]) / stats_ticks)
                           << '\n';
                 std::cout << node_prefix << "pending_occ_max." << cls_name << " = " << diag.pending_occ_max_by_class[cls] << '\n';
                 std::cout << node_prefix << "ready_occ_avg." << cls_name << " = "
-                          << (tick_count_ > 0
-                                  ? static_cast<double>(diag.ready_occ_sum_by_class[cls]) / static_cast<double>(tick_count_)
-                                  : 0.0)
+                          << (static_cast<double>(diag.ready_occ_sum_by_class[cls]) / stats_ticks)
                           << '\n';
                 std::cout << node_prefix << "ready_occ_max." << cls_name << " = " << diag.ready_occ_max_by_class[cls] << '\n';
                 std::cout << node_prefix << "mem_ready_avg_cycles." << cls_name << " = "

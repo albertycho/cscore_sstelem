@@ -484,7 +484,7 @@ void FabricPort::handle_event(SST::Event* ev) {
             return;
         }
         if (ctrl_code == kControlResetUtil) {
-            reset_ingress_utilization();
+            reset_stats((last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_);
             // Reset controls are out-of-band: do not let data backlog delay phase reset propagation.
             push_ready(cevent, true);
             return;
@@ -522,10 +522,153 @@ void FabricPort::handle_event(SST::Event* ev) {
     };
 }
 
-void FabricPort::reset_ingress_utilization() {
+void FabricPort::reset_stats(uint64_t cycle) {
     if (ingress_) {
         ingress_->reset_utilization();
     }
+
+    for (auto& entry : egress_queue_) {
+        entry.enqueue_cycle = cycle;
+    }
+    for (auto& [item, meta] : ingress_enqueue_cycle_) {
+        (void)item;
+        meta.enqueue_cycle = cycle;
+        meta.pre_enqueue_occ_bytes = 0;
+        meta.saw_nonempty_queue = false;
+    }
+    for (auto& [item, enqueue_cycle] : ready_enqueue_cycle_) {
+        (void)item;
+        enqueue_cycle = cycle;
+    }
+
+    ingress_wait_sum_cycles_ = 0;
+    ingress_wait_samples_ = 0;
+    ingress_wait_max_cycles_ = 0;
+    ingress_queue_wait_sum_cycles_ = 0;
+    ingress_queue_wait_samples_ = 0;
+    ingress_queue_wait_max_cycles_ = 0;
+    egress_wait_sum_cycles_ = 0;
+    egress_wait_samples_ = 0;
+    egress_wait_max_cycles_ = 0;
+    egress_occ_sum_bytes_ = 0;
+    egress_occ_sq_sum_bytes_ = 0.0L;
+    egress_occ_nonempty_cycles_ = 0;
+    egress_occ_max_bytes_ = 0;
+    egress_blocked_cycles_ = 0;
+    egress_blocked_occ_sum_bytes_ = 0;
+    egress_blocked_occ_max_bytes_ = 0;
+    egress_send_burst_max_pkts_ = 0;
+    egress_send_burst_max_bytes_ = 0;
+    egress_send_nonempty_cycles_ = 0;
+    egress_send_burst_sum_pkts_ = 0;
+    egress_send_burst_sum_bytes_ = 0;
+    egress_send_burst_sq_sum_pkts_ = 0.0L;
+    egress_send_burst_sq_sum_bytes_ = 0.0L;
+    ingress_arrival_burst_cycle_ = std::numeric_limits<uint64_t>::max();
+    ingress_arrival_burst_pkts_cur_ = 0;
+    ingress_arrival_burst_bytes_cur_ = 0;
+    ingress_arrival_burst_max_pkts_ = 0;
+    ingress_arrival_burst_max_bytes_ = 0;
+    ingress_arrival_nonempty_cycles_ = 0;
+    ingress_arrival_burst_sum_pkts_ = 0;
+    ingress_arrival_burst_sum_bytes_ = 0;
+    ingress_arrival_burst_sq_sum_pkts_ = 0.0L;
+    ingress_arrival_burst_sq_sum_bytes_ = 0.0L;
+    ingress_arrival_prev_cycle_ = std::numeric_limits<uint64_t>::max();
+    ingress_arrival_run_cur_cycles_ = 0;
+    ingress_arrival_run_max_cycles_ = 0;
+    ingress_arrival_run_count_ = 0;
+    ingress_arrival_run_sum_cycles_ = 0;
+    ingress_arrival_run_sq_sum_cycles_ = 0.0L;
+    ingress_arrival_gap_max_cycles_ = 0;
+    ingress_arrival_gap_count_ = 0;
+    ingress_arrival_gap_sum_cycles_ = 0;
+    ingress_arrival_gap_sq_sum_cycles_ = 0.0L;
+    ingress_release_burst_max_pkts_ = 0;
+    ingress_release_burst_max_bytes_ = 0;
+    ingress_release_nonempty_cycles_ = 0;
+    ingress_release_burst_sum_pkts_ = 0;
+    ingress_release_burst_sum_bytes_ = 0;
+    ingress_release_burst_sq_sum_pkts_ = 0.0L;
+    ingress_release_burst_sq_sum_bytes_ = 0.0L;
+    ingress_release_seen_nonempty_ = false;
+    ingress_release_run_cur_cycles_ = 0;
+    ingress_release_run_max_cycles_ = 0;
+    ingress_release_run_count_ = 0;
+    ingress_release_run_sum_cycles_ = 0;
+    ingress_release_run_sq_sum_cycles_ = 0.0L;
+    ingress_release_gap_cur_cycles_ = 0;
+    ingress_release_gap_max_cycles_ = 0;
+    ingress_release_gap_count_ = 0;
+    ingress_release_gap_sum_cycles_ = 0;
+    ingress_release_gap_sq_sum_cycles_ = 0.0L;
+    ingress_occ_sum_bytes_ = 0;
+    ingress_occ_sq_sum_bytes_ = 0.0L;
+    ingress_occ_samples_ = 0;
+    ingress_occ_nonempty_cycles_ = 0;
+    ingress_occ_max_bytes_ = 0;
+    ingress_occ_seen_nonempty_ = false;
+    ingress_occ_run_cur_cycles_ = 0;
+    ingress_occ_run_max_cycles_ = 0;
+    ingress_occ_run_count_ = 0;
+    ingress_occ_run_sum_cycles_ = 0;
+    ingress_occ_run_sq_sum_cycles_ = 0.0L;
+    ingress_occ_gap_cur_cycles_ = 0;
+    ingress_occ_gap_max_cycles_ = 0;
+    ingress_occ_gap_count_ = 0;
+    ingress_occ_gap_sum_cycles_ = 0;
+    ingress_occ_gap_sq_sum_cycles_ = 0.0L;
+    ready_wait_sum_cycles_ = 0;
+    ready_wait_samples_ = 0;
+    ready_wait_max_cycles_ = 0;
+    ready_retry_count_ = 0;
+    ready_occ_sum_ = 0;
+    ready_occ_samples_ = 0;
+    ready_occ_max_ = 0;
+    ready_occ_bucket_counts_.fill(0);
+    ingress_occ_bucket_counts_.fill(0);
+    tick_samples_ = 0;
+    tx_bytes_total_ = 0;
+    rx_bytes_total_ = 0;
+    tx_bytes_by_class_.fill(0);
+    rx_bytes_by_class_.fill(0);
+    tx_packets_by_class_.fill(0);
+    rx_packets_by_class_.fill(0);
+    ingress_arrival_empty_packets_by_class_.fill(0);
+    ingress_arrival_nonempty_packets_by_class_.fill(0);
+    ingress_arrival_empty_bytes_by_class_.fill(0);
+    ingress_arrival_nonempty_bytes_by_class_.fill(0);
+    ingress_nonempty_pre_occ_sum_bytes_by_class_.fill(0);
+    ingress_nonempty_pre_occ_max_bytes_by_class_.fill(0);
+    ingress_release_after_empty_packets_by_class_.fill(0);
+    ingress_release_after_nonempty_packets_by_class_.fill(0);
+    ingress_wait_after_empty_sum_cycles_by_class_.fill(0);
+    ingress_wait_after_nonempty_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_empty_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_nonempty_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_empty_max_cycles_by_class_.fill(0);
+    ingress_queue_wait_after_nonempty_max_cycles_by_class_.fill(0);
+    ingress_wait_sum_cycles_by_class_.fill(0);
+    ingress_wait_samples_by_class_.fill(0);
+    ingress_wait_max_cycles_by_class_.fill(0);
+    ingress_queue_wait_sum_cycles_by_class_.fill(0);
+    ingress_queue_wait_samples_by_class_.fill(0);
+    ingress_queue_wait_max_cycles_by_class_.fill(0);
+    egress_wait_sum_cycles_by_class_.fill(0);
+    egress_wait_samples_by_class_.fill(0);
+    egress_wait_max_cycles_by_class_.fill(0);
+    egress_occ_sum_bytes_by_class_.fill(0);
+    egress_occ_max_bytes_by_class_.fill(0);
+    egress_blocked_cycles_by_class_.fill(0);
+    ingress_pre_occ_bucket_counts_by_class_ = {};
+    ingress_queue_wait_bucket_counts_by_class_ = {};
+    rx_by_src_peer_.clear();
+    rx_by_dst_peer_.clear();
+    tx_by_src_peer_.clear();
+    tx_by_dst_peer_.clear();
+    ingress_episode_diag_ = EpisodeDiag{};
+    ingress_episode_state_ = EpisodeState{};
+    ingress_episode_active_ = false;
 }
 
 bool FabricPort::can_send() const {
