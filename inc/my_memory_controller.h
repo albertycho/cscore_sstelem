@@ -14,7 +14,9 @@
 
 extern template class lat_bw_queue<champsim::channel::request_type>;
 
-// 64B request
+// Request-based controller service model.
+// Bandwidth knobs are still interpreted using 64B/cache-line equivalence when
+// converting bytes-per-cycle inputs into cycles per request.
 // 2.4 GHz: cycle = ~0.4167 ns
 // bw: 40 GB/s --> ~16.7 bytes per cycle
 // ~4 cycles per request (64B)
@@ -83,14 +85,12 @@ public:
 
     struct QueueDiagStats {
         uint64_t occ_samples = 0;
-        uint64_t occ_sum_bytes = 0;
-        long double occ_sq_sum_bytes = 0.0L;
+        uint64_t occ_sum_reqs = 0;
+        long double occ_sq_sum_reqs = 0.0L;
         uint64_t occ_nonempty_cycles = 0;
-        uint64_t occ_max_bytes = 0;
-        std::array<uint64_t, kDiagClassCount> occ_sum_bytes_by_class{};
-        std::array<uint64_t, kDiagClassCount> occ_max_bytes_by_class{};
-        std::array<uint64_t, kDiagClassCount> occ_sum_pkts_by_class{};
-        std::array<uint64_t, kDiagClassCount> occ_max_pkts_by_class{};
+        uint64_t occ_max_reqs = 0;
+        std::array<uint64_t, kDiagClassCount> occ_sum_reqs_by_class{};
+        std::array<uint64_t, kDiagClassCount> occ_max_reqs_by_class{};
         uint64_t enqueue_burst_nonempty_cycles = 0;
         uint64_t enqueue_burst_sum_pkts = 0;
         long double enqueue_burst_sq_sum_pkts = 0.0L;
@@ -109,8 +109,8 @@ public:
         uint64_t episode_count = 0;
         uint64_t episode_sum_cycles = 0;
         uint64_t episode_max_cycles = 0;
-        uint64_t episode_sum_peak_occ_bytes = 0;
-        uint64_t episode_max_peak_occ_bytes = 0;
+        uint64_t episode_sum_peak_occ_reqs = 0;
+        uint64_t episode_max_peak_occ_reqs = 0;
         uint64_t episode_sum_enqueue_pkts = 0;
         uint64_t episode_max_enqueue_pkts = 0;
         uint64_t episode_sum_complete_pkts = 0;
@@ -122,13 +122,23 @@ public:
                          std::vector<channel_type*>&& queues, 
                          int64_t bw_cycles_per_req = DEFAULT_BW,
                          latency_function_type&& latency_function = estimate_latency_utilization_based,
-                         champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES});
+                         champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES},
+                         int64_t max_pending_requests = 0);
 
     void initialize() final;
     long operate() final;
     void begin_phase() final;
     void end_phase(unsigned cpu) final;
     void print_deadlock() final;
+    bool enqueue_request(std::size_t idx, channel_type::request_type req);
+    bool has_ready_response(std::size_t idx) const;
+    const channel_type::request_type& front_ready_response(std::size_t idx) const;
+    channel_type::request_type pop_ready_response(std::size_t idx);
+    std::vector<channel_type::request_type> drain_ready_responses_if(
+        std::size_t idx,
+        const std::function<bool(const channel_type::request_type&)>& pred);
+    std::size_t ready_response_count(std::size_t idx) const;
+    void for_each_ready_response(std::size_t idx, const std::function<void(const channel_type::request_type&)>& fn) const;
     RequestDiagStats demand_diag_stats() const;
     const QueueDiagStats& queue_diag_stats() const { return queue_diag_stats_; }
     const RequestDiagStats& request_diag_stats(RequestDiagClass cls) const {
@@ -165,21 +175,23 @@ private:
     std::unordered_map<uint64_t, RequestDiagState> request_diag_state_;
     std::array<RequestDiagStats, kDiagClassCount> request_diag_stats_{};
     QueueDiagStats queue_diag_stats_{};
+    uint64_t enqueued_since_last_operate_total_ = 0;
+    std::array<uint64_t, kDiagClassCount> enqueued_since_last_operate_by_class_{};
+    uint64_t completed_this_operate_total_ = 0;
+    std::array<uint64_t, kDiagClassCount> completed_this_operate_by_class_{};
     bool queue_episode_active_ = false;
     uint64_t queue_episode_cycles_ = 0;
-    uint64_t queue_episode_peak_occ_bytes_ = 0;
+    uint64_t queue_episode_peak_occ_reqs_ = 0;
     uint64_t queue_episode_enqueue_pkts_ = 0;
     uint64_t queue_episode_complete_pkts_ = 0;
-    //champsim::data::bytes channel_width;
     champsim::data::bytes size_ = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES};
 
 public:
     champsim::data::bytes size() const { return size_; }
-    //champsim::data::bytes size() const { return champsim::data::bytes{size_}; }
 
     std::size_t queue_count() const { return lat_bw_queues.size(); }
     std::size_t queue_occupancy(std::size_t idx) const {
-        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].occupancy() : 0;
+        return idx < lat_bw_queues.size() ? lat_bw_queues[idx].packet_occupancy() : 0;
     }
     double queue_utilization(std::size_t idx) const {
         return idx < lat_bw_queues.size() ? lat_bw_queues[idx].utilization() : 0.0;
@@ -192,13 +204,23 @@ public:
             q.reset_utilization();
         }
     }
-    void reset_diagnostics() {
-        request_diag_state_.clear();
+    void reset_diagnostics(int64_t cycle) {
+        for (auto& [tag, state] : request_diag_state_) {
+            (void)tag;
+            state.enqueue_cycle = cycle;
+            if (state.service_start_cycle >= 0) {
+                state.service_start_cycle = cycle;
+            }
+        }
         request_diag_stats_.fill(RequestDiagStats{});
         queue_diag_stats_ = QueueDiagStats{};
+        enqueued_since_last_operate_total_ = 0;
+        enqueued_since_last_operate_by_class_.fill(0);
+        completed_this_operate_total_ = 0;
+        completed_this_operate_by_class_.fill(0);
         queue_episode_active_ = false;
         queue_episode_cycles_ = 0;
-        queue_episode_peak_occ_bytes_ = 0;
+        queue_episode_peak_occ_reqs_ = 0;
         queue_episode_enqueue_pkts_ = 0;
         queue_episode_complete_pkts_ = 0;
     }

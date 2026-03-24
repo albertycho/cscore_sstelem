@@ -90,7 +90,6 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   using hits_value_type = typename decltype(stats.hits)::value_type;
   using misses_value_type = typename decltype(stats.misses)::value_type;
   using mshr_merge_value_type = typename decltype(stats.mshr_merge)::value_type;
-  using mshr_return_value_type = typename decltype(stats.mshr_return)::value_type;
 
   std::vector<std::size_t> cpus;
 
@@ -150,8 +149,8 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
                                 stats.pf_issued, stats.pf_useful, stats.pf_useless));
 
     uint64_t total_downstream_demands =
-        stats.mshr_return.value_or(std::pair<access_type, std::size_t>{access_type::LOAD, cpu}, mshr_return_value_type{}) +
-        stats.mshr_return.value_or(std::pair<access_type, std::size_t>{access_type::RFO, cpu}, mshr_return_value_type{});
+        stats.misses.value_or(std::pair<access_type, std::size_t>{access_type::LOAD, cpu}, misses_value_type{}) +
+        stats.misses.value_or(std::pair<access_type, std::size_t>{access_type::RFO, cpu}, misses_value_type{});
     lines.push_back(
         fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
   }

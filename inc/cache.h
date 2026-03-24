@@ -81,6 +81,7 @@ class CACHE : public champsim::operable
     uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
     champsim::chrono::clock::time_point event_cycle = champsim::chrono::clock::time_point::max();
+    champsim::chrono::clock::time_point miss_start_time = champsim::chrono::clock::time_point::max();
 
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
@@ -109,8 +110,9 @@ public:
     uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
     champsim::chrono::clock::time_point time_enqueued;
-    champsim::chrono::clock::time_point remote_issue_time = champsim::chrono::clock::time_point::max();
+    champsim::chrono::clock::time_point issue_time = champsim::chrono::clock::time_point::max();
     bool remote_is_pool = false;
+    std::vector<champsim::chrono::clock::time_point> demand_start_times{};
 
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
@@ -124,6 +126,7 @@ private:
   bool handle_fill(const mshr_type& fill_mshr);
   bool handle_miss(const tag_lookup_type& handle_pkt);
   bool handle_write(const tag_lookup_type& handle_pkt);
+  std::deque<mshr_type>::iterator complete_mshr_response(std::deque<mshr_type>::iterator mshr_entry, mshr_type::returned_value finished_value);
   void finish_packet(const response_type& packet);
   void finish_translation(const response_type& packet);
 

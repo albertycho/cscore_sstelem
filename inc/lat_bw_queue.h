@@ -1,6 +1,7 @@
 #pragma once
 
 #include <queue>
+#include <deque>
 #include <utility>
 #include <functional>
 #include <algorithm>
@@ -64,10 +65,21 @@ public:
     /// Returns packets completed on this tick
     std::vector<T> on_tick();
 
+    /// Advances the queue by one cycle without draining completed packets.
+    void tick();
+
     /// Adds a single packet to the channel. Packet will be queued if there is not sufficient bandwidth.
     bool add_packet(T packet);
 
     std::size_t occupancy() const;
+    bool has_ready() const;
+    const T& front_ready() const;
+    T pop_ready();
+    std::vector<T> drain_ready();
+    std::vector<T> drain_ready_if(const std::function<bool(const T&)>& pred);
+    std::size_t packet_occupancy() const;
+    std::size_t ready_count() const;
+    void for_each_ready(const std::function<void(const T&)>& fn) const;
     uint64_t class_packet_occupancy(std::size_t class_id) const;
     uint64_t class_byte_occupancy(std::size_t class_id) const;
 
@@ -78,6 +90,9 @@ public:
     void reset_utilization();
 
 private:
+    bool can_accept_bytes(uint64_t bytes) const;
+    T consume_ready_entry(entry ready);
+    void move_completed_to_ready();
     void service_bandwidth();
     double get_utilization() const;
     [[nodiscard]] queue_snapshot snapshot() const;
@@ -95,6 +110,7 @@ private:
 
     std::priority_queue<entry> active_queue;    // (packet, injection_time)
     std::queue<pending_entry> blocked_queue;    // waiting to transmit
+    std::deque<entry> ready_queue;              // completed, awaiting consumer
     int64_t max_pending_bytes;
     int64_t occupancy_bytes = 0;
     std::vector<uint64_t> occupancy_packets_by_class{};

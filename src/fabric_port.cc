@@ -39,9 +39,9 @@ uint64_t credit_bytes(const csEvent* ev) {
     return event_bytes(ev);
 }
 
-int64_t credit_capacity_bytes(int64_t queue_size_bytes) {
-    if (queue_size_bytes > 0) {
-        return queue_size_bytes;
+int64_t bounded_capacity_bytes(int64_t size_bytes) {
+    if (size_bytes > 0) {
+        return size_bytes;
     }
     return kInfiniteCredits;
 }
@@ -159,8 +159,10 @@ void FabricPort::configure(SST::Link* link,
                            uint64_t self_id,
                            int64_t bw_cycles,
                            int64_t lat_cycles,
-                           int64_t queue_size_bytes) {
-    if (bw_cycles < 0 || lat_cycles < 0 || queue_size_bytes < 0) {
+                           int64_t egress_buffer_bytes,
+                           int64_t credit_window_bytes,
+                           std::optional<uint64_t> peer_id) {
+    if (bw_cycles < 0 || lat_cycles < 0 || egress_buffer_bytes < 0 || credit_window_bytes < 0) {
         throw std::runtime_error("FabricPort: negative configuration values are invalid.");
     }
     if (!link) {
@@ -168,6 +170,7 @@ void FabricPort::configure(SST::Link* link,
     }
     link_ = link;
     self_id_ = self_id;
+    peer_id_ = peer_id;
     ingress_bw_cycles_ = bw_cycles;
     ingress_lat_cycles_ = lat_cycles;
     const bool bw_enabled = (bw_cycles > 0);
@@ -191,9 +194,9 @@ void FabricPort::configure(SST::Link* link,
         // No ingress timing model when both are disabled.
         ingress_.reset();
     }
-    egress_credit_cap_ = credit_capacity_bytes(queue_size_bytes);
+    egress_credit_cap_ = bounded_capacity_bytes(credit_window_bytes);
     egress_credits_ = egress_credit_cap_;
-    egress_queue_max_bytes_ = queue_size_bytes > 0 ? queue_size_bytes : 0;
+    egress_buffer_max_bytes_ = egress_buffer_bytes > 0 ? egress_buffer_bytes : 0;
     egress_queue_bytes_ = 0;
     ingress_enqueue_cycle_.clear();
     ingress_wait_sum_cycles_ = 0;
@@ -330,7 +333,7 @@ bool FabricPort::send(csEvent* item) {
     return true;
 }
 
-void FabricPort::tick(uint64_t cycle) {
+void FabricPort::advance(uint64_t cycle) {
     if (last_tick_cycle_ != cycle) {
         last_tick_cycle_ = cycle;
         tick_ingress();
@@ -435,23 +438,15 @@ void FabricPort::tick(uint64_t cycle) {
     }
 }
 
-std::optional<csEvent*> FabricPort::receive(uint64_t cycle) {
-    if (!can_receive(cycle)) {
-        return std::nullopt;
-    }
-    csEvent* item = std::move(ready_.front());
-    const uint64_t credit_dst = event_credit_dst(item);
-    const uint64_t credit_len = credit_bytes(item);
-    ready_.pop_front();
-    record_ready_pop(cycle, item);
-    last_deliver_cycle_ = cycle;
-    send_credit(credit_dst, credit_len);
-    return item;
-}
-
 bool FabricPort::try_receive(uint64_t cycle,
                              const std::function<bool(csEvent*)>& handle) {
-    if (!can_receive(cycle)) {
+    advance(cycle);
+    return try_receive_ready(cycle, handle);
+}
+
+bool FabricPort::try_receive_ready(uint64_t cycle,
+                                   const std::function<bool(csEvent*)>& handle) {
+    if (!has_ready_to_receive(cycle)) {
         return false;
     }
     csEvent* item = ready_.front();
@@ -671,13 +666,9 @@ void FabricPort::reset_stats(uint64_t cycle) {
     ingress_episode_active_ = false;
 }
 
-bool FabricPort::can_send() const {
-    return can_send(kDefaultMsgBytes);
-}
-
 bool FabricPort::can_send(uint64_t bytes) const {
     const uint64_t bounded_bytes = std::max<uint64_t>(bytes, 1);
-    if (egress_queue_max_bytes_ <= 0) {
+    if (egress_buffer_max_bytes_ <= 0) {
         return true;
     }
     return !egress_queue_full(bounded_bytes);
@@ -685,7 +676,7 @@ bool FabricPort::can_send(uint64_t bytes) const {
 
 bool FabricPort::can_send(const csEvent* item) const {
     if (!item) {
-        return can_send();
+        return can_send(kDefaultMsgBytes);
     }
     return can_send(event_bytes(item));
 }
@@ -1454,8 +1445,7 @@ void FabricPort::emit_deep_diagnostics(std::ostream& os, const std::string& pref
     emit_peer_map(tx_by_dst_peer_, "tx_dst");
 }
 
-bool FabricPort::can_receive(uint64_t cycle) {
-    tick(cycle);
+bool FabricPort::has_ready_to_receive(uint64_t cycle) const {
     if (last_deliver_cycle_ == cycle) {
         return false;
     }
@@ -1552,8 +1542,8 @@ void FabricPort::send_credit(uint64_t dst, uint64_t bytes) {
 }
 
 bool FabricPort::egress_queue_full(uint64_t bytes) const {
-    return egress_queue_max_bytes_ > 0 &&
-           (egress_queue_bytes_ + static_cast<int64_t>(bytes)) > egress_queue_max_bytes_;
+    return egress_buffer_max_bytes_ > 0 &&
+           (egress_queue_bytes_ + static_cast<int64_t>(bytes)) > egress_buffer_max_bytes_;
 }
 
 uint64_t FabricPort::ingress_service_floor_cycles(const csEvent* item) const {

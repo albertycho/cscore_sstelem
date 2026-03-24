@@ -136,7 +136,11 @@ namespace SST {
             util_heartbeat_period = params.find<uint64_t>("util_heartbeat_period", 0);
             cxl_link_bw_cycles_ = params.find<int64_t>("cxl_link_bw_cycles", 0);
             cxl_link_latency_cycles_ = params.find<int64_t>("cxl_link_latency_cycles", 0);
-            cxl_link_queue_size_ = params.find<int64_t>("cxl_link_queue_size", 0);
+            const int64_t legacy_cxl_link_queue_size = params.find<int64_t>("cxl_link_queue_size", 0);
+            cxl_link_egress_buffer_size_ =
+                params.find<int64_t>("cxl_link_egress_buffer_size", legacy_cxl_link_queue_size);
+            cxl_link_credit_window_size_ =
+                params.find<int64_t>("cxl_link_credit_window_size", legacy_cxl_link_queue_size);
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -443,7 +447,9 @@ namespace SST {
                                    static_cast<uint64_t>(node_id),
                                    cxl_link_bw_cycles_,
                                    cxl_link_latency_cycles_,
-                                   cxl_link_queue_size_);
+                                   cxl_link_egress_buffer_size_,
+                                   cxl_link_credit_window_size_,
+                                   std::nullopt);
             cxl_port_configured_ = true;
 
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
@@ -470,7 +476,6 @@ namespace SST {
                 }
                 warmup_bypass_responses_.pop_front();
             }
-            remote_port_.tick(cycle_u);
             remote_port_.try_receive(cycle_u, [this](csEvent* ev) {
                 return handle_remote_event(ev);
             });
@@ -615,12 +620,12 @@ namespace SST {
                 printer.print(stats);
             }
 
-            // StarNUMA-style LLC demand-miss summary (LOAD+RFO only), post-merge (MSHR return).
-            const auto demand_return_count = [](const CACHE::stats_type& st) {
+            // LLC demand-miss summary (LOAD+RFO only), per original miss.
+            const auto demand_miss_count = [](const CACHE::stats_type& st) {
                 uint64_t total = 0;
-                for (const auto& key : st.mshr_return.get_keys()) {
+                for (const auto& key : st.misses.get_keys()) {
                     if (key.first == access_type::LOAD || key.first == access_type::RFO) {
-                        total += static_cast<uint64_t>(st.mshr_return.value_or(key, 0));
+                        total += static_cast<uint64_t>(st.misses.value_or(key, 0));
                     }
                 }
                 return total;
@@ -631,7 +636,7 @@ namespace SST {
                     continue;
                 }
                 const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
-                const uint64_t total_demand_miss = demand_return_count(st);
+                const uint64_t total_demand_miss = demand_miss_count(st);
                 const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
                 const double avg_pool_roundtrip_lat = (st.pool_completed > 0)
                     ? static_cast<double>(st.pool_latency_sum) / static_cast<double>(st.pool_completed)

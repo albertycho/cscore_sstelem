@@ -6,21 +6,12 @@
 #include <stdexcept>
 #include <string>
 
-#include "access_type.h"
 #include "control_event.h"
 
 namespace SST {
 namespace csimCore {
 
 namespace {
-bool is_write_request(const csEvent& ev) {
-    if (ev.payload.size() <= 10) {
-        return false;
-    }
-    const auto type = static_cast<access_type>(ev.payload[10]);
-    return type == access_type::WRITE;
-}
-
 bool is_reset_event(const csEvent& ev) {
     return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == kControlResetUtil;
 }
@@ -33,26 +24,6 @@ csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
         out->payload[1] = dst;
     }
     return out;
-}
-
-FabricPort::TrafficClass classify_fabric_event(const csEvent& ev) {
-    if (is_control_event(ev)) {
-        return FabricPort::TrafficClass::OtherReq;
-    }
-    if (ev.payload.size() > 10) {
-        const auto type = static_cast<access_type>(ev.payload[10]);
-        if (type == access_type::LOAD || type == access_type::RFO) {
-            return FabricPort::TrafficClass::DemandReq;
-        }
-        if (type == access_type::WRITE) {
-            return FabricPort::TrafficClass::WriteReq;
-        }
-        return FabricPort::TrafficClass::OtherReq;
-    }
-    if (ev.payload.size() > 8) {
-        return FabricPort::TrafficClass::Response;
-    }
-    return FabricPort::TrafficClass::OtherReq;
 }
 
 double parse_clock_ghz(std::string clock_str) {
@@ -107,7 +78,9 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     clock_frequency_ = params.find<std::string>("clock", "2.4GHz");
     link_bw_cycles_ = params.find<int64_t>("link_bw_cycles", 0);
     link_latency_cycles_ = params.find<int64_t>("link_latency_cycles", 0);
-    link_queue_size_ = params.find<int64_t>("link_queue_size", 0);
+    const int64_t legacy_link_queue_size = params.find<int64_t>("link_queue_size", 0);
+    link_egress_buffer_size_ = params.find<int64_t>("link_egress_buffer_size", legacy_link_queue_size);
+    link_credit_window_size_ = params.find<int64_t>("link_credit_window_size", legacy_link_queue_size);
     lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
 
     if (num_nodes_ <= 0) {
@@ -129,11 +102,13 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
             throw std::runtime_error("Switch: missing link for " + port_name +
                                      ". Ensure the topology connects all configured node ports.");
         }
-        node_ports_[i].port.configure(link,
-                                      static_cast<uint64_t>(i),
-                                      link_bw_cycles_,
-                                      link_latency_cycles_,
-                                      link_queue_size_);
+        node_ports_[i].configure(link,
+                                 static_cast<uint64_t>(i),
+                                 link_bw_cycles_,
+                                 link_latency_cycles_,
+                                 link_egress_buffer_size_,
+                                 link_credit_window_size_,
+                                 static_cast<uint64_t>(i));
     }
 
     pool_ports_.resize(std::max(num_pools_, 0));
@@ -145,11 +120,13 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
                                      ". Ensure the topology connects all configured pool ports.");
         }
         const uint64_t port_id = pool_node_id_base_ + static_cast<uint64_t>(p);
-        pool_ports_[p].port.configure(link,
-                                      port_id,
-                                      link_bw_cycles_,
-                                      link_latency_cycles_,
-                                      link_queue_size_);
+        pool_ports_[p].configure(link,
+                                 port_id,
+                                 link_bw_cycles_,
+                                 link_latency_cycles_,
+                                 link_egress_buffer_size_,
+                                 link_credit_window_size_,
+                                 port_id);
     }
 
     registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));
@@ -163,17 +140,14 @@ void Switch::setup() {
     route_blocked_to_node_ = 0;
     route_blocked_to_pool_ = 0;
     route_blocked_replicated_write_ = 0;
-    route_send_fail_to_node_ = 0;
-    route_send_fail_to_pool_ = 0;
     route_attempt_to_node_by_class_.fill(0);
     route_attempt_to_pool_by_class_.fill(0);
     route_blocked_to_node_by_class_.fill(0);
     route_blocked_to_pool_by_class_.fill(0);
-    route_send_fail_to_node_by_class_.fill(0);
-    route_send_fail_to_pool_by_class_.fill(0);
     route_replicated_clones_by_class_.fill(0);
     stats_start_tick_ = 0;
     last_cycle_ = 0;
+    rr_input_idx_ = 0;
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
@@ -182,10 +156,28 @@ bool Switch::clock_tick(SST::Cycle_t cycle)
     ++tick_count_;
     const auto cycle_u = static_cast<uint64_t>(cycle);
     last_cycle_ = cycle_u;
-    for_each_port([&](PortState& port) {
-        port.port.tick(cycle_u);
-        try_receive_and_route(port, cycle_u);
-    });
+    for (auto& port : node_ports_) {
+        port.advance(cycle_u);
+    }
+    for (auto& port : pool_ports_) {
+        port.advance(cycle_u);
+    }
+    const std::size_t total_ports = node_ports_.size() + pool_ports_.size();
+    for (std::size_t offset = 0; offset < total_ports; ++offset) {
+        const std::size_t flat_idx = (rr_input_idx_ + offset) % total_ports;
+        FabricPort* port = nullptr;
+        if (flat_idx < node_ports_.size()) {
+            port = &node_ports_[flat_idx];
+        } else {
+            port = &pool_ports_[flat_idx - node_ports_.size()];
+        }
+        port->try_receive_ready(cycle_u, [this](csEvent* ev) {
+            return try_route_event(ev);
+        });
+    }
+    if (total_ports > 0) {
+        rr_input_idx_ = (rr_input_idx_ + 1) % total_ports;
+    }
     return false;
 }
 
@@ -198,7 +190,7 @@ void Switch::handle_event(SST::Event* ev)
     if (cevent->payload.size() < 2) {
         throw std::runtime_error("Switch: received malformed csEvent (payload size < 2).");
     }
-    PortState* port = nullptr;
+    FabricPort* port = nullptr;
     const uint64_t src = cevent->payload[0];
     if (src < static_cast<uint64_t>(num_nodes_)) {
         const auto idx = static_cast<size_t>(src);
@@ -218,7 +210,7 @@ void Switch::handle_event(SST::Event* ev)
         throw std::runtime_error("Switch: unable to map src id to a port.");
     }
 
-    port->port.handle_event(cevent);
+    port->handle_event(cevent);
 
 }
 
@@ -236,7 +228,7 @@ bool Switch::try_route_event(csEvent* ev)
         return true;
     }
     const uint64_t dst = ev->payload[1];
-    const auto cls = classify_fabric_event(*ev);
+    const auto cls = FabricPort::classify_event(ev);
     const auto cls_idx = static_cast<std::size_t>(cls);
     if (dst < static_cast<uint64_t>(num_nodes_)) {
         const auto idx = static_cast<size_t>(dst);
@@ -244,15 +236,10 @@ bool Switch::try_route_event(csEvent* ev)
             throw std::runtime_error("Switch: dst node id out of range for configured ports.");
         }
         route_attempt_to_node_by_class_[cls_idx]++;
-        if (!node_ports_[idx].port.can_send(ev)) {
+        if (!node_ports_[idx].send(ev)) {
             route_blocked_to_node_++;
             route_blocked_to_node_by_class_[cls_idx]++;
             return false;
-        }
-        if (!node_ports_[idx].port.send(ev)) {
-            route_send_fail_to_node_++;
-            route_send_fail_to_node_by_class_[cls_idx]++;
-            delete ev;
         }
         return true;
     }
@@ -262,9 +249,9 @@ bool Switch::try_route_event(csEvent* ev)
         if (idx >= pool_ports_.size()) {
             throw std::runtime_error("Switch: dst pool id out of range for configured ports.");
         }
-        if (replicate_writes_ && is_write_request(*ev)) {
+        if (replicate_writes_ && cls == FabricPort::TrafficClass::WriteReq) {
             for (const auto& pool : pool_ports_) {
-                if (!pool.port.can_send(ev)) {
+                if (!pool.can_send(ev)) {
                     route_blocked_replicated_write_++;
                     route_blocked_to_pool_by_class_[cls_idx]++;
                     return false;
@@ -276,32 +263,27 @@ bool Switch::try_route_event(csEvent* ev)
                 replicated_count_++;
                 route_attempt_to_pool_by_class_[cls_idx]++;
                 route_replicated_clones_by_class_[cls_idx]++;
-                if (!pool_ports_[static_cast<size_t>(p)].port.send(clone)) {
-                    route_send_fail_to_pool_++;
-                    route_send_fail_to_pool_by_class_[cls_idx]++;
+                if (!pool_ports_[static_cast<size_t>(p)].send(clone)) {
                     delete clone;
+                    delete ev;
+                    throw std::runtime_error("Switch: FabricPort send failed after replicated-write precheck.");
                 }
             }
             delete ev;
             return true;
         }
-        std::size_t pick = pick_pool_index(true, ev);
+        std::size_t pick = pick_pool_index(ev);
         if (pick >= pool_ports_.size()) {
             route_blocked_to_pool_++;
             route_blocked_to_pool_by_class_[cls_idx]++;
             return false;
         }
         route_attempt_to_pool_by_class_[cls_idx]++;
-        if (!pool_ports_[pick].port.can_send(ev)) {
+        ev->payload[1] = pool_node_id_base_ + pick;
+        if (!pool_ports_[pick].send(ev)) {
             route_blocked_to_pool_++;
             route_blocked_to_pool_by_class_[cls_idx]++;
             return false;
-        }
-        ev->payload[1] = pool_node_id_base_ + pick;
-        if (!pool_ports_[pick].port.send(ev)) {
-            route_send_fail_to_pool_++;
-            route_send_fail_to_pool_by_class_[cls_idx]++;
-            delete ev;
         }
         return true;
     }
@@ -315,34 +297,7 @@ bool Switch::try_route_event(csEvent* ev)
     throw std::runtime_error(msg);
 }
 
-void Switch::try_receive_and_route(PortState& port, uint64_t cycle)
-{
-    port.port.try_receive(cycle, [this](csEvent* ev) {
-        return try_route_event(ev);
-    });
-}
-
-void Switch::for_each_port(const std::function<void(PortState&)>& fn)
-{
-    for (auto& port : node_ports_) {
-        fn(port);
-    }
-    for (auto& port : pool_ports_) {
-        fn(port);
-    }
-}
-
-void Switch::for_each_port(const std::function<void(const PortState&)>& fn) const
-{
-    for (const auto& port : node_ports_) {
-        fn(port);
-    }
-    for (const auto& port : pool_ports_) {
-        fn(port);
-    }
-}
-
-std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
+std::size_t Switch::pick_pool_index(const csEvent* probe)
 {
     if (pool_ports_.empty()) {
         return pool_ports_.size();
@@ -353,13 +308,11 @@ std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
     const std::size_t total = pool_ports_.size();
     for (std::size_t offset = 0; offset < total; ++offset) {
         const std::size_t idx = (rr_pool_idx_ + offset) % total;
-        const auto& port = pool_ports_[idx].port;
+        const auto& port = pool_ports_[idx];
         if (!port.can_send(probe)) {
             continue;
         }
-        if (advance) {
-            rr_pool_idx_ = (idx + 1) % total;
-        }
+        rr_pool_idx_ = (idx + 1) % total;
         return idx;
     }
     return total;
@@ -367,393 +320,395 @@ std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
 
 void Switch::reset_stats_and_broadcast()
 {
-    for_each_port([this](PortState& port) { port.port.reset_stats(last_cycle_); });
+    for (auto& port : node_ports_) {
+        port.reset_stats(last_cycle_);
+    }
+    for (auto& port : pool_ports_) {
+        port.reset_stats(last_cycle_);
+    }
     route_blocked_to_node_ = 0;
     route_blocked_to_pool_ = 0;
     route_blocked_replicated_write_ = 0;
-    route_send_fail_to_node_ = 0;
-    route_send_fail_to_pool_ = 0;
     route_attempt_to_node_by_class_.fill(0);
     route_attempt_to_pool_by_class_.fill(0);
     route_blocked_to_node_by_class_.fill(0);
     route_blocked_to_pool_by_class_.fill(0);
-    route_send_fail_to_node_by_class_.fill(0);
-    route_send_fail_to_pool_by_class_.fill(0);
     route_replicated_clones_by_class_.fill(0);
     stats_start_tick_ = tick_count_;
     for (int p = 0; p < num_pools_; ++p) {
         const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
         auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
-        if (!pool_ports_[static_cast<std::size_t>(p)].port.send(clone)) {
+        if (!pool_ports_[static_cast<std::size_t>(p)].send(clone)) {
             delete clone;
+            throw std::runtime_error("Switch: reset broadcast send unexpectedly blocked.");
         }
     }
 }
 
 void Switch::finish()
 {
-    auto avg_util = [](const std::vector<PortState>& ports) {
+    auto avg_util = [](const std::vector<FabricPort>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            sum += port.port.ingress_avg_utilization();
+            sum += port.ingress_avg_utilization();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    auto avg_ingress_wait = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_wait = [](const std::vector<FabricPort>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            sum += port.port.ingress_wait_avg_cycles();
+            sum += port.ingress_wait_avg_cycles();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    auto avg_egress_wait = [](const std::vector<PortState>& ports) {
+    auto avg_egress_wait = [](const std::vector<FabricPort>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            sum += port.port.egress_wait_avg_cycles();
+            sum += port.egress_wait_avg_cycles();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    auto avg_ingress_queue_wait = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_queue_wait = [](const std::vector<FabricPort>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            sum += port.port.ingress_queue_wait_avg_cycles();
+            sum += port.ingress_queue_wait_avg_cycles();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    auto avg_ready_wait = [](const std::vector<PortState>& ports) {
+    auto avg_ready_wait = [](const std::vector<FabricPort>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            sum += port.port.ready_wait_avg_cycles();
+            sum += port.ready_wait_avg_cycles();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    auto avg_ready_occ = [](const std::vector<PortState>& ports) {
+    auto avg_ready_occ = [](const std::vector<FabricPort>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            sum += port.port.ready_occupancy_avg();
+            sum += port.ready_occupancy_avg();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    auto max_ingress_wait = [](const std::vector<PortState>& ports) {
+    auto max_ingress_wait = [](const std::vector<FabricPort>& ports) {
         uint64_t max_wait = 0;
         for (const auto& port : ports) {
-            max_wait = std::max(max_wait, port.port.ingress_wait_max_cycles());
+            max_wait = std::max(max_wait, port.ingress_wait_max_cycles());
         }
         return max_wait;
     };
-    auto max_egress_wait = [](const std::vector<PortState>& ports) {
+    auto max_egress_wait = [](const std::vector<FabricPort>& ports) {
         uint64_t max_wait = 0;
         for (const auto& port : ports) {
-            max_wait = std::max(max_wait, port.port.egress_wait_max_cycles());
+            max_wait = std::max(max_wait, port.egress_wait_max_cycles());
         }
         return max_wait;
     };
-    auto max_ingress_queue_wait = [](const std::vector<PortState>& ports) {
+    auto max_ingress_queue_wait = [](const std::vector<FabricPort>& ports) {
         uint64_t max_wait = 0;
         for (const auto& port : ports) {
-            max_wait = std::max(max_wait, port.port.ingress_queue_wait_max_cycles());
+            max_wait = std::max(max_wait, port.ingress_queue_wait_max_cycles());
         }
         return max_wait;
     };
-    auto max_ready_wait = [](const std::vector<PortState>& ports) {
+    auto max_ready_wait = [](const std::vector<FabricPort>& ports) {
         uint64_t max_wait = 0;
         for (const auto& port : ports) {
-            max_wait = std::max(max_wait, port.port.ready_wait_max_cycles());
+            max_wait = std::max(max_wait, port.ready_wait_max_cycles());
         }
         return max_wait;
     };
-    auto sum_ingress_occ = [](const std::vector<PortState>& ports) {
+    auto sum_ingress_occ = [](const std::vector<FabricPort>& ports) {
         std::size_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.ingress_occupancy();
+            sum += port.ingress_occupancy();
         }
         return sum;
     };
-    auto sum_ready_occ = [](const std::vector<PortState>& ports) {
+    auto sum_ready_occ = [](const std::vector<FabricPort>& ports) {
         std::size_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.ready_occupancy();
+            sum += port.ready_occupancy();
         }
         return sum;
     };
-    auto max_ready_occ = [](const std::vector<PortState>& ports) {
+    auto max_ready_occ = [](const std::vector<FabricPort>& ports) {
         std::size_t max_occ = 0;
         for (const auto& port : ports) {
-            max_occ = std::max(max_occ, port.port.ready_occupancy_max());
+            max_occ = std::max(max_occ, port.ready_occupancy_max());
         }
         return max_occ;
     };
-    auto sum_ready_retries = [](const std::vector<PortState>& ports) {
+    auto sum_ready_retries = [](const std::vector<FabricPort>& ports) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.ready_retry_count();
+            sum += port.ready_retry_count();
         }
         return sum;
     };
-    auto max_ingress_arrival_burst_pkts = [](const std::vector<PortState>& ports) {
+    auto max_ingress_arrival_burst_pkts = [](const std::vector<FabricPort>& ports) {
         uint64_t max_burst = 0;
         for (const auto& port : ports) {
-            max_burst = std::max(max_burst, port.port.ingress_arrival_burst_max_pkts());
+            max_burst = std::max(max_burst, port.ingress_arrival_burst_max_pkts());
         }
         return max_burst;
     };
-    auto max_ingress_arrival_burst_bytes = [](const std::vector<PortState>& ports) {
+    auto max_ingress_arrival_burst_bytes = [](const std::vector<FabricPort>& ports) {
         uint64_t max_burst = 0;
         for (const auto& port : ports) {
-            max_burst = std::max(max_burst, port.port.ingress_arrival_burst_max_bytes());
+            max_burst = std::max(max_burst, port.ingress_arrival_burst_max_bytes());
         }
         return max_burst;
     };
-    auto max_ingress_release_burst_pkts = [](const std::vector<PortState>& ports) {
+    auto max_ingress_release_burst_pkts = [](const std::vector<FabricPort>& ports) {
         uint64_t max_burst = 0;
         for (const auto& port : ports) {
-            max_burst = std::max(max_burst, port.port.ingress_release_burst_max_pkts());
+            max_burst = std::max(max_burst, port.ingress_release_burst_max_pkts());
         }
         return max_burst;
     };
-    auto max_ingress_release_burst_bytes = [](const std::vector<PortState>& ports) {
+    auto max_ingress_release_burst_bytes = [](const std::vector<FabricPort>& ports) {
         uint64_t max_burst = 0;
         for (const auto& port : ports) {
-            max_burst = std::max(max_burst, port.port.ingress_release_burst_max_bytes());
+            max_burst = std::max(max_burst, port.ingress_release_burst_max_bytes());
         }
         return max_burst;
     };
-    auto avg_ingress_arrival_burst_pkts = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_burst_pkts = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_avg_pkts();
+        for (const auto& port : ports) sum += port.ingress_arrival_burst_avg_pkts();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_arrival_burst_bytes = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_burst_bytes = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_avg_bytes();
+        for (const auto& port : ports) sum += port.ingress_arrival_burst_avg_bytes();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_arrival_burst_stddev_pkts = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_burst_stddev_pkts = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_stddev_pkts();
+        for (const auto& port : ports) sum += port.ingress_arrival_burst_stddev_pkts();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_arrival_burst_stddev_bytes = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_burst_stddev_bytes = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_burst_stddev_bytes();
+        for (const auto& port : ports) sum += port.ingress_arrival_burst_stddev_bytes();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_arrival_nonempty_frac = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_nonempty_frac = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_nonempty_frac();
+        for (const auto& port : ports) sum += port.ingress_arrival_nonempty_frac();
         return sum / static_cast<double>(ports.size());
     };
-    auto max_ingress_arrival_run_cycles = [](const std::vector<PortState>& ports) {
+    auto max_ingress_arrival_run_cycles = [](const std::vector<FabricPort>& ports) {
         uint64_t max_run = 0;
-        for (const auto& port : ports) max_run = std::max(max_run, port.port.ingress_arrival_run_max_cycles());
+        for (const auto& port : ports) max_run = std::max(max_run, port.ingress_arrival_run_max_cycles());
         return max_run;
     };
-    auto avg_ingress_arrival_run_cycles = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_run_cycles = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_run_avg_cycles();
+        for (const auto& port : ports) sum += port.ingress_arrival_run_avg_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_arrival_run_stddev = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_run_stddev = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_run_stddev_cycles();
+        for (const auto& port : ports) sum += port.ingress_arrival_run_stddev_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto max_ingress_arrival_gap_cycles = [](const std::vector<PortState>& ports) {
+    auto max_ingress_arrival_gap_cycles = [](const std::vector<FabricPort>& ports) {
         uint64_t max_gap = 0;
-        for (const auto& port : ports) max_gap = std::max(max_gap, port.port.ingress_arrival_gap_max_cycles());
+        for (const auto& port : ports) max_gap = std::max(max_gap, port.ingress_arrival_gap_max_cycles());
         return max_gap;
     };
-    auto avg_ingress_arrival_gap_cycles = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_gap_cycles = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_gap_avg_cycles();
+        for (const auto& port : ports) sum += port.ingress_arrival_gap_avg_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_arrival_gap_stddev = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_arrival_gap_stddev = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_arrival_gap_stddev_cycles();
+        for (const auto& port : ports) sum += port.ingress_arrival_gap_stddev_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_release_burst_pkts = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_burst_pkts = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_burst_avg_pkts();
+        for (const auto& port : ports) sum += port.ingress_release_burst_avg_pkts();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_release_burst_bytes = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_burst_bytes = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_burst_avg_bytes();
+        for (const auto& port : ports) sum += port.ingress_release_burst_avg_bytes();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_release_burst_stddev_pkts = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_burst_stddev_pkts = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_burst_stddev_pkts();
+        for (const auto& port : ports) sum += port.ingress_release_burst_stddev_pkts();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_release_burst_stddev_bytes = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_burst_stddev_bytes = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_burst_stddev_bytes();
+        for (const auto& port : ports) sum += port.ingress_release_burst_stddev_bytes();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_release_nonempty_frac = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_nonempty_frac = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_nonempty_frac();
+        for (const auto& port : ports) sum += port.ingress_release_nonempty_frac();
         return sum / static_cast<double>(ports.size());
     };
-    auto max_ingress_release_run_cycles = [](const std::vector<PortState>& ports) {
+    auto max_ingress_release_run_cycles = [](const std::vector<FabricPort>& ports) {
         uint64_t max_run = 0;
-        for (const auto& port : ports) max_run = std::max(max_run, port.port.ingress_release_run_max_cycles());
+        for (const auto& port : ports) max_run = std::max(max_run, port.ingress_release_run_max_cycles());
         return max_run;
     };
-    auto avg_ingress_release_run_cycles = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_run_cycles = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_run_avg_cycles();
+        for (const auto& port : ports) sum += port.ingress_release_run_avg_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_release_run_stddev = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_run_stddev = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_run_stddev_cycles();
+        for (const auto& port : ports) sum += port.ingress_release_run_stddev_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto max_ingress_release_gap_cycles = [](const std::vector<PortState>& ports) {
+    auto max_ingress_release_gap_cycles = [](const std::vector<FabricPort>& ports) {
         uint64_t max_gap = 0;
-        for (const auto& port : ports) max_gap = std::max(max_gap, port.port.ingress_release_gap_max_cycles());
+        for (const auto& port : ports) max_gap = std::max(max_gap, port.ingress_release_gap_max_cycles());
         return max_gap;
     };
-    auto avg_ingress_release_gap_cycles = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_gap_cycles = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_gap_avg_cycles();
+        for (const auto& port : ports) sum += port.ingress_release_gap_avg_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_release_gap_stddev = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_release_gap_stddev = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_release_gap_stddev_cycles();
+        for (const auto& port : ports) sum += port.ingress_release_gap_stddev_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_occ = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_occ = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_occ_avg_bytes();
+        for (const auto& port : ports) sum += port.ingress_occ_avg_bytes();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_occ_stddev = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_occ_stddev = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_occ_stddev_bytes();
+        for (const auto& port : ports) sum += port.ingress_occ_stddev_bytes();
         return sum / static_cast<double>(ports.size());
     };
-    auto max_ingress_occ_bytes = [](const std::vector<PortState>& ports) {
+    auto max_ingress_occ_bytes = [](const std::vector<FabricPort>& ports) {
         uint64_t max_occ = 0;
-        for (const auto& port : ports) max_occ = std::max(max_occ, port.port.ingress_occ_max_bytes());
+        for (const auto& port : ports) max_occ = std::max(max_occ, port.ingress_occ_max_bytes());
         return max_occ;
     };
-    auto avg_ingress_occ_nonempty_frac = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_occ_nonempty_frac = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_occ_nonempty_frac();
+        for (const auto& port : ports) sum += port.ingress_occ_nonempty_frac();
         return sum / static_cast<double>(ports.size());
     };
-    auto max_ingress_occ_run_cycles = [](const std::vector<PortState>& ports) {
+    auto max_ingress_occ_run_cycles = [](const std::vector<FabricPort>& ports) {
         uint64_t max_run = 0;
-        for (const auto& port : ports) max_run = std::max(max_run, port.port.ingress_occ_run_max_cycles());
+        for (const auto& port : ports) max_run = std::max(max_run, port.ingress_occ_run_max_cycles());
         return max_run;
     };
-    auto avg_ingress_occ_run_cycles = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_occ_run_cycles = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_occ_run_avg_cycles();
+        for (const auto& port : ports) sum += port.ingress_occ_run_avg_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_occ_run_stddev = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_occ_run_stddev = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_occ_run_stddev_cycles();
+        for (const auto& port : ports) sum += port.ingress_occ_run_stddev_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto max_ingress_occ_gap_cycles = [](const std::vector<PortState>& ports) {
+    auto max_ingress_occ_gap_cycles = [](const std::vector<FabricPort>& ports) {
         uint64_t max_gap = 0;
-        for (const auto& port : ports) max_gap = std::max(max_gap, port.port.ingress_occ_gap_max_cycles());
+        for (const auto& port : ports) max_gap = std::max(max_gap, port.ingress_occ_gap_max_cycles());
         return max_gap;
     };
-    auto avg_ingress_occ_gap_cycles = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_occ_gap_cycles = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_occ_gap_avg_cycles();
+        for (const auto& port : ports) sum += port.ingress_occ_gap_avg_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto avg_ingress_occ_gap_stddev = [](const std::vector<PortState>& ports) {
+    auto avg_ingress_occ_gap_stddev = [](const std::vector<FabricPort>& ports) {
         if (ports.empty()) return 0.0;
         double sum = 0.0;
-        for (const auto& port : ports) sum += port.port.ingress_occ_gap_stddev_cycles();
+        for (const auto& port : ports) sum += port.ingress_occ_gap_stddev_cycles();
         return sum / static_cast<double>(ports.size());
     };
-    auto sum_rx_bytes_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+    auto sum_rx_bytes_class = [](const std::vector<FabricPort>& ports, FabricPort::TrafficClass cls) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.rx_bytes(cls);
+            sum += port.rx_bytes(cls);
         }
         return sum;
     };
-    auto sum_tx_bytes_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+    auto sum_tx_bytes_class = [](const std::vector<FabricPort>& ports, FabricPort::TrafficClass cls) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.tx_bytes(cls);
+            sum += port.tx_bytes(cls);
         }
         return sum;
     };
-    auto sum_rx_pkts_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+    auto sum_rx_pkts_class = [](const std::vector<FabricPort>& ports, FabricPort::TrafficClass cls) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.rx_packets(cls);
+            sum += port.rx_packets(cls);
         }
         return sum;
     };
-    auto sum_tx_pkts_class = [](const std::vector<PortState>& ports, FabricPort::TrafficClass cls) {
+    auto sum_tx_pkts_class = [](const std::vector<FabricPort>& ports, FabricPort::TrafficClass cls) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.tx_packets(cls);
+            sum += port.tx_packets(cls);
         }
         return sum;
     };
-    auto sum_tx_bytes = [](const std::vector<PortState>& ports) {
+    auto sum_tx_bytes = [](const std::vector<FabricPort>& ports) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.tx_bytes_total();
+            sum += port.tx_bytes_total();
         }
         return sum;
     };
-    auto sum_rx_bytes = [](const std::vector<PortState>& ports) {
+    auto sum_rx_bytes = [](const std::vector<FabricPort>& ports) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.rx_bytes_total();
+            sum += port.rx_bytes_total();
         }
         return sum;
     };
@@ -882,16 +837,12 @@ void Switch::finish()
         std::cout << "stat.switch.route.blocked_to_node = " << route_blocked_to_node_ << '\n';
         std::cout << "stat.switch.route.blocked_to_pool = " << route_blocked_to_pool_ << '\n';
         std::cout << "stat.switch.route.blocked_replicated_write = " << route_blocked_replicated_write_ << '\n';
-        std::cout << "stat.switch.route.send_fail_to_node = " << route_send_fail_to_node_ << '\n';
-        std::cout << "stat.switch.route.send_fail_to_pool = " << route_send_fail_to_pool_ << '\n';
         for (const auto& [cls, cls_name] : kTrafficClasses) {
             const auto idx = static_cast<std::size_t>(cls);
             std::cout << "stat.switch.route.attempt_to_node." << cls_name << " = " << route_attempt_to_node_by_class_[idx] << '\n';
             std::cout << "stat.switch.route.attempt_to_pool." << cls_name << " = " << route_attempt_to_pool_by_class_[idx] << '\n';
             std::cout << "stat.switch.route.blocked_to_node." << cls_name << " = " << route_blocked_to_node_by_class_[idx] << '\n';
             std::cout << "stat.switch.route.blocked_to_pool." << cls_name << " = " << route_blocked_to_pool_by_class_[idx] << '\n';
-            std::cout << "stat.switch.route.send_fail_to_node." << cls_name << " = " << route_send_fail_to_node_by_class_[idx] << '\n';
-            std::cout << "stat.switch.route.send_fail_to_pool." << cls_name << " = " << route_send_fail_to_pool_by_class_[idx] << '\n';
             std::cout << "stat.switch.route.replicated_clones." << cls_name << " = " << route_replicated_clones_by_class_[idx] << '\n';
             std::cout << "stat.switch.fabric.node_rx_bytes." << cls_name << " = " << sum_rx_bytes_class(node_ports_, cls) << '\n';
             std::cout << "stat.switch.fabric.node_tx_bytes." << cls_name << " = " << sum_tx_bytes_class(node_ports_, cls) << '\n';
@@ -984,10 +935,10 @@ void Switch::finish()
             port.emit_deep_diagnostics(std::cout, prefix);
         };
         for (std::size_t i = 0; i < node_ports_.size(); ++i) {
-            print_port_stats("stat.switch.port.node." + std::to_string(i) + ".", node_ports_[i].port);
+            print_port_stats("stat.switch.port.node." + std::to_string(i) + ".", node_ports_[i]);
         }
         for (std::size_t i = 0; i < pool_ports_.size(); ++i) {
-            print_port_stats("stat.switch.port.pool." + std::to_string(i) + ".", pool_ports_[i].port);
+            print_port_stats("stat.switch.port.pool." + std::to_string(i) + ".", pool_ports_[i]);
         }
         std::cout << "stat.switch.walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {

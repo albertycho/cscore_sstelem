@@ -32,11 +32,15 @@ csEvent* make_reset_util_event(uint64_t src, uint64_t dst);
 //  - credit-based egress backpressure
 //
 // Usage (csEvent* only):
-//   port.configure(link, self_id, bw_cycles, lat_cycles, queue_size_bytes);
-//   port.send(ev);                 // returns false if egress queue full
-//   auto ev = port.receive(cyc);   // returns at most one message per cycle
+//   port.configure(link, self_id, bw_cycles, lat_cycles,
+//                  egress_buffer_bytes, credit_window_bytes, peer_id);
+//   port.send(ev); // returns false if the local egress buffer cannot accept the event
+//   Convenience receive path:
+//     port.try_receive(cyc, handle); // advances once for `cyc`, then consumes at most one ready message
+//   Split-phase receive path:
+//     port.advance(cyc);             // advances once for `cyc`
+//     port.try_receive_ready(cyc, handle); // consumes at most one already-ready message
 class FabricPort {
-private:
 public:
     enum class TrafficClass : std::size_t {
         DemandReq = 0,
@@ -55,31 +59,38 @@ public:
 
     // Configure the port using default type traits for conversion/bytes.
     // Parameters:
-    //   link               SST link pointer (may be null; send() will fail).
-    //   self_id            Node id for credit/control messages.
+    //   link               SST link pointer (must be non-null).
+    //   self_id            Local endpoint identity used on control/credit messages.
     //   bw_cycles          Cycles per 64B for ingress bandwidth modeling (0 disables bandwidth shaping).
     //   lat_cycles         Base latency in cycles for ingress modeling (0 disables latency shaping).
     //                     If both bw_cycles and lat_cycles are 0, ingress queue/timing is bypassed.
-    //   queue_size_bytes   Egress credit capacity in bytes (0 = unbounded).
-    //                     Ingress is unbounded to avoid drops; credits gate senders.
+    //   egress_buffer_bytes Sender-local egress buffer capacity in bytes (0 = unbounded).
+    //   credit_window_bytes Downstream returned-credit window in bytes (0 = unbounded).
+    //                     Ingress is unbounded to avoid drops; upstream flow control is
+    //                     provided by credits rather than receiver-side drops.
+    //   peer_id            Optional direct peer identity for the owning component's routing logic.
     void configure(SST::Link* link,
                    uint64_t self_id,
                    int64_t bw_cycles,
                    int64_t lat_cycles,
-                   int64_t queue_size_bytes);
+                   int64_t egress_buffer_bytes,
+                   int64_t credit_window_bytes,
+                   std::optional<uint64_t> peer_id = std::nullopt);
 
     [[nodiscard]] bool send(csEvent* item);
 
-    // Returns at most one message per cycle for this port.
-    void tick(uint64_t cycle);
-    std::optional<csEvent*> receive(uint64_t cycle);
     bool try_receive(uint64_t cycle,
                      const std::function<bool(csEvent*)>& handle);
+    bool try_receive_ready(uint64_t cycle,
+                           const std::function<bool(csEvent*)>& handle);
 
     void handle_event(SST::Event* ev);
+    void advance(uint64_t cycle);
 
     void reset_stats(uint64_t cycle);
-    bool can_send() const;
+    bool has_peer_id() const { return peer_id_.has_value(); }
+    std::optional<uint64_t> peer_id() const { return peer_id_; }
+    static TrafficClass classify_event(const csEvent* item);
     bool can_send(uint64_t bytes) const;
     bool can_send(const csEvent* item) const;
     double ingress_avg_utilization() const;
@@ -179,14 +190,13 @@ public:
     void emit_deep_diagnostics(std::ostream& os, const std::string& prefix) const;
 
 private:
-    bool can_receive(uint64_t cycle);
+    bool has_ready_to_receive(uint64_t cycle) const;
     void tick_ingress();
     void drain_egress();
     void send_credit(uint64_t dst, uint64_t bytes);
     uint64_t ingress_service_floor_cycles(const csEvent* item) const;
     void push_ready(csEvent* item, bool front = false);
     void record_ready_pop(uint64_t cycle, csEvent* item);
-    static TrafficClass classify_event(const csEvent* item);
     void record_rx(const csEvent* item);
     void record_tx(const csEvent* item);
     void record_ingress_arrival(uint64_t cycle, uint64_t bytes);
@@ -283,12 +293,13 @@ private:
 
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
+    std::optional<uint64_t> peer_id_;
     std::unique_ptr<::lat_bw_queue<csEvent*>> ingress_;
     int64_t ingress_bw_cycles_ = 0;
     int64_t ingress_lat_cycles_ = 0;
     int64_t egress_credits_ = 0;
     int64_t egress_credit_cap_ = 0;
-    int64_t egress_queue_max_bytes_ = 0;
+    int64_t egress_buffer_max_bytes_ = 0;
     int64_t egress_queue_bytes_ = 0;
     struct EgressEntry {
         csEvent* ev = nullptr;

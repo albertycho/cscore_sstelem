@@ -1,8 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
-#include <memory>
 #include <array>
 #include <vector>
 #include <chrono>
@@ -20,7 +18,6 @@ namespace csimCore {
 
 /**
  * Switch is a multi-port router.
- * For now, all pool-bound traffic is forwarded to pool 0.
  */
 class Switch : public SST::Component {
 public:
@@ -45,7 +42,9 @@ public:
         { "clock", "Clock frequency for queue timing", "2.4GHz" },
         { "link_bw_cycles", "Link ingress bandwidth in cycles per 64B (0 disables ingress bandwidth shaping)", "0" },
         { "link_latency_cycles", "Link ingress base latency in cycles (0 disables ingress latency shaping; when both bw+lat are 0, ingress queue is bypassed)", "0" },
-        { "link_queue_size", "Link ingress queue capacity in bytes (0 = unbounded)", "0" },
+        { "link_egress_buffer_size", "Sender-local link egress buffer capacity in bytes (0 = unbounded)", "0" },
+        { "link_credit_window_size", "Returned-credit window in bytes for each link (0 = unbounded)", "0" },
+        { "link_queue_size", "Legacy shorthand: default value for both link_egress_buffer_size and link_credit_window_size when explicit knobs are omitted", "0" },
         { "lightweight_output", "If set, emit stat.* switch summaries", "0" }
     )
 
@@ -63,17 +62,12 @@ private:
     Switch(const Switch&) = delete;
     void operator=(const Switch&) = delete;
 
-    struct PortState;
-
     void handle_event(SST::Event* ev);
     void finish() override;
     bool clock_tick(SST::Cycle_t cycle);
     void reset_stats_and_broadcast();
     bool try_route_event(csEvent* ev);
-    void try_receive_and_route(PortState& port, uint64_t cycle);
-    void for_each_port(const std::function<void(PortState&)>& fn);
-    void for_each_port(const std::function<void(const PortState&)>& fn) const;
-    std::size_t pick_pool_index(bool advance, const csEvent* probe);
+    std::size_t pick_pool_index(const csEvent* probe);
 
     int num_nodes_ = 0;
     int num_pools_ = 0;
@@ -82,28 +76,23 @@ private:
     enum class PoolSelectPolicy { Fixed0, RoundRobin };
     PoolSelectPolicy pool_select_policy_ = PoolSelectPolicy::RoundRobin;
     std::size_t rr_pool_idx_ = 0;
+    std::size_t rr_input_idx_ = 0;
     std::string clock_frequency_{"2.4GHz"};
     int64_t link_bw_cycles_ = 0;
     int64_t link_latency_cycles_ = 0;
-    int64_t link_queue_size_ = 0;
+    int64_t link_egress_buffer_size_ = 0;
+    int64_t link_credit_window_size_ = 0;
     bool lightweight_output_ = false;
-    struct PortState {
-        FabricPort port;
-    };
-    std::vector<PortState> node_ports_;
-    std::vector<PortState> pool_ports_;
+    std::vector<FabricPort> node_ports_;
+    std::vector<FabricPort> pool_ports_;
     uint64_t replicated_count_ = 0;
     uint64_t route_blocked_to_node_ = 0;
     uint64_t route_blocked_to_pool_ = 0;
     uint64_t route_blocked_replicated_write_ = 0;
-    uint64_t route_send_fail_to_node_ = 0;
-    uint64_t route_send_fail_to_pool_ = 0;
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_attempt_to_node_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_attempt_to_pool_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_blocked_to_node_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_blocked_to_pool_by_class_{};
-    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_send_fail_to_node_by_class_{};
-    std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_send_fail_to_pool_by_class_{};
     std::array<uint64_t, static_cast<std::size_t>(FabricPort::TrafficClass::Count)> route_replicated_clones_by_class_{};
     uint64_t tick_count_ = 0;
     uint64_t stats_start_tick_ = 0;

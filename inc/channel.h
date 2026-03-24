@@ -27,6 +27,7 @@
 #include "access_type.h"
 #include "address.h"
 #include "champsim.h"
+#include "chrono.h"
 
 namespace champsim
 {
@@ -66,6 +67,7 @@ class channel
     champsim::address data{};
     uint64_t instr_id = 0;
     champsim::address ip{};
+    champsim::chrono::clock::time_point miss_start_time = champsim::chrono::clock::time_point::max();
 
     std::vector<uint64_t> instr_depend_on_me{};
   };

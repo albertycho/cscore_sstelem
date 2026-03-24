@@ -44,7 +44,6 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
   using hits_value_type = typename decltype(stats.hits)::value_type;
   using misses_value_type = typename decltype(stats.misses)::value_type;
   using mshr_merge_value_type = typename decltype(stats.mshr_merge)::value_type;
-  using mshr_return_value_type = typename decltype(stats.mshr_return)::value_type;
 
   std::map<std::string, nlohmann::json> statsmap;
   statsmap.emplace("prefetch requested", stats.pf_requested);
@@ -54,8 +53,8 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
 
   uint64_t total_downstream_demands = 0;
   for (std::size_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
-    total_downstream_demands += stats.mshr_return.value_or(std::pair{access_type::LOAD, cpu}, mshr_return_value_type{});
-    total_downstream_demands += stats.mshr_return.value_or(std::pair{access_type::RFO, cpu}, mshr_return_value_type{});
+    total_downstream_demands += stats.misses.value_or(std::pair{access_type::LOAD, cpu}, misses_value_type{});
+    total_downstream_demands += stats.misses.value_or(std::pair{access_type::RFO, cpu}, misses_value_type{});
   }
 
   statsmap.emplace("miss latency", std::ceil(stats.total_miss_latency_cycles) / std::ceil(total_downstream_demands));

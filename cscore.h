@@ -85,7 +85,9 @@ namespace SST {
             { "util_heartbeat_period", "Cycles between utilization logs (0 disables)", "0" },
             { "cxl_link_bw_cycles", "CXL ingress bandwidth in cycles per 64B (core-side FabricPort; 0 disables ingress bandwidth shaping)", "0" },
             { "cxl_link_latency_cycles", "CXL ingress base latency in cycles (core-side FabricPort; 0 disables ingress latency shaping; when both bw+lat are 0, ingress queue is bypassed)", "0" },
-            { "cxl_link_queue_size", "CXL link queue capacity in bytes (0 = unbounded)", "0" },
+            { "cxl_link_egress_buffer_size", "Sender-local CXL egress buffer capacity in bytes (0 = unbounded)", "0" },
+            { "cxl_link_credit_window_size", "Returned-credit window in bytes for the CXL link (0 = unbounded)", "0" },
+            { "cxl_link_queue_size", "Legacy shorthand: default value for both cxl_link_egress_buffer_size and cxl_link_credit_window_size when explicit knobs are omitted", "0" },
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
             { "warm_cache_insts", "Initial instructions where remote requests are satisfied locally (cache warm only, no fabric traffic). Clamped to warmup_insts.", "0 (defaults to warmup_insts)" },
@@ -172,7 +174,8 @@ namespace SST {
         std::deque<sst_response> warmup_bypass_responses_;
         int64_t cxl_link_bw_cycles_ = 0;
         int64_t cxl_link_latency_cycles_ = 0;
-        int64_t cxl_link_queue_size_ = 0;
+        int64_t cxl_link_egress_buffer_size_ = 0;
+        int64_t cxl_link_credit_window_size_ = 0;
         bool final_stats_printed = false;
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
