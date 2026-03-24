@@ -638,24 +638,19 @@ namespace SST {
                 const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
                 const uint64_t total_demand_miss = demand_miss_count(st);
                 const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
-                const double avg_pool_roundtrip_lat = (st.pool_completed > 0)
-                    ? static_cast<double>(st.pool_latency_sum) / static_cast<double>(st.pool_completed)
-                    : 0.0;
                 const double avg_miss_lat = (total_demand_miss > 0)
                     ? static_cast<double>(st.total_miss_latency_cycles) / static_cast<double>(total_demand_miss)
                     : 0.0;
-                const double avg_cxl_lat = (cxl_demand_miss > 0)
+                const double avg_cxl_miss_lat = (cxl_demand_miss > 0)
                     ? static_cast<double>(st.pool_demand_miss_latency_sum) / static_cast<double>(cxl_demand_miss)
                     : 0.0;
                 if (lightweight_output_) {
                     const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".llc.";
                     std::cout << prefix << "pool_accesses = " << st.pool_accesses << '\n';
-                    std::cout << prefix << "pool_completed = " << st.pool_completed << '\n';
-                    std::cout << prefix << "avg_pool_roundtrip_lat = " << avg_pool_roundtrip_lat << '\n';
                     std::cout << prefix << "cxl_miss = " << cxl_demand_miss << '\n';
                     std::cout << prefix << "total_miss = " << total_demand_miss << '\n';
                     std::cout << prefix << "avg_miss_lat = " << avg_miss_lat << '\n';
-                    std::cout << prefix << "avg_cxl_lat = " << avg_cxl_lat << '\n';
+                    std::cout << prefix << "avg_cxl_miss_lat = " << avg_cxl_miss_lat << '\n';
                     if (print_latency_hist_) {
                         std::cout << prefix << "miss_lat_hist_bin_ns = 10\n";
                         std::cout << prefix << "miss_lat_hist = [";
@@ -669,7 +664,7 @@ namespace SST {
                     }
                 } else {
                     std::cout << cxl_demand_miss << " / " << total_demand_miss << " LLC misses are CXL" << std::endl;
-                    std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl lat: " << avg_cxl_lat << std::endl;
+                    std::cout << "LLC miss lat: " << avg_miss_lat << ", cxl miss lat: " << avg_cxl_miss_lat << std::endl;
                     if (print_latency_hist_) {
                         std::cout << "LLC_MISS_LAT_HIST (in ns):" << std::endl;
                         for (std::size_t i = 0; i < st.miss_latency_hist.size(); ++i) {

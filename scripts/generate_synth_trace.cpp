@@ -48,8 +48,8 @@ constexpr uint64_t kCxlBase = 64ull * 1024 * 1024 * 1024;
 constexpr uint64_t kCxlSize = 64ull * 1024 * 1024 * 1024;
 
 // Working set sizes (bytes). If 0, use full region size.
-constexpr uint64_t kLocalWsBytes = 8ull * 1024 * 1024;
-constexpr uint64_t kCxlWsBytes = 8ull * 1024 * 1024;
+constexpr uint64_t kLocalWsBytes = 64ull * 1024 * 1024;
+constexpr uint64_t kCxlWsBytes = 64ull * 1024 * 1024;
 
 static_assert(std::is_trivial<input_instr>::value, "input_instr must be trivial");
 static_assert(std::is_standard_layout<input_instr>::value, "input_instr must be standard layout");

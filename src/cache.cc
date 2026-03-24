@@ -330,11 +330,12 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
       }
     }
   }
-  if (is_std_req && fill_mshr.remote_is_pool && fill_mshr.issue_time != max_time) {
-    const auto cxl_lat_time = current_time - fill_mshr.issue_time;
-    const auto cxl_lat_cycles = cxl_lat_time / clock_period;
-    sim_stats.pool_demand_miss_latency_sum += cxl_lat_cycles;
-    sim_stats.pool_demand_miss_count++;
+  if (is_std_req && fill_mshr.remote_is_pool && !fill_mshr.demand_start_times.empty()) {
+    for (const auto& miss_start_time : fill_mshr.demand_start_times) {
+      const auto cxl_miss_lat_time = current_time - miss_start_time;
+      sim_stats.pool_demand_miss_latency_sum += (cxl_miss_lat_time / clock_period);
+      sim_stats.pool_demand_miss_count++;
+    }
   }
   sim_stats.mshr_return.increment(std::pair{fill_mshr.type, fill_mshr.cpu});
 
@@ -1054,7 +1055,6 @@ void CACHE::begin_phase()
   for (auto& mshr_entry : MSHR) {
     mshr_entry.demand_start_times.clear();
     mshr_entry.issue_time = champsim::chrono::clock::time_point::max();
-    mshr_entry.remote_is_pool = false;
   }
   for (auto& entry : inflight_tag_check) {
     entry.miss_start_time = champsim::chrono::clock::time_point::max();

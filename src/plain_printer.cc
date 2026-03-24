@@ -153,12 +153,7 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
         fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
   }
 
-  auto pool_avg = ::print_ratio(stats.pool_latency_sum, stats.pool_completed);
-  auto pool_p95 = stats.pool_completed > 0 ? fmt::format("{}", hist_quantile(stats.pool_latency_hist, 0.95)) : "-";
-  auto pool_p99 = stats.pool_completed > 0 ? fmt::format("{}", hist_quantile(stats.pool_latency_hist, 0.99)) : "-";
   auto pool_demand_avg = ::print_ratio(stats.pool_demand_miss_latency_sum, stats.pool_demand_miss_count);
-  lines.push_back(fmt::format("{} POOL ACCESS: {:10} COMPLETED: {:10} AVG_LAT: {} cycles P95: {} P99: {}", stats.name, stats.pool_accesses,
-                              stats.pool_completed, pool_avg, pool_p95, pool_p99));
   lines.push_back(fmt::format("{} POOL MISS LATENCY (LOAD/RFO): {} cycles (count {})", stats.name, pool_demand_avg, stats.pool_demand_miss_count));
 
   return lines;
