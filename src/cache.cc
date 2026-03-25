@@ -29,6 +29,7 @@
 #include "chrono.h"
 #include "deadlock.h"
 #include "instruction.h"
+#include "response_timeline.h"
 #include "util/algorithm.h"
 #include "util/bits.h"
 #include "util/span.h"
@@ -66,6 +67,7 @@ void record_miss_latency(cache_stats& stats, champsim::chrono::clock::duration l
   }
   stats.miss_latency_hist[bin]++;
 }
+
 } // namespace
 
 CACHE::CACHE(CACHE&& other)
@@ -444,6 +446,47 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
   auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
 
+  SST::csimCore::AddressMap::Entry const* remote_entry = nullptr;
+  if (address_map && send_remote) {
+    auto entry = address_map->lookup(static_cast<uint32_t>(node_id), mshr_pkt.second.v_address.to<uint64_t>());
+    if (entry && entry->type != SST::csimCore::AddressType::Local) {
+      remote_entry = entry;
+    }
+  }
+
+  const auto log_remote_stage = [&](std::string_view stage) {
+    if (remote_entry == nullptr) {
+      return;
+    }
+    sst_request req;
+    req.src_node = static_cast<uint32_t>(node_id);
+    req.dst_node = static_cast<uint32_t>(remote_entry->target);
+    req.forward_checked = mshr_pkt.second.forward_checked;
+    req.is_translated = mshr_pkt.second.is_translated;
+    req.response_requested = mshr_pkt.second.response_requested;
+    req.type = mshr_pkt.second.type;
+    req.pf_metadata = mshr_pkt.second.pf_metadata;
+    req.cpu = mshr_pkt.second.cpu;
+    req.sst_cpu = node_id;
+    req.address = mshr_pkt.second.address.to<uint64_t>();
+    req.v_address = mshr_pkt.second.v_address.to<uint64_t>();
+    req.data = mshr_pkt.second.data.to<uint64_t>();
+    req.instr_id = mshr_pkt.second.instr_id;
+    req.trace_tag = mshr_pkt.second.instr_id;
+    req.ip = mshr_pkt.second.ip.to<uint64_t>();
+    req.asid[0] = mshr_pkt.second.asid[0];
+    req.asid[1] = mshr_pkt.second.asid[1];
+    req.msg_bytes = (req.type == access_type::WRITE) ? 64 : 8;
+    response_timeline::log_request("node." + std::to_string(node_id) + ".llc",
+                                   std::string(stage),
+                                   current_time.time_since_epoch() / clock_period,
+                                   req);
+  };
+
+  if (remote_entry != nullptr) {
+    log_remote_stage("llc.remote_candidate");
+  }
+
   // check mshr (search both queues)
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
   bool mshr_full = (MSHR.size() >= MSHR_SIZE); // TODO: enforce per-dest limits to avoid starvation
@@ -457,53 +500,57 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       }
     }
 
+    if (remote_entry != nullptr) {
+      log_remote_stage("llc.remote_mshr_merge");
+    }
+
     // COLLECT STATS
     sim_stats.mshr_merge.increment(std::pair{to_allocate.type, to_allocate.cpu});
 
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
   } else {
     if (mshr_full) { // not enough MSHR resource
+      if (remote_entry != nullptr) {
+        log_remote_stage("llc.remote_mshr_full");
+      }
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
     }
-    
-    // Remote/pool path: consult address map to see if address is owned by another node.
-    if (address_map && send_remote) {
-      auto entry = address_map->lookup(static_cast<uint32_t>(node_id), mshr_pkt.second.v_address.to<uint64_t>());
-      if (entry && entry->type != SST::csimCore::AddressType::Local) {
-        sst_request sreq;
-        sreq.src_node = static_cast<uint32_t>(node_id);
-        sreq.dst_node = static_cast<uint32_t>(entry->target);
-        sreq.forward_checked = mshr_pkt.second.forward_checked;
-        sreq.is_translated = mshr_pkt.second.is_translated;
-        sreq.response_requested = mshr_pkt.second.response_requested;
-        sreq.type = mshr_pkt.second.type;
-        sreq.pf_metadata = mshr_pkt.second.pf_metadata;
-        sreq.cpu = mshr_pkt.second.cpu;
-        sreq.sst_cpu = node_id; // return path target
-        sreq.address = mshr_pkt.second.address.to<uint64_t>();
-        sreq.v_address = mshr_pkt.second.v_address.to<uint64_t>();
-        sreq.data = mshr_pkt.second.data.to<uint64_t>();
-        sreq.instr_id = mshr_pkt.second.instr_id;
-        sreq.ip = mshr_pkt.second.ip.to<uint64_t>();
-        sreq.asid[0] = mshr_pkt.second.asid[0];
-        sreq.asid[1] = mshr_pkt.second.asid[1];
-        sreq.msg_bytes = (sreq.type == access_type::WRITE) ? 64 : 8;
 
-        bool accepted = send_remote(sreq); // pool is treated as remote memory
-        if (accepted) {
-          if (mshr_pkt.second.response_requested) {
-            mshr_pkt.first.issue_time = current_time;
-            mshr_pkt.first.remote_is_pool = (entry->type == SST::csimCore::AddressType::Pool);
-            MSHR.emplace_back(std::move(mshr_pkt.first));
-          }
-          if (entry->type == SST::csimCore::AddressType::Pool) {
-            sim_stats.pool_accesses++;
-          }
-          sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
-          return true;
+    if (remote_entry != nullptr) {
+      sst_request sreq;
+      sreq.src_node = static_cast<uint32_t>(node_id);
+      sreq.dst_node = static_cast<uint32_t>(remote_entry->target);
+      sreq.forward_checked = mshr_pkt.second.forward_checked;
+      sreq.is_translated = mshr_pkt.second.is_translated;
+      sreq.response_requested = mshr_pkt.second.response_requested;
+      sreq.type = mshr_pkt.second.type;
+      sreq.pf_metadata = mshr_pkt.second.pf_metadata;
+      sreq.cpu = mshr_pkt.second.cpu;
+      sreq.sst_cpu = node_id;
+      sreq.address = mshr_pkt.second.address.to<uint64_t>();
+      sreq.v_address = mshr_pkt.second.v_address.to<uint64_t>();
+      sreq.data = mshr_pkt.second.data.to<uint64_t>();
+      sreq.instr_id = mshr_pkt.second.instr_id;
+      sreq.ip = mshr_pkt.second.ip.to<uint64_t>();
+      sreq.asid[0] = mshr_pkt.second.asid[0];
+      sreq.asid[1] = mshr_pkt.second.asid[1];
+      sreq.msg_bytes = (sreq.type == access_type::WRITE) ? 64 : 8;
+      bool accepted = send_remote(sreq); // pool is treated as remote memory
+      if (accepted) {
+        log_remote_stage("llc.remote_issue_success");
+        if (mshr_pkt.second.response_requested) {
+          mshr_pkt.first.issue_time = current_time;
+          mshr_pkt.first.remote_is_pool = (remote_entry->type == SST::csimCore::AddressType::Pool);
+          MSHR.emplace_back(std::move(mshr_pkt.first));
         }
-        return false;
+        if (remote_entry->type == SST::csimCore::AddressType::Pool) {
+          sim_stats.pool_accesses++;
+        }
+        sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
+        return true;
       }
+      log_remote_stage("llc.remote_issue_blocked");
+      return false;
     }
 
     const bool send_to_rq = (prefetch_as_load || handle_pkt.type != access_type::PREFETCH);

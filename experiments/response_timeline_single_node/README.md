@@ -6,6 +6,11 @@ Files:
 - `analyze_timeline.py`: prints stage-to-stage average deltas from one or more timeline CSVs
 
 The timeline is gated by the `CSCORE_RESPONSE_TIMELINE_PATH` env var and logs:
+- `node.0.llc:llc.remote_candidate`
+- `node.0.llc:llc.remote_mshr_merge`
+- `node.0.llc:llc.remote_mshr_full`
+- `node.0.llc:llc.remote_issue_success`
+- `node.0.llc:llc.remote_issue_blocked`
 - `node.request_issue`
 - `pool.request_accept`
 - `pool.response_ready`

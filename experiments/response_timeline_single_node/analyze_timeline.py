@@ -123,6 +123,11 @@ def summarize(path: Path) -> None:
             )
 
     for stage_name in (
+        "node.0.llc:llc.remote_candidate",
+        "node.0.llc:llc.remote_mshr_merge",
+        "node.0.llc:llc.remote_mshr_full",
+        "node.0.llc:llc.remote_issue_success",
+        "node.0.llc:llc.remote_issue_blocked",
         "node.0:node.request_issue",
         "pool.100:pool.request_accept",
         "pool.100:pool.response_ready",
