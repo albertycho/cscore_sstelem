@@ -179,6 +179,7 @@ namespace SST {
         bool final_stats_printed = false;
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
+        uint64_t next_remote_trace_tag_ = 1;
         std::chrono::steady_clock::time_point wall_start_{};
         std::chrono::steady_clock::duration active_time_{};
         uint64_t active_calls_ = 0;

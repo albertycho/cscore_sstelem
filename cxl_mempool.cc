@@ -447,15 +447,14 @@ bool CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
             request.src_node,
             request.type,
             request.instr_id,
-            tag,
+            request.trace_tag != 0 ? request.trace_tag : tag,
             tick_count_,
             std::numeric_limits<uint64_t>::max()
         };
         response_timeline::log_request("pool." + std::to_string(pool_node_id_),
                                        "pool.request_accept",
                                        tick_count_,
-                                       request,
-                                       tag);
+                                       request);
     }
 
     if (request.src_node < MAX_CXL_PORTS) {

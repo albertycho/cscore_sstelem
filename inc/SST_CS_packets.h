@@ -36,6 +36,7 @@ struct sst_request {
     uint64_t v_address = 0;
     uint64_t data = 0;
     uint64_t instr_id = 0;
+    uint64_t trace_tag = 0;
     uint64_t ip = 0;
     uint16_t msg_bytes = 64;
 
@@ -63,7 +64,7 @@ struct sst_response {
     {
     }
     explicit sst_response(sst_request req)
-        : sst_response(req.address, req.v_address, req.data, req.pf_metadata, req.cpu, req.sst_cpu, req.instr_id, 0, req.type) {}
+        : sst_response(req.address, req.v_address, req.data, req.pf_metadata, req.cpu, req.sst_cpu, req.instr_id, req.trace_tag, req.type) {}
 };
 
 std::string type_to_string(access_type type);

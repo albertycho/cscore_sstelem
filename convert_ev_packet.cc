@@ -6,13 +6,14 @@ SST::csimCore::csEvent* convert_request_to_event(const sst_request &req) {
     auto src = (req.src_node == std::numeric_limits<uint32_t>::max()) ? req.cpu : req.src_node;
     auto dst = (req.dst_node == std::numeric_limits<uint32_t>::max()) ? req.sst_cpu : req.dst_node;
     auto nev = new SST::csimCore::csEvent();
-    nev->payload.reserve(17);
+    nev->payload.reserve(18);
     nev->payload.push_back(src);
     nev->payload.push_back(dst);
     nev->payload.push_back(req.address);
     nev->payload.push_back(req.v_address);
     nev->payload.push_back(req.data);
     nev->payload.push_back(req.instr_id);
+    nev->payload.push_back(req.trace_tag);
     nev->payload.push_back(req.ip);
     nev->payload.push_back(req.pf_metadata);
     nev->payload.push_back(req.cpu);
@@ -30,7 +31,7 @@ SST::csimCore::csEvent* convert_request_to_event(const sst_request &req) {
 // Helper function to convert csEvent to sst_request
 sst_request convert_event_to_request(const SST::csimCore::csEvent &event) {
     sst_request req;
-    if (event.payload.size() < 2 + 14) {
+    if (event.payload.size() < 18) {
         return req;
     }
     req.src_node = static_cast<uint32_t>(event.payload[0]);
@@ -39,19 +40,18 @@ sst_request convert_event_to_request(const SST::csimCore::csEvent &event) {
     req.v_address = event.payload[3];
     req.data = event.payload[4];
     req.instr_id = event.payload[5];
-    req.ip = event.payload[6];
-    req.pf_metadata = static_cast<uint32_t>(event.payload[7]);
-    req.cpu = static_cast<uint32_t>(event.payload[8]);
-    req.sst_cpu = static_cast<uint32_t>(event.payload[9]);
-    req.type = static_cast<access_type>(event.payload[10]);
-    req.asid[0] = static_cast<uint8_t>(event.payload[11]);
-    req.asid[1] = static_cast<uint8_t>(event.payload[12]);
-    req.forward_checked = (event.payload[13] != 0);
-    req.is_translated = (event.payload[14] != 0);
-    req.response_requested = (event.payload[15] != 0);
-    if (event.payload.size() > 16) {
-        req.msg_bytes = static_cast<uint16_t>(event.payload[16]);
-    }
+    req.trace_tag = event.payload[6];
+    req.ip = event.payload[7];
+    req.pf_metadata = static_cast<uint32_t>(event.payload[8]);
+    req.cpu = static_cast<uint32_t>(event.payload[9]);
+    req.sst_cpu = static_cast<uint32_t>(event.payload[10]);
+    req.type = static_cast<access_type>(event.payload[11]);
+    req.asid[0] = static_cast<uint8_t>(event.payload[12]);
+    req.asid[1] = static_cast<uint8_t>(event.payload[13]);
+    req.forward_checked = (event.payload[14] != 0);
+    req.is_translated = (event.payload[15] != 0);
+    req.response_requested = (event.payload[16] != 0);
+    req.msg_bytes = static_cast<uint16_t>(event.payload[17]);
     return req;
 }
 

@@ -886,16 +886,20 @@ namespace SST {
 			if (!cxl_port_configured_) {
 				return false;
 			}
-			auto* event = convert_request_to_event(req);
+            sst_request tagged_req = req;
+            if (tagged_req.response_requested && tagged_req.trace_tag == 0) {
+                tagged_req.trace_tag = next_remote_trace_tag_++;
+            }
+			auto* event = convert_request_to_event(tagged_req);
 			if (!remote_port_.send(event)) {
 				delete event;
 				return false;
 			}
-            if (req.response_requested) {
+            if (tagged_req.response_requested) {
                 response_timeline::log_request("node." + std::to_string(node_id),
                                                "node.request_issue",
                                                heartbeat_count,
-                                               req);
+                                               tagged_req);
             }
 			return true;
 		}

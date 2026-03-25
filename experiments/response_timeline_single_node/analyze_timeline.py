@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 import csv
+import math
 import statistics
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 
-def key_for(row: dict[str, str]) -> int:
-    instr_id = int(row["instr_id"])
-    if instr_id != 0:
-        return instr_id
+def trace_tag_key(row: dict[str, str]) -> int:
     return int(row["trace_tag"])
 
 
@@ -20,33 +18,35 @@ def load_rows(path: Path) -> list[dict[str, str]]:
 
 def summarize(path: Path) -> None:
     rows = load_rows(path)
-    by_key: dict[int, dict[str, int]] = defaultdict(dict)
+    by_trace_tag: dict[int, dict[str, int]] = defaultdict(dict)
+    stage_rows: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows:
-        key = key_for(row)
         location = row["location"]
         stage = row["stage"]
         cycle = int(row["cycle"])
         full_stage = f"{location}:{stage}"
-        if full_stage not in by_key[key] or cycle < by_key[key][full_stage]:
-            by_key[key][full_stage] = cycle
+        trace_tag = trace_tag_key(row)
+        if trace_tag != 0:
+            if full_stage not in by_trace_tag[trace_tag] or cycle < by_trace_tag[trace_tag][full_stage]:
+                by_trace_tag[trace_tag][full_stage] = cycle
+        stage_rows[full_stage].append(row)
 
-    ordered_stage_names = [
-        "node.0:node.request_issue",
-        "pool.100:pool.request_accept",
-        "pool.100:pool.response_ready",
-        "pool.100:pool.response_send",
-        "switch.port.pool.0:fabric.rx_enqueue",
-        "switch.port.pool.0:fabric.ingress_release",
-        "switch.port.node.0:fabric.tx_send",
-        "node.0.remote_port:fabric.rx_enqueue",
-        "node.0.remote_port:fabric.ingress_release",
-        "node.0:node.response_receive",
+    ordered_stage_pairs = [
+        ("node.0:node.request_issue", "pool.100:pool.request_accept", by_trace_tag),
+        ("pool.100:pool.request_accept", "pool.100:pool.response_ready", by_trace_tag),
+        ("pool.100:pool.response_ready", "pool.100:pool.response_send", by_trace_tag),
+        ("pool.100:pool.response_send", "switch.port.pool.0:fabric.rx_enqueue", by_trace_tag),
+        ("switch.port.pool.0:fabric.rx_enqueue", "switch.port.pool.0:fabric.ingress_release", by_trace_tag),
+        ("switch.port.pool.0:fabric.ingress_release", "switch.port.node.0:fabric.tx_send", by_trace_tag),
+        ("switch.port.node.0:fabric.tx_send", "node.0.remote_port:fabric.rx_enqueue", by_trace_tag),
+        ("node.0.remote_port:fabric.rx_enqueue", "node.0.remote_port:fabric.ingress_release", by_trace_tag),
+        ("node.0.remote_port:fabric.ingress_release", "node.0:node.response_receive", by_trace_tag),
     ]
 
     print(f"# {path}")
-    for left, right in zip(ordered_stage_names, ordered_stage_names[1:]):
+    for left, right, index in ordered_stage_pairs:
         samples = []
-        for stages in by_key.values():
+        for stages in index.values():
             if left in stages and right in stages:
                 samples.append(stages[right] - stages[left])
         if not samples:
@@ -56,6 +56,36 @@ def summarize(path: Path) -> None:
             f"count={len(samples)} avg={statistics.fmean(samples):.3f} "
             f"min={min(samples)} max={max(samples)}"
         )
+
+    def print_gap_summary(stage_name: str) -> None:
+        rows_for_stage = sorted(
+            (row for row in stage_rows.get(stage_name, []) if trace_tag_key(row) != 0),
+            key=lambda row: int(row["cycle"]),
+        )
+        if len(rows_for_stage) < 2:
+            return
+        gaps = [
+            int(rows_for_stage[idx]["cycle"]) - int(rows_for_stage[idx - 1]["cycle"])
+            for idx in range(1, len(rows_for_stage))
+        ]
+        mean = statistics.fmean(gaps)
+        variance = statistics.fmean([(gap - mean) ** 2 for gap in gaps])
+        pre_occ_values = [int(row["pre_queue_occ_bytes"]) for row in rows_for_stage]
+        print(
+            f"{stage_name} gaps: "
+            f"count={len(gaps)} avg={mean:.3f} stddev={math.sqrt(variance):.3f} "
+            f"lt25_frac={sum(1 for gap in gaps if gap < 25) / len(gaps):.6f} "
+            f"lt50_frac={sum(1 for gap in gaps if gap < 50) / len(gaps):.6f}"
+        )
+        print(
+            f"{stage_name} pre_queue_occ_bytes: "
+            f"avg={statistics.fmean(pre_occ_values):.3f} "
+            f"nonzero_frac={sum(1 for value in pre_occ_values if value > 0) / len(pre_occ_values):.6f} "
+            f"max={max(pre_occ_values)}"
+        )
+
+    print_gap_summary("pool.100:pool.response_send")
+    print_gap_summary("switch.port.pool.0:fabric.rx_enqueue")
 
 
 def main(argv: list[str]) -> int:

@@ -17,7 +17,7 @@ namespace response_timeline {
 inline constexpr std::size_t kResponseInstrIdPayloadIndex = 9;
 inline constexpr std::size_t kResponseTraceTagPayloadIndex = 10;
 inline constexpr std::size_t kResponseTypePayloadIndex = 11;
-inline constexpr std::size_t kRequestPayloadMinSize = 16;
+inline constexpr std::size_t kRequestPayloadMinSize = 18;
 
 inline std::mutex g_mutex;
 inline std::unique_ptr<std::ofstream> g_stream;
@@ -154,7 +154,7 @@ inline void log_request(const std::string& location,
                  stage,
                  cycle,
                  req.instr_id,
-                 trace_tag,
+                 trace_tag != 0 ? trace_tag : req.trace_tag,
                  normalize_access_type(req.type),
                  req.src_node == std::numeric_limits<uint32_t>::max() ? req.sst_cpu : req.src_node,
                  req.dst_node == std::numeric_limits<uint32_t>::max() ? req.cpu : req.dst_node,

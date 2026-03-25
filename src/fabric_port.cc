@@ -20,6 +20,9 @@ bool is_reset_control_event(const csEvent* ev) {
 }
 
 uint64_t msg_bytes(const csEvent& ev) {
+    if (ev.payload.size() > 17) {
+        return std::max<uint64_t>(ev.payload[17], 1);
+    }
     if (ev.payload.size() > 16) {
         return std::max<uint64_t>(ev.payload[16], 1);
     }
@@ -1618,6 +1621,16 @@ FabricPort::TrafficClass FabricPort::classify_event(const csEvent* item) {
         return TrafficClass::OtherReq;
     }
     if (is_control_event(*item)) {
+        return TrafficClass::OtherReq;
+    }
+    if (item->payload.size() > 17) {
+        const auto type = static_cast<access_type>(item->payload[11]);
+        if (type == access_type::LOAD || type == access_type::RFO) {
+            return TrafficClass::DemandReq;
+        }
+        if (type == access_type::WRITE) {
+            return TrafficClass::WriteReq;
+        }
         return TrafficClass::OtherReq;
     }
     if (item->payload.size() > 15) {
