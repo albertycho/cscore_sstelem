@@ -146,11 +146,9 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
     lines.push_back(fmt::format("cpu{}->{} PREFETCH REQUESTED: {:10} ISSUED: {:10} USEFUL: {:10} USELESS: {:10}", cpu, stats.name, stats.pf_requested,
                                 stats.pf_issued, stats.pf_useful, stats.pf_useless));
 
-    uint64_t total_downstream_demands =
-        stats.misses.value_or(std::pair<access_type, std::size_t>{access_type::LOAD, cpu}, misses_value_type{}) +
-        stats.misses.value_or(std::pair<access_type, std::size_t>{access_type::RFO, cpu}, misses_value_type{});
     lines.push_back(
-        fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
+        fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name,
+                    ::print_ratio(stats.total_miss_latency_cycles, stats.completed_demand_miss_count)));
   }
 
   auto pool_demand_avg = ::print_ratio(stats.pool_demand_miss_latency_sum, stats.pool_demand_miss_count);

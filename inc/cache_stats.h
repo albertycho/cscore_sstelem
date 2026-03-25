@@ -28,6 +28,7 @@ struct cache_stats {
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> mshr_return = {};
 
   long total_miss_latency_cycles{};
+  uint64_t completed_demand_miss_count = 0;
 
   uint64_t pool_accesses = 0;
   uint64_t pool_completed = 0;

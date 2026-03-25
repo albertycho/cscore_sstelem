@@ -15,6 +15,7 @@ cache_stats operator-(cache_stats lhs, cache_stats rhs)
   result.misses = lhs.misses - rhs.misses;
 
   result.total_miss_latency_cycles = lhs.total_miss_latency_cycles - rhs.total_miss_latency_cycles;
+  result.completed_demand_miss_count = lhs.completed_demand_miss_count - rhs.completed_demand_miss_count;
   result.pool_accesses = lhs.pool_accesses - rhs.pool_accesses;
   result.pool_completed = lhs.pool_completed - rhs.pool_completed;
   result.pool_latency_sum = lhs.pool_latency_sum - rhs.pool_latency_sum;

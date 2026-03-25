@@ -325,6 +325,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     for (const auto& miss_start_time : fill_mshr.demand_start_times) {
       const auto miss_lat_time = current_time - miss_start_time;
       sim_stats.total_miss_latency_cycles += (miss_lat_time / clock_period);
+      sim_stats.completed_demand_miss_count++;
       if (NAME == "LLC") {
         record_miss_latency(sim_stats, miss_lat_time);
       }
@@ -1078,6 +1079,7 @@ void CACHE::begin_phase()
 void CACHE::end_phase(unsigned /*finished_cpu*/)
 {
   roi_stats.total_miss_latency_cycles = sim_stats.total_miss_latency_cycles;
+  roi_stats.completed_demand_miss_count = sim_stats.completed_demand_miss_count;
 
   roi_stats.hits = sim_stats.hits;
   roi_stats.misses = sim_stats.misses;
