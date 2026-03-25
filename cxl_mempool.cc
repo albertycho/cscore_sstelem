@@ -14,6 +14,7 @@
 #include "champsim.h"
 #include "control_event.h"
 #include "convert_ev_packet.h"
+#include "response_timeline.h"
 
 namespace SST {
 namespace csimCore {
@@ -134,6 +135,7 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
                             link_egress_buffer_size_,
                             link_credit_window_size_,
                             std::nullopt);
+            port->set_debug_label("pool." + std::to_string(pool_node_id_) + ".port.switch");
             switch_connected = true;
         } else {
             ports_.pop_back();
@@ -156,6 +158,7 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
                             link_egress_buffer_size_,
                             link_credit_window_size_,
                             static_cast<uint64_t>(i));
+            port->set_debug_label("pool." + std::to_string(pool_node_id_) + ".port.node." + std::to_string(i));
             connected_core_count++;
         } else {
             ports_.pop_back();
@@ -443,9 +446,16 @@ bool CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
             request.sst_cpu,
             request.src_node,
             request.type,
+            request.instr_id,
+            tag,
             tick_count_,
             std::numeric_limits<uint64_t>::max()
         };
+        response_timeline::log_request("pool." + std::to_string(pool_node_id_),
+                                       "pool.request_accept",
+                                       tick_count_,
+                                       request,
+                                       tag);
     }
 
     if (request.src_node < MAX_CXL_PORTS) {
@@ -788,6 +798,25 @@ void CXLMemoryPool::mark_response_ready(const champsim::channel::request_type& r
         return;
     }
     pending.response_ready_cycle = tick_count_;
+    sst_response trace_resp(response.address.to<uint64_t>(),
+                            response.v_address.to<uint64_t>(),
+                            response.data.to<uint64_t>(),
+                            response.pf_metadata,
+                            pending.cpu,
+                            pending.sst_cpu,
+                            pending.instr_id,
+                            pending.trace_tag,
+                            pending.type);
+    trace_resp.src_node = pool_node_id_;
+    trace_resp.dst_node = pending.src_node == std::numeric_limits<uint32_t>::max()
+                              ? pending.sst_cpu
+                              : pending.src_node;
+    trace_resp.msg_bytes = 64;
+    response_timeline::log_response("pool." + std::to_string(pool_node_id_),
+                                    "pool.response_ready",
+                                    tick_count_,
+                                    trace_resp,
+                                    tick_count_ >= pending.enqueue_cycle ? (tick_count_ - pending.enqueue_cycle) : 0);
     if (pending.src_node < MAX_CXL_PORTS) {
         auto& diag = source_diag_[static_cast<std::size_t>(pending.src_node)];
         const auto cls = diag_class_index(pending.type);
@@ -831,7 +860,10 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::request_type& res
                      response.data.to<uint64_t>(),
                      response.pf_metadata,
                      route.cpu,
-                     route.sst_cpu);
+                     route.sst_cpu,
+                     route.instr_id,
+                     route.trace_tag,
+                     route.type);
     out.msg_bytes = 64;
     out.src_node = pool_node_id_;
     out.dst_node = route.src_node == std::numeric_limits<uint32_t>::max()
@@ -853,6 +885,11 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::request_type& res
             : 0;
     const uint64_t total_turnaround =
         tick_count_ >= route.enqueue_cycle ? (tick_count_ - route.enqueue_cycle) : 0;
+    response_timeline::log_response("pool." + std::to_string(pool_node_id_),
+                                    "pool.response_send",
+                                    tick_count_,
+                                    out,
+                                    response_wait);
     resp_stats.completed++;
     resp_stats.wait_sum_cycles += response_wait;
     resp_stats.wait_max_cycles = std::max(resp_stats.wait_max_cycles, response_wait);

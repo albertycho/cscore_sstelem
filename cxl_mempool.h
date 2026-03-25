@@ -68,6 +68,8 @@ private:
         uint32_t sst_cpu = 0;
         uint32_t src_node = std::numeric_limits<uint32_t>::max();
         access_type type = access_type::LOAD;
+        uint64_t instr_id = 0;
+        uint64_t trace_tag = 0;
         uint64_t enqueue_cycle = 0;
         uint64_t response_ready_cycle = std::numeric_limits<uint64_t>::max();
     };

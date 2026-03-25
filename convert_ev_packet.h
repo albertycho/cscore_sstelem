@@ -3,7 +3,6 @@
 
 #include "csEvent.h"
 #include "SST_CS_packets.h"
-#include <vector>
 
 // Helper function to convert sst_request to csEvent
 SST::csimCore::csEvent* convert_request_to_event(const sst_request &req);

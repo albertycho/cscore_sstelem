@@ -109,6 +109,7 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
                                  link_egress_buffer_size_,
                                  link_credit_window_size_,
                                  static_cast<uint64_t>(i));
+        node_ports_[i].set_debug_label("switch.port.node." + std::to_string(i));
     }
 
     pool_ports_.resize(std::max(num_pools_, 0));
@@ -127,6 +128,7 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
                                  link_egress_buffer_size_,
                                  link_credit_window_size_,
                                  port_id);
+        pool_ports_[p].set_debug_label("switch.port.pool." + std::to_string(p));
     }
 
     registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));

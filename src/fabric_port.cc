@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "lat_bw_queue.h"
+#include "response_timeline.h"
 
 namespace SST {
 namespace csimCore {
@@ -492,12 +493,27 @@ void FabricPort::handle_event(SST::Event* ev) {
     const uint64_t src = !cevent->payload.empty() ? cevent->payload[0] : 0;
     const uint64_t dst = cevent->payload.size() > 1 ? cevent->payload[1] : 0;
     const uint64_t pre_enqueue_occ_bytes = ingress_ ? static_cast<uint64_t>(ingress_->occupancy()) : 0;
-    record_ingress_arrival((last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_,
-                           bytes);
+    const uint64_t enqueue_cycle =
+        (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
+    record_ingress_arrival(enqueue_cycle, bytes);
     record_conditional_ingress_arrival(cls, bytes, pre_enqueue_occ_bytes, src, dst);
+    response_timeline::log_response_event(debug_label_,
+                                          "fabric.rx_enqueue",
+                                          enqueue_cycle,
+                                          cevent,
+                                          0,
+                                          0,
+                                          pre_enqueue_occ_bytes);
     if (!ingress_) {
         record_ingress_wait(cls, 0, 0);
         record_conditional_ingress_release(cls, src, dst, pre_enqueue_occ_bytes > 0, bytes, 0, 0);
+        response_timeline::log_response_event(debug_label_,
+                                              "fabric.ingress_release",
+                                              enqueue_cycle,
+                                              cevent,
+                                              0,
+                                              0,
+                                              pre_enqueue_occ_bytes);
         push_ready(cevent);
         return;
     }
@@ -505,8 +521,6 @@ void FabricPort::handle_event(SST::Event* ev) {
     if (!ingress_->add_packet(cevent)) {
         throw std::runtime_error("FabricPort: ingress queue full; credit accounting mismatch.");
     }
-    const uint64_t enqueue_cycle =
-        (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
     ingress_enqueue_cycle_[cevent] = IngressArrivalMeta{
         enqueue_cycle,
         pre_enqueue_occ_bytes,
@@ -1481,6 +1495,13 @@ void FabricPort::tick_ingress() {
         const uint64_t queue_wait = wait_cycles > service_floor ? (wait_cycles - service_floor) : 0;
         record_ingress_wait(cls, wait_cycles, queue_wait);
         record_conditional_ingress_release(cls, src, dst, saw_nonempty_queue, event_bytes(item), wait_cycles, queue_wait);
+        response_timeline::log_response_event(debug_label_,
+                                              "fabric.ingress_release",
+                                              last_tick_cycle_,
+                                              item,
+                                              wait_cycles,
+                                              queue_wait,
+                                              0);
         push_ready(item);
     }
 }
@@ -1513,6 +1534,13 @@ void FabricPort::drain_egress() {
         egress_wait_max_cycles_by_class_[idx] = std::max(egress_wait_max_cycles_by_class_[idx], wait_cycles);
         link_->send(ev);
         record_tx(ev);
+        response_timeline::log_response_event(debug_label_,
+                                              "fabric.tx_send",
+                                              last_tick_cycle_,
+                                              ev,
+                                              wait_cycles,
+                                              0,
+                                              static_cast<uint64_t>(std::max<int64_t>(egress_queue_bytes_, 0)));
         sent_pkts++;
         sent_bytes += event_bytes(ev);
         egress_queue_.pop_front();
@@ -1592,7 +1620,7 @@ FabricPort::TrafficClass FabricPort::classify_event(const csEvent* item) {
     if (is_control_event(*item)) {
         return TrafficClass::OtherReq;
     }
-    if (item->payload.size() > 10) {
+    if (item->payload.size() > 15) {
         const auto type = static_cast<access_type>(item->payload[10]);
         if (type == access_type::LOAD || type == access_type::RFO) {
             return TrafficClass::DemandReq;

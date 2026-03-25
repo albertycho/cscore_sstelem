@@ -60,7 +60,7 @@ SST::csimCore::csEvent* convert_response_to_event(const sst_response &resp) {
     auto src = (resp.src_node == std::numeric_limits<uint32_t>::max()) ? resp.sst_cpu : resp.src_node;
     auto dst = (resp.dst_node == std::numeric_limits<uint32_t>::max()) ? resp.cpu : resp.dst_node;
     auto nev = new SST::csimCore::csEvent();
-    nev->payload.reserve(9);
+    nev->payload.reserve(12);
     nev->payload.push_back(src);
     nev->payload.push_back(dst);
     nev->payload.push_back(resp.address);
@@ -70,6 +70,9 @@ SST::csimCore::csEvent* convert_response_to_event(const sst_response &resp) {
     nev->payload.push_back(resp.cpu);
     nev->payload.push_back(resp.sst_cpu);
     nev->payload.push_back(resp.msg_bytes);
+    nev->payload.push_back(resp.instr_id);
+    nev->payload.push_back(resp.trace_tag);
+    nev->payload.push_back(static_cast<uint64_t>(resp.type));
     return nev;
 }
 
@@ -84,6 +87,15 @@ sst_response convert_event_to_response(const SST::csimCore::csEvent &event) {
     resp.dst_node = static_cast<uint32_t>(event.payload[1]);
     if (event.payload.size() > 8) {
         resp.msg_bytes = static_cast<uint16_t>(event.payload[8]);
+    }
+    if (event.payload.size() > 9) {
+        resp.instr_id = event.payload[9];
+    }
+    if (event.payload.size() > 10) {
+        resp.trace_tag = event.payload[10];
+    }
+    if (event.payload.size() > 11) {
+        resp.type = static_cast<access_type>(event.payload[11]);
     }
     return resp;
 }

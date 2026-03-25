@@ -30,6 +30,7 @@
 #include "bimodal/bimodal.h"
 #include "prefetcher/no/no.h"
 #include "control_event.h"
+#include "response_timeline.h"
 
 namespace {
 constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
@@ -450,6 +451,7 @@ namespace SST {
                                    cxl_link_egress_buffer_size_,
                                    cxl_link_credit_window_size_,
                                    std::nullopt);
+            remote_port_.set_debug_label("node." + std::to_string(node_id) + ".remote_port");
             cxl_port_configured_ = true;
 
 			registerClock(clock_frequency_str, new Clock::Handler<csimCore>(this,
@@ -621,22 +623,12 @@ namespace SST {
             }
 
             // LLC demand-miss summary (LOAD+RFO only), per original miss.
-            const auto demand_miss_count = [](const CACHE::stats_type& st) {
-                uint64_t total = 0;
-                for (const auto& key : st.misses.get_keys()) {
-                    if (key.first == access_type::LOAD || key.first == access_type::RFO) {
-                        total += static_cast<uint64_t>(st.misses.value_or(key, 0));
-                    }
-                }
-                return total;
-            };
-
             for (const auto& cache : caches) {
                 if (cache.NAME != "LLC") {
                     continue;
                 }
                 const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
-                const uint64_t total_demand_miss = demand_miss_count(st);
+                const uint64_t total_demand_miss = st.completed_demand_miss_count;
                 const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
                 const double avg_miss_lat = (total_demand_miss > 0)
                     ? static_cast<double>(st.total_miss_latency_cycles) / static_cast<double>(total_demand_miss)
@@ -862,6 +854,10 @@ namespace SST {
 
         bool csimCore::deliver_remote_response(const sst_response& resp)
         {
+            response_timeline::log_response("node." + std::to_string(node_id),
+                                            "node.response_receive",
+                                            heartbeat_count,
+                                            resp);
             for (auto& cache : caches) {
                 if (cache.NAME == "LLC" && cache.handle_remote_response(resp)) {
                     return true;
@@ -895,6 +891,12 @@ namespace SST {
 				delete event;
 				return false;
 			}
+            if (req.response_requested) {
+                response_timeline::log_request("node." + std::to_string(node_id),
+                                               "node.request_issue",
+                                               heartbeat_count,
+                                               req);
+            }
 			return true;
 		}
 

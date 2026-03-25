@@ -12,6 +12,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <sst/core/link.h>
@@ -90,6 +91,8 @@ public:
     void reset_stats(uint64_t cycle);
     bool has_peer_id() const { return peer_id_.has_value(); }
     std::optional<uint64_t> peer_id() const { return peer_id_; }
+    void set_debug_label(std::string label) { debug_label_ = std::move(label); }
+    const std::string& debug_label() const { return debug_label_; }
     static TrafficClass classify_event(const csEvent* item);
     bool can_send(uint64_t bytes) const;
     bool can_send(const csEvent* item) const;
@@ -294,6 +297,7 @@ private:
     SST::Link* link_ = nullptr;
     uint64_t self_id_ = 0;
     std::optional<uint64_t> peer_id_;
+    std::string debug_label_;
     std::unique_ptr<::lat_bw_queue<csEvent*>> ingress_;
     int64_t ingress_bw_cycles_ = 0;
     int64_t ingress_lat_cycles_ = 0;
