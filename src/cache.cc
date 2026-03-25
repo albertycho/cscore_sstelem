@@ -446,7 +446,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
   auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
 
-  SST::csimCore::AddressMap::Entry const* remote_entry = nullptr;
+  std::optional<SST::csimCore::AddressEntry> remote_entry;
   if (address_map && send_remote) {
     auto entry = address_map->lookup(static_cast<uint32_t>(node_id), mshr_pkt.second.v_address.to<uint64_t>());
     if (entry && entry->type != SST::csimCore::AddressType::Local) {
@@ -455,7 +455,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
   }
 
   const auto log_remote_stage = [&](std::string_view stage) {
-    if (remote_entry == nullptr) {
+    if (!remote_entry.has_value()) {
       return;
     }
     sst_request req;
@@ -477,13 +477,13 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     req.asid[0] = mshr_pkt.second.asid[0];
     req.asid[1] = mshr_pkt.second.asid[1];
     req.msg_bytes = (req.type == access_type::WRITE) ? 64 : 8;
-    response_timeline::log_request("node." + std::to_string(node_id) + ".llc",
-                                   std::string(stage),
-                                   current_time.time_since_epoch() / clock_period,
-                                   req);
+    SST::csimCore::response_timeline::log_request("node." + std::to_string(node_id) + ".llc",
+                                                  std::string(stage),
+                                                  current_time.time_since_epoch() / clock_period,
+                                                  req);
   };
 
-  if (remote_entry != nullptr) {
+  if (remote_entry.has_value()) {
     log_remote_stage("llc.remote_candidate");
   }
 
@@ -500,7 +500,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       }
     }
 
-    if (remote_entry != nullptr) {
+    if (remote_entry.has_value()) {
       log_remote_stage("llc.remote_mshr_merge");
     }
 
@@ -510,13 +510,13 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
   } else {
     if (mshr_full) { // not enough MSHR resource
-      if (remote_entry != nullptr) {
+      if (remote_entry.has_value()) {
         log_remote_stage("llc.remote_mshr_full");
       }
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
     }
 
-    if (remote_entry != nullptr) {
+    if (remote_entry.has_value()) {
       sst_request sreq;
       sreq.src_node = static_cast<uint32_t>(node_id);
       sreq.dst_node = static_cast<uint32_t>(remote_entry->target);
