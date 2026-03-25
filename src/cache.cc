@@ -455,7 +455,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
   }
 
   const auto log_remote_stage = [&](std::string_view stage) {
-    if (!remote_entry.has_value()) {
+    if (warmup || !remote_entry.has_value()) {
       return;
     }
     sst_request req;
@@ -597,7 +597,7 @@ bool CACHE::handle_write(const tag_lookup_type& handle_pkt)
 template <bool UpdateRequest>
 auto CACHE::initiate_tag_check(champsim::channel* ul)
 {
-  return [time = current_time + (warmup ? champsim::chrono::clock::duration{} : HIT_LATENCY), start_time = current_time, ul](const auto& entry) {
+  return [time = current_time + (warmup ? champsim::chrono::clock::duration{} : HIT_LATENCY), start_time = current_time, ul, this](const auto& entry) {
     CACHE::tag_lookup_type retval{entry};
     retval.event_cycle = time;
     if ((retval.type == access_type::LOAD || retval.type == access_type::RFO) &&
@@ -616,6 +616,35 @@ auto CACHE::initiate_tag_check(champsim::channel* ul)
     if constexpr (champsim::debug_print) {
       fmt::print("[TAG] initiate_tag_check instr_id: {} address: {} v_address: {} type: {} response_requested: {}\n", retval.instr_id, retval.address,
                  retval.v_address, access_type_names.at(champsim::to_underlying(retval.type)), !std::empty(retval.to_return));
+    }
+
+    if (!warmup && retval.is_translated && address_map && send_remote) {
+      auto remote_entry = address_map->lookup(static_cast<uint32_t>(node_id), retval.v_address.to<uint64_t>());
+      if (remote_entry && remote_entry->type != SST::csimCore::AddressType::Local) {
+        sst_request req;
+        req.src_node = static_cast<uint32_t>(node_id);
+        req.dst_node = static_cast<uint32_t>(remote_entry->target);
+        req.forward_checked = retval.is_translated;
+        req.is_translated = retval.is_translated;
+        req.response_requested = !std::empty(retval.to_return);
+        req.type = retval.type;
+        req.pf_metadata = retval.pf_metadata;
+        req.cpu = retval.cpu;
+        req.sst_cpu = node_id;
+        req.address = retval.address.to<uint64_t>();
+        req.v_address = retval.v_address.to<uint64_t>();
+        req.data = retval.data.to<uint64_t>();
+        req.instr_id = retval.instr_id;
+        req.trace_tag = retval.instr_id;
+        req.ip = retval.ip.to<uint64_t>();
+        req.asid[0] = retval.asid[0];
+        req.asid[1] = retval.asid[1];
+        req.msg_bytes = (req.type == access_type::WRITE) ? 64 : 8;
+        SST::csimCore::response_timeline::log_request("node." + std::to_string(node_id) + ".llc",
+                                                      "llc.tag_enter_remote",
+                                                      start_time.time_since_epoch() / clock_period,
+                                                      req);
+      }
     }
 
     return retval;
