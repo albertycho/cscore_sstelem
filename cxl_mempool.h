@@ -46,9 +46,12 @@ public:
         { "memory_bandwidth", "Memory side bandwidth in bytes per cycle (converted to cycles/request using BLOCK_SIZE)", "0" },
         { "pool_latency_model", "Pool memory latency model: fixed or utilization-based", "fixed" },
         { "latency_cycles", "Fixed pool memory latency in cycles (used when pool_latency_model=fixed)", "300" },
+        { "mem_queue_size", "Internal pool memory-controller queue capacity in requests (0 derives from link credit window or defaults to 128)", "0" },
         { "link_bw_cycles", "CXL ingress bandwidth in cycles per 64B request (0 disables ingress bandwidth shaping)", "0" },
         { "link_latency_cycles", "CXL ingress base latency in cycles (0 disables ingress latency shaping; when both bw+lat are 0, ingress queue is bypassed)", "0" },
-        { "link_queue_size", "CXL ingress queue capacity in bytes (0 = unbounded)", "0" },
+        { "link_egress_buffer_size", "Sender-local link egress buffer capacity in bytes (0 = unbounded)", "0" },
+        { "link_credit_window_size", "Returned-credit window in bytes for each link (0 = unbounded)", "0" },
+        { "link_queue_size", "Legacy shorthand: default value for both link_egress_buffer_size and link_credit_window_size when explicit knobs are omitted", "0" },
         { "pool_node_id", "Logical node id used in fabric headers", "100" },
         { "heartbeat_period", "Cycles between CXL heartbeat dumps", "1000" },
         { "lightweight_output", "If set, emit stat.* pool summaries", "0" }
@@ -70,7 +73,7 @@ private:
     };
 
     bool clock_tick(SST::Cycle_t current);
-    void enqueue_mem_request(const sst_request& request);
+    bool enqueue_mem_request(const sst_request& request);
     // Aggregated ingress stats across active CXL ports.
     struct LinkStats {
         double util = 0.0;
@@ -84,7 +87,7 @@ private:
     void for_each_port(const std::function<void(FabricPort&)>& fn);
     void for_each_port(const std::function<void(const FabricPort&)>& fn) const;
     FabricPort* select_egress_port(uint32_t sst_cpu);
-    bool try_send_response(const champsim::channel::response_type& response);
+    bool try_send_response(const champsim::channel::request_type& response);
 
     uint64_t device_bandwidth_;
     uint64_t memory_bandwidth_;
@@ -92,7 +95,8 @@ private:
     int64_t latency_cycles_;
     int64_t link_bw_cycles_ = 0;
     int64_t link_latency_cycles_ = 0;
-    int64_t link_queue_size_ = 0;
+    int64_t link_egress_buffer_size_ = 0;
+    int64_t link_credit_window_size_ = 0;
     uint32_t pool_node_id_ = 100;
 
     std::string clock_frequency_;
@@ -102,7 +106,6 @@ private:
     std::array<bool, MAX_CXL_PORTS> core_port_connected_{};
     std::vector<FabricPort*> active_ports_;
     bool use_switch_port_ = false;
-    champsim::channel mem_channel_{};
     MY_MEMORY_CONTROLLER mem_ctrl_;
     uint64_t next_tag_ = 1;
     std::unordered_map<uint64_t, OutstandingRequest> pending_;

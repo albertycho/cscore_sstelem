@@ -97,8 +97,9 @@ void FabricPort::configure(SST::Link* link,
                            uint64_t self_id,
                            int64_t bw_cycles,
                            int64_t lat_cycles,
-                           int64_t queue_size_bytes) {
-    if (bw_cycles < 0 || lat_cycles < 0 || queue_size_bytes < 0) {
+                           int64_t egress_buffer_bytes,
+                           int64_t credit_window_bytes) {
+    if (bw_cycles < 0 || lat_cycles < 0 || egress_buffer_bytes < 0 || credit_window_bytes < 0) {
         throw std::runtime_error("FabricPort: negative configuration values are invalid.");
     }
     if (!link) {
@@ -127,9 +128,9 @@ void FabricPort::configure(SST::Link* link,
         // No ingress timing model when both are disabled.
         ingress_.reset();
     }
-    egress_credit_cap_ = credit_capacity_bytes(queue_size_bytes);
+    egress_credit_cap_ = credit_capacity_bytes(credit_window_bytes);
     egress_credits_ = egress_credit_cap_;
-    egress_queue_max_bytes_ = queue_size_bytes > 0 ? queue_size_bytes : 0;
+    egress_queue_max_bytes_ = egress_buffer_bytes > 0 ? egress_buffer_bytes : 0;
     egress_queue_bytes_ = 0;
     tx_bytes_total_ = 0;
     rx_bytes_total_ = 0;
@@ -151,6 +152,10 @@ bool FabricPort::send(csEvent* item) {
 }
 
 void FabricPort::tick(uint64_t cycle) {
+    advance(cycle);
+}
+
+void FabricPort::advance(uint64_t cycle) {
     if (last_tick_cycle_ != cycle) {
         last_tick_cycle_ = cycle;
         tick_ingress();
@@ -158,22 +163,15 @@ void FabricPort::tick(uint64_t cycle) {
     }
 }
 
-std::optional<csEvent*> FabricPort::receive(uint64_t cycle) {
-    if (!can_receive(cycle)) {
-        return std::nullopt;
-    }
-    csEvent* item = std::move(ready_.front());
-    const uint64_t credit_dst = event_credit_dst(item);
-    const uint64_t credit_len = credit_bytes(item);
-    ready_.pop_front();
-    last_deliver_cycle_ = cycle;
-    send_credit(credit_dst, credit_len);
-    return item;
-}
-
 bool FabricPort::try_receive(uint64_t cycle,
                              const std::function<bool(csEvent*)>& handle) {
-    if (!can_receive(cycle)) {
+    advance(cycle);
+    return try_receive_ready(cycle, handle);
+}
+
+bool FabricPort::try_receive_ready(uint64_t cycle,
+                                   const std::function<bool(csEvent*)>& handle) {
+    if (!has_ready_to_receive(cycle)) {
         return false;
     }
     csEvent* item = ready_.front();
@@ -277,8 +275,7 @@ uint64_t FabricPort::rx_bytes_total() const {
     return rx_bytes_total_;
 }
 
-bool FabricPort::can_receive(uint64_t cycle) {
-    tick(cycle);
+bool FabricPort::has_ready_to_receive(uint64_t cycle) const {
     if (last_deliver_cycle_ == cycle) {
         return false;
     }

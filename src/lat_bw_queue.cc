@@ -20,25 +20,20 @@ lat_bw_queue<T>::lat_bw_queue(double peak_bw_per_cycle,
 
 template<typename T>
 std::vector<T> lat_bw_queue<T>::on_tick() {
+    tick();
+    return drain_ready();
+}
+
+template<typename T>
+void lat_bw_queue<T>::tick() {
     internal_clock++;
-    std::vector<T> completed_on_tick;
-
-    auto pop_completed = [&]() {
-        while (!active_queue.empty() && active_queue.top().completion_time <= internal_clock) {
-            occupancy_bytes = std::max<int64_t>(occupancy_bytes - active_queue.top().total_bytes, 0);
-            completed_on_tick.emplace_back(std::move(active_queue.top().payload));
-            active_queue.pop();
-        }
-    };
-
-    // Pop completed packets that were already active at tick start.
-    pop_completed();
+    move_completed_to_ready();
 
     // Transmit bytes for this cycle
     service_bandwidth();
 
-    // Pop packets that become ready in the same tick (needed for zero-latency mode).
-    pop_completed();
+    // Move packets that become ready in the same tick (needed for zero-latency mode).
+    move_completed_to_ready();
 
     // Update bandwidth history for utilization
     bw_sum -= bw_hist[bw_idx];
@@ -49,8 +44,6 @@ std::vector<T> lat_bw_queue<T>::on_tick() {
     const auto util = get_utilization();
     util_sum += util;
     util_samples++;
-
-    return completed_on_tick;
 }
 
 template<typename T>
@@ -69,6 +62,45 @@ bool lat_bw_queue<T>::add_packet(T packet) {
 template<typename T>
 std::size_t lat_bw_queue<T>::occupancy() const {
     return static_cast<std::size_t>(std::max<int64_t>(occupancy_bytes, 0));
+}
+
+template<typename T>
+bool lat_bw_queue<T>::has_ready() const {
+    return !ready_queue.empty();
+}
+
+template<typename T>
+const T& lat_bw_queue<T>::front_ready() const {
+    return ready_queue.front().payload;
+}
+
+template<typename T>
+T lat_bw_queue<T>::pop_ready() {
+    auto ready = std::move(ready_queue.front());
+    ready_queue.pop_front();
+    return consume_ready_entry(std::move(ready));
+}
+
+template<typename T>
+std::vector<T> lat_bw_queue<T>::drain_ready() {
+    return drain_ready_if([](const T&) { return true; });
+}
+
+template<typename T>
+std::vector<T> lat_bw_queue<T>::drain_ready_if(const std::function<bool(const T&)>& pred) {
+    std::vector<T> drained;
+    std::deque<entry> remaining;
+    while (!ready_queue.empty()) {
+        auto ready = std::move(ready_queue.front());
+        ready_queue.pop_front();
+        if (!pred || pred(ready.payload)) {
+            drained.emplace_back(consume_ready_entry(std::move(ready)));
+        } else {
+            remaining.push_back(std::move(ready));
+        }
+    }
+    ready_queue.swap(remaining);
+    return drained;
 }
 
 template<typename T>
@@ -91,6 +123,21 @@ void lat_bw_queue<T>::reset_utilization() {
     bw_hist.fill(0.0);
     bw_sum = 0.0;
     bw_used_this_cycle = 0.0;
+}
+
+template<typename T>
+T lat_bw_queue<T>::consume_ready_entry(entry ready) {
+    occupancy_bytes = std::max<int64_t>(occupancy_bytes - ready.total_bytes, 0);
+    return std::move(ready.payload);
+}
+
+template<typename T>
+void lat_bw_queue<T>::move_completed_to_ready() {
+    while (!active_queue.empty() && active_queue.top().completion_time <= internal_clock) {
+        auto ready = std::move(const_cast<entry&>(active_queue.top()));
+        active_queue.pop();
+        ready_queue.push_back(std::move(ready));
+    }
 }
 
 template<typename T>

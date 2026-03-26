@@ -87,7 +87,9 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     clock_frequency_ = params.find<std::string>("clock", "2.4GHz");
     link_bw_cycles_ = params.find<int64_t>("link_bw_cycles", 0);
     link_latency_cycles_ = params.find<int64_t>("link_latency_cycles", 0);
-    link_queue_size_ = params.find<int64_t>("link_queue_size", 0);
+    const int64_t legacy_link_queue_size = params.find<int64_t>("link_queue_size", 0);
+    link_egress_buffer_size_ = params.find<int64_t>("link_egress_buffer_size", legacy_link_queue_size);
+    link_credit_window_size_ = params.find<int64_t>("link_credit_window_size", legacy_link_queue_size);
     lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
 
     if (num_nodes_ <= 0) {
@@ -109,11 +111,12 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
             throw std::runtime_error("Switch: missing link for " + port_name +
                                      ". Ensure the topology connects all configured node ports.");
         }
-        node_ports_[i].port.configure(link,
-                                      static_cast<uint64_t>(i),
-                                      link_bw_cycles_,
-                                      link_latency_cycles_,
-                                      link_queue_size_);
+        node_ports_[i].configure(link,
+                                 static_cast<uint64_t>(i),
+                                 link_bw_cycles_,
+                                 link_latency_cycles_,
+                                 link_egress_buffer_size_,
+                                 link_credit_window_size_);
     }
 
     pool_ports_.resize(std::max(num_pools_, 0));
@@ -125,11 +128,12 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
                                      ". Ensure the topology connects all configured pool ports.");
         }
         const uint64_t port_id = pool_node_id_base_ + static_cast<uint64_t>(p);
-        pool_ports_[p].port.configure(link,
-                                      port_id,
-                                      link_bw_cycles_,
-                                      link_latency_cycles_,
-                                      link_queue_size_);
+        pool_ports_[p].configure(link,
+                                 port_id,
+                                 link_bw_cycles_,
+                                 link_latency_cycles_,
+                                 link_egress_buffer_size_,
+                                 link_credit_window_size_);
     }
 
     registerClock(clock_frequency_, new Clock::Handler<Switch>(this, &Switch::clock_tick));
@@ -140,6 +144,8 @@ void Switch::setup() {
     active_time_ = std::chrono::steady_clock::duration{};
     active_calls_ = 0;
     tick_count_ = 0;
+    last_cycle_ = 0;
+    rr_input_idx_ = 0;
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
@@ -147,10 +153,29 @@ bool Switch::clock_tick(SST::Cycle_t cycle)
     ScopedTimer timer(active_time_, active_calls_);
     ++tick_count_;
     const auto cycle_u = static_cast<uint64_t>(cycle);
-    for_each_port([&](PortState& port) {
-        port.port.tick(cycle_u);
-        try_receive_and_route(port, cycle_u);
-    });
+    last_cycle_ = cycle_u;
+    for (auto& port : node_ports_) {
+        port.advance(cycle_u);
+    }
+    for (auto& port : pool_ports_) {
+        port.advance(cycle_u);
+    }
+    const std::size_t total_ports = node_ports_.size() + pool_ports_.size();
+    for (std::size_t offset = 0; offset < total_ports; ++offset) {
+        const std::size_t flat_idx = (rr_input_idx_ + offset) % total_ports;
+        FabricPort* port = nullptr;
+        if (flat_idx < node_ports_.size()) {
+            port = &node_ports_[flat_idx];
+        } else {
+            port = &pool_ports_[flat_idx - node_ports_.size()];
+        }
+        port->try_receive_ready(cycle_u, [this](csEvent* ev) {
+            return try_route_event(ev);
+        });
+    }
+    if (total_ports > 0) {
+        rr_input_idx_ = (rr_input_idx_ + 1) % total_ports;
+    }
     return false;
 }
 
@@ -163,7 +188,7 @@ void Switch::handle_event(SST::Event* ev)
     if (cevent->payload.size() < 2) {
         throw std::runtime_error("Switch: received malformed csEvent (payload size < 2).");
     }
-    PortState* port = nullptr;
+    FabricPort* port = nullptr;
     const uint64_t src = cevent->payload[0];
     if (src < static_cast<uint64_t>(num_nodes_)) {
         const auto idx = static_cast<size_t>(src);
@@ -183,7 +208,7 @@ void Switch::handle_event(SST::Event* ev)
         throw std::runtime_error("Switch: unable to map src id to a port.");
     }
 
-    port->port.handle_event(cevent);
+    port->handle_event(cevent);
 
 }
 
@@ -206,10 +231,10 @@ bool Switch::try_route_event(csEvent* ev)
         if (idx >= node_ports_.size()) {
             throw std::runtime_error("Switch: dst node id out of range for configured ports.");
         }
-        if (!node_ports_[idx].port.can_send(ev)) {
+        if (!node_ports_[idx].can_send(ev)) {
             return false;
         }
-        if (!node_ports_[idx].port.send(ev)) {
+        if (!node_ports_[idx].send(ev)) {
             delete ev;
         }
         return true;
@@ -222,7 +247,7 @@ bool Switch::try_route_event(csEvent* ev)
         }
         if (replicate_writes_ && is_write_request(*ev)) {
             for (const auto& pool : pool_ports_) {
-                if (!pool.port.can_send(ev)) {
+                if (!pool.can_send(ev)) {
                     return false;
                 }
             }
@@ -230,22 +255,22 @@ bool Switch::try_route_event(csEvent* ev)
                 const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
                 auto* clone = clone_event_with_dst(*ev, pool_dst);
                 replicated_count_++;
-                if (!pool_ports_[static_cast<size_t>(p)].port.send(clone)) {
+                if (!pool_ports_[static_cast<size_t>(p)].send(clone)) {
                     delete clone;
                 }
             }
             delete ev;
             return true;
         }
-        std::size_t pick = pick_pool_index(true, ev);
+        std::size_t pick = pick_pool_index(ev);
         if (pick >= pool_ports_.size()) {
             return false;
         }
-        if (!pool_ports_[pick].port.can_send(ev)) {
+        if (!pool_ports_[pick].can_send(ev)) {
             return false;
         }
         ev->payload[1] = pool_node_id_base_ + pick;
-        if (!pool_ports_[pick].port.send(ev)) {
+        if (!pool_ports_[pick].send(ev)) {
             delete ev;
         }
         return true;
@@ -260,34 +285,7 @@ bool Switch::try_route_event(csEvent* ev)
     throw std::runtime_error(msg);
 }
 
-void Switch::try_receive_and_route(PortState& port, uint64_t cycle)
-{
-    port.port.try_receive(cycle, [this](csEvent* ev) {
-        return try_route_event(ev);
-    });
-}
-
-void Switch::for_each_port(const std::function<void(PortState&)>& fn)
-{
-    for (auto& port : node_ports_) {
-        fn(port);
-    }
-    for (auto& port : pool_ports_) {
-        fn(port);
-    }
-}
-
-void Switch::for_each_port(const std::function<void(const PortState&)>& fn) const
-{
-    for (const auto& port : node_ports_) {
-        fn(port);
-    }
-    for (const auto& port : pool_ports_) {
-        fn(port);
-    }
-}
-
-std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
+std::size_t Switch::pick_pool_index(const csEvent* probe)
 {
     if (pool_ports_.empty()) {
         return pool_ports_.size();
@@ -298,13 +296,11 @@ std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
     const std::size_t total = pool_ports_.size();
     for (std::size_t offset = 0; offset < total; ++offset) {
         const std::size_t idx = (rr_pool_idx_ + offset) % total;
-        const auto& port = pool_ports_[idx].port;
+        const auto& port = pool_ports_[idx];
         if (!port.can_send(probe)) {
             continue;
         }
-        if (advance) {
-            rr_pool_idx_ = (idx + 1) % total;
-        }
+        rr_pool_idx_ = (idx + 1) % total;
         return idx;
     }
     return total;
@@ -312,11 +308,16 @@ std::size_t Switch::pick_pool_index(bool advance, const csEvent* probe)
 
 void Switch::reset_stats_and_broadcast()
 {
-    for_each_port([](PortState& port) { port.port.reset_ingress_utilization(); });
+    for (auto& port : node_ports_) {
+        port.reset_ingress_utilization();
+    }
+    for (auto& port : pool_ports_) {
+        port.reset_ingress_utilization();
+    }
     for (int p = 0; p < num_pools_; ++p) {
         const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
         auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
-        if (!pool_ports_[static_cast<std::size_t>(p)].port.send(clone)) {
+        if (!pool_ports_[static_cast<std::size_t>(p)].send(clone)) {
             delete clone;
         }
     }
@@ -324,26 +325,26 @@ void Switch::reset_stats_and_broadcast()
 
 void Switch::finish()
 {
-    auto avg_util = [](const std::vector<PortState>& ports) {
+    auto avg_util = [](const std::vector<FabricPort>& ports) {
         double sum = 0.0;
         std::size_t count = 0;
         for (const auto& port : ports) {
-            sum += port.port.ingress_avg_utilization();
+            sum += port.ingress_avg_utilization();
             count++;
         }
         return count > 0 ? sum / static_cast<double>(count) : 0.0;
     };
-    auto sum_tx_bytes = [](const std::vector<PortState>& ports) {
+    auto sum_tx_bytes = [](const std::vector<FabricPort>& ports) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.tx_bytes_total();
+            sum += port.tx_bytes_total();
         }
         return sum;
     };
-    auto sum_rx_bytes = [](const std::vector<PortState>& ports) {
+    auto sum_rx_bytes = [](const std::vector<FabricPort>& ports) {
         uint64_t sum = 0;
         for (const auto& port : ports) {
-            sum += port.port.rx_bytes_total();
+            sum += port.rx_bytes_total();
         }
         return sum;
     };

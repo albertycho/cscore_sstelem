@@ -413,6 +413,7 @@ namespace SST {
                                    static_cast<uint64_t>(node_id),
                                    cxl_link_bw_cycles_,
                                    cxl_link_latency_cycles_,
+                                   cxl_link_queue_size_,
                                    cxl_link_queue_size_);
             cxl_port_configured_ = true;
 

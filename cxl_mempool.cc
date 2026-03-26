@@ -19,6 +19,7 @@ namespace csimCore {
 
 namespace {
 constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
+constexpr int64_t kDefaultMemQueueSizeReqs = 128;
 bool is_reset_event(const csEvent& ev) {
     return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == kControlResetUtil;
 }
@@ -44,6 +45,16 @@ MY_MEMORY_CONTROLLER::latency_function_type select_pool_latency_fn(SST::Params& 
     }
     return [fixed_cycles](double) { return fixed_cycles; };
 }
+
+int64_t resolve_mem_queue_size(int64_t configured, int64_t link_credit_window_size) {
+    if (configured > 0) {
+        return configured;
+    }
+    if (link_credit_window_size > 0) {
+        return std::max<int64_t>(link_credit_window_size / BLOCK_SIZE, 1);
+    }
+    return kDefaultMemQueueSizeReqs;
+}
 } // namespace
 
 CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
@@ -54,14 +65,20 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
       latency_cycles_(static_cast<int64_t>(params.find<uint64_t>("latency_cycles", DEFAULT_FIXED_LATENCY_CYCLES))),
       link_bw_cycles_(params.find<int64_t>("link_bw_cycles", 0)),
       link_latency_cycles_(params.find<int64_t>("link_latency_cycles", 0)),
-      link_queue_size_(params.find<int64_t>("link_queue_size", 0)),
+      link_egress_buffer_size_(params.find<int64_t>("link_egress_buffer_size",
+                                                    params.find<int64_t>("link_queue_size", 0))),
+      link_credit_window_size_(params.find<int64_t>("link_credit_window_size",
+                                                    params.find<int64_t>("link_queue_size", 0))),
       pool_node_id_(static_cast<uint32_t>(params.find<uint64_t>("pool_node_id", 100))),
       clock_frequency_(params.find<std::string>("clock", "2.4GHz")),
-      mem_channel_{},
       mem_ctrl_(champsim::chrono::picoseconds{kClockPeriodPs},
-                std::vector<champsim::channel*>{&mem_channel_},
+                std::vector<champsim::channel*>{nullptr},
                 resolve_mem_bw(memory_bandwidth_, device_bandwidth_, pool_bw_cycles_per_req_),
-                select_pool_latency_fn(params, latency_cycles_)),
+                select_pool_latency_fn(params, latency_cycles_),
+                champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES},
+                resolve_mem_queue_size(params.find<int64_t>("mem_queue_size", 0),
+                                       params.find<int64_t>("link_credit_window_size",
+                                                            params.find<int64_t>("link_queue_size", 0)))),
       heartbeat_period_(params.find<uint64_t>("heartbeat_period", 1000)),
       lightweight_output_(params.find<int>("lightweight_output", 0) != 0) {
 
@@ -78,7 +95,8 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
                                static_cast<uint64_t>(pool_node_id_),
                                link_bw_cycles_,
                                link_latency_cycles_,
-                               link_queue_size_);
+                               link_egress_buffer_size_,
+                               link_credit_window_size_);
     }
 
     for (int i = 0; i < MAX_CXL_PORTS; ++i) {
@@ -93,7 +111,8 @@ CXLMemoryPool::CXLMemoryPool(SST::ComponentId_t id, SST::Params& params)
                                      static_cast<uint64_t>(pool_node_id_),
                                      link_bw_cycles_,
                                      link_latency_cycles_,
-                                     link_queue_size_);
+                                     link_egress_buffer_size_,
+                                     link_credit_window_size_);
             core_port_connected_[static_cast<size_t>(i)] = true;
         }
     }
@@ -134,12 +153,12 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
     ++tick_count_;
     poll_ports(tick_count_);
     mem_ctrl_.operate();
-    while (!mem_channel_.returned.empty()) {
-        const auto& response = mem_channel_.returned.front();
+    while (mem_ctrl_.has_ready_response(0)) {
+        const auto& response = mem_ctrl_.front_ready_response(0);
         if (!try_send_response(response)) {
             break;
         }
-        mem_channel_.returned.pop_front();
+        mem_ctrl_.pop_ready_response(0);
         ++total_completed_;
     }
     if (heartbeat_period_ > 0 && (tick_count_ % heartbeat_period_ == 0)) {
@@ -160,7 +179,7 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
     return false;
 }
 
-void CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
+bool CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
     champsim::channel::request_type channel_req{};
     channel_req.forward_checked = request.forward_checked;
     channel_req.is_translated = request.is_translated;
@@ -176,15 +195,17 @@ void CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
     channel_req.instr_id = request.instr_id;
     channel_req.ip = champsim::address{request.ip};
 
-    const uint64_t tag = next_tag_++;
+    const uint64_t tag = next_tag_;
     channel_req.instr_depend_on_me.push_back(tag);
+    if (!mem_ctrl_.enqueue_request(0, channel_req)) {
+        return false;
+    }
+    next_tag_++;
     if (request.response_requested) {
         pending_[tag] = OutstandingRequest{request.cpu, request.sst_cpu, request.src_node, request.dst_node};
     }
-
-    auto& pool_queue = mem_channel_.PQ;
-    pool_queue.push_back(std::move(channel_req));
     ++total_enqueued_;
+    return true;
 }
 
 void CXLMemoryPool::poll_ports(uint64_t cycle) {
@@ -194,18 +215,16 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
             delete ev;
             return true;
         }
-        if (mem_channel_.pq_occupancy() >= mem_channel_.pq_size()) {
-            return false;
-        }
         sst_request req = convert_event_to_request(*ev);
         delete ev;
-        enqueue_mem_request(req);
-        return true;
+        return enqueue_mem_request(req);
     };
 
     for_each_port([&](FabricPort& port) {
-        port.tick(cycle);
-        port.try_receive(cycle, handle_event);
+        port.advance(cycle);
+    });
+    for_each_port([&](FabricPort& port) {
+        port.try_receive_ready(cycle, handle_event);
     });
 }
 
@@ -266,7 +285,7 @@ FabricPort* CXLMemoryPool::select_egress_port(uint32_t sst_cpu) {
                              std::to_string(idx) + ".");
 }
 
-bool CXLMemoryPool::try_send_response(const champsim::channel::response_type& response) {
+bool CXLMemoryPool::try_send_response(const champsim::channel::request_type& response) {
     if (response.instr_depend_on_me.empty()) {
         return true;
     }

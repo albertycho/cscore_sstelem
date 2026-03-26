@@ -26,9 +26,12 @@ csEvent* make_reset_util_event(uint64_t src, uint64_t dst);
 //  - credit-based egress backpressure
 //
 // Usage (csEvent* only):
-//   port.configure(link, self_id, bw_cycles, lat_cycles, queue_size_bytes);
-//   port.send(ev);                 // returns false if egress queue full
-//   auto ev = port.receive(cyc);   // returns at most one message per cycle
+//   port.configure(link, self_id, bw_cycles, lat_cycles,
+//                  egress_buffer_bytes, credit_window_bytes);
+//   port.send(ev);                        // returns false if egress queue full
+//   port.try_receive(cyc, handle);       // advance + consume at most one message
+//   port.advance(cyc);
+//   port.try_receive_ready(cyc, handle); // consume at most one already-ready message
 class FabricPort {
 private:
 public:
@@ -52,15 +55,18 @@ public:
                    uint64_t self_id,
                    int64_t bw_cycles,
                    int64_t lat_cycles,
-                   int64_t queue_size_bytes);
+                   int64_t egress_buffer_bytes,
+                   int64_t credit_window_bytes);
 
     [[nodiscard]] bool send(csEvent* item);
 
-    // Returns at most one message per cycle for this port.
+    // Legacy wrapper retained for existing callers.
     void tick(uint64_t cycle);
-    std::optional<csEvent*> receive(uint64_t cycle);
+    void advance(uint64_t cycle);
     bool try_receive(uint64_t cycle,
                      const std::function<bool(csEvent*)>& handle);
+    bool try_receive_ready(uint64_t cycle,
+                           const std::function<bool(csEvent*)>& handle);
 
     void handle_event(SST::Event* ev);
 
@@ -75,7 +81,7 @@ public:
     uint64_t rx_bytes_total() const;
 
 private:
-    bool can_receive(uint64_t cycle);
+    bool has_ready_to_receive(uint64_t cycle) const;
     void tick_ingress();
     void drain_egress();
     void send_credit(uint64_t dst, uint64_t bytes);

@@ -55,13 +55,18 @@ public:
                          std::vector<channel_type*>&& queues, 
                          int64_t bw_cycles_per_req = DEFAULT_BW,
                          latency_function_type&& latency_function = estimate_latency_utilization_based,
-                         champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES});
+                         champsim::data::bytes size = champsim::data::bytes{DEFAULT_DRAM_SIZE_BYTES},
+                         int64_t max_pending_requests = 0);
 
     void initialize() final;
     long operate() final;
     void begin_phase() final;
     void end_phase(unsigned cpu) final;
     void print_deadlock() final;
+    bool enqueue_request(std::size_t idx, channel_type::request_type req);
+    bool has_ready_response(std::size_t idx) const;
+    const channel_type::request_type& front_ready_response(std::size_t idx) const;
+    channel_type::request_type pop_ready_response(std::size_t idx);
 
 private:
     std::vector<channel_type*> queues;
