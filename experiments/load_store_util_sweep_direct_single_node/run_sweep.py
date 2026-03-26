@@ -36,6 +36,9 @@ CXL_PCT = 100
 AGGREGATE_PEAK_GBPS = 12.0
 COMPLETE_STORES_AFTER_ISSUE = os.environ.get("COMPLETE_STORES_AFTER_ISSUE", "0")
 L1D_MSHR_SIZE_OVERRIDE = os.environ.get("L1D_MSHR_SIZE_OVERRIDE", "16")
+LLC_MSHR_SIZE_OVERRIDE = os.environ.get("LLC_MSHR_SIZE_OVERRIDE", "64")
+LLC_TAG_BANDWIDTH_OVERRIDE = os.environ.get("LLC_TAG_BANDWIDTH_OVERRIDE", "1")
+LLC_FILL_BANDWIDTH_OVERRIDE = os.environ.get("LLC_FILL_BANDWIDTH_OVERRIDE", "1")
 
 # Must match pool_sweep.py
 WARMUP_MAIN_INSTS = 100_000
@@ -106,6 +109,9 @@ def run_sst(trace_path: Path, cxl_config: Path, out_path: Path, err_path: Path) 
     env["CXL_CONFIG_PATH"] = str(cxl_config)
     env["COMPLETE_STORES_AFTER_ISSUE"] = str(COMPLETE_STORES_AFTER_ISSUE)
     env["L1D_MSHR_SIZE_OVERRIDE"] = str(L1D_MSHR_SIZE_OVERRIDE)
+    env["LLC_MSHR_SIZE_OVERRIDE"] = str(LLC_MSHR_SIZE_OVERRIDE)
+    env["LLC_TAG_BANDWIDTH_OVERRIDE"] = str(LLC_TAG_BANDWIDTH_OVERRIDE)
+    env["LLC_FILL_BANDWIDTH_OVERRIDE"] = str(LLC_FILL_BANDWIDTH_OVERRIDE)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.touch(exist_ok=True)
@@ -127,6 +133,9 @@ def main() -> int:
     print(f"[STATUS] Using fixed aggregate synth target peak: {AGGREGATE_PEAK_GBPS} GB/s")
     print(f"[STATUS] COMPLETE_STORES_AFTER_ISSUE={COMPLETE_STORES_AFTER_ISSUE}")
     print(f"[STATUS] L1D_MSHR_SIZE_OVERRIDE={L1D_MSHR_SIZE_OVERRIDE}")
+    print(f"[STATUS] LLC_MSHR_SIZE_OVERRIDE={LLC_MSHR_SIZE_OVERRIDE}")
+    print(f"[STATUS] LLC_TAG_BANDWIDTH_OVERRIDE={LLC_TAG_BANDWIDTH_OVERRIDE}")
+    print(f"[STATUS] LLC_FILL_BANDWIDTH_OVERRIDE={LLC_FILL_BANDWIDTH_OVERRIDE}")
     print(
         "[STATUS] Warmup split: "
         f"warm_cache={WARM_CACHE_INSTS}, "

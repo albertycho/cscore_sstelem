@@ -144,6 +144,14 @@ namespace SST {
                 params.find<int64_t>("cxl_link_credit_window_size", legacy_cxl_link_queue_size);
             const auto l1d_mshr_size_override =
                 static_cast<std::size_t>(params.find<uint64_t>("l1d_mshr_size_override", 16));
+            const auto llc_mshr_size_override =
+                static_cast<std::size_t>(params.find<uint64_t>("llc_mshr_size_override", 64));
+            const auto llc_tag_bandwidth_override =
+                champsim::bandwidth::maximum_type{
+                    params.find<uint64_t>("llc_tag_bandwidth_override", 1)};
+            const auto llc_fill_bandwidth_override =
+                champsim::bandwidth::maximum_type{
+                    params.find<uint64_t>("llc_fill_bandwidth_override", 1)};
             const bool complete_stores_after_issue =
                 params.find<int>("complete_stores_after_issue", 0) != 0;
 
@@ -185,20 +193,20 @@ namespace SST {
 
 			/* Populating CACHES */
 			
-			auto llc_builder = champsim::cache_builder{ champsim::defaults::default_llc }
-				.name("LLC")
-				.upper_levels({&channels.at(6)})
-				.sets(2048)
-				.ways(16)
-				.pq_size(32)
-				.mshr_size(64)
-				.latency(20)
-				.fill_latency(1)
-				.tag_bandwidth(champsim::bandwidth::maximum_type{1})
-				.fill_bandwidth(champsim::bandwidth::maximum_type{1})
-				.offset_bits(champsim::data::bits{champsim::lg2(64)})
-				.prefetch_activate(access_type::LOAD, access_type::PREFETCH)
-				.replacement<class lru>()
+				auto llc_builder = champsim::cache_builder{ champsim::defaults::default_llc }
+					.name("LLC")
+					.upper_levels({&channels.at(6)})
+					.sets(2048)
+					.ways(16)
+					.pq_size(32)
+					.mshr_size(llc_mshr_size_override)
+					.latency(20)
+					.fill_latency(1)
+					.tag_bandwidth(llc_tag_bandwidth_override)
+					.fill_bandwidth(llc_fill_bandwidth_override)
+					.offset_bits(champsim::data::bits{champsim::lg2(64)})
+					.prefetch_activate(access_type::LOAD, access_type::PREFETCH)
+					.replacement<class lru>()
 				.prefetcher<class no>()
 				.lower_level(&channels.at(1))
 				.clock_period(champsim::chrono::picoseconds{kClockPeriodPs})

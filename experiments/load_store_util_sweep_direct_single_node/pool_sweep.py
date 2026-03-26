@@ -22,6 +22,9 @@ TRACE_PATH = os.environ["TRACE_PATH"]
 CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 COMPLETE_STORES_AFTER_ISSUE = int(os.environ.get("COMPLETE_STORES_AFTER_ISSUE", "0"))
 L1D_MSHR_SIZE_OVERRIDE = int(os.environ.get("L1D_MSHR_SIZE_OVERRIDE", "16"))
+LLC_MSHR_SIZE_OVERRIDE = int(os.environ.get("LLC_MSHR_SIZE_OVERRIDE", "64"))
+LLC_TAG_BANDWIDTH_OVERRIDE = int(os.environ.get("LLC_TAG_BANDWIDTH_OVERRIDE", "1"))
+LLC_FILL_BANDWIDTH_OVERRIDE = int(os.environ.get("LLC_FILL_BANDWIDTH_OVERRIDE", "1"))
 
 # Output
 LIGHTWEIGHT_OUTPUT = 1
@@ -66,6 +69,9 @@ sock.addParams({
     "print_latency_hist": PRINT_LAT_HIST,
     "complete_stores_after_issue": COMPLETE_STORES_AFTER_ISSUE,
     "l1d_mshr_size_override": L1D_MSHR_SIZE_OVERRIDE,
+    "llc_mshr_size_override": LLC_MSHR_SIZE_OVERRIDE,
+    "llc_tag_bandwidth_override": LLC_TAG_BANDWIDTH_OVERRIDE,
+    "llc_fill_bandwidth_override": LLC_FILL_BANDWIDTH_OVERRIDE,
 })
 
 link_node_to_pool = sst.Link("s0_to_pool0")

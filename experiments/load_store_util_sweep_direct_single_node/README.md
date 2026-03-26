@@ -36,6 +36,9 @@ Environment overrides:
 - `TRACE_ROOT`: optional directory for generated traces
 - `COMPLETE_STORES_AFTER_ISSUE`: `0` keeps the original core behavior; `1` delays store instruction completion until `issue_write()` succeeds
 - `L1D_MSHR_SIZE_OVERRIDE`: override for `cpu0_L1D.mshr_size` in the direct experiment
+- `LLC_MSHR_SIZE_OVERRIDE`: override for `LLC.mshr_size`
+- `LLC_TAG_BANDWIDTH_OVERRIDE`: override for `LLC.tag_bandwidth`
+- `LLC_FILL_BANDWIDTH_OVERRIDE`: override for `LLC.fill_bandwidth`
 
 Example A/B runs:
 
@@ -43,4 +46,6 @@ Example A/B runs:
 python3 experiments/load_store_util_sweep_direct_single_node/run_sweep.py
 COMPLETE_STORES_AFTER_ISSUE=1 python3 experiments/load_store_util_sweep_direct_single_node/run_sweep.py
 L1D_MSHR_SIZE_OVERRIDE=64 python3 experiments/load_store_util_sweep_direct_single_node/run_sweep.py
+LLC_TAG_BANDWIDTH_OVERRIDE=4 LLC_FILL_BANDWIDTH_OVERRIDE=4 python3 experiments/load_store_util_sweep_direct_single_node/run_sweep.py
+LLC_MSHR_SIZE_OVERRIDE=256 LLC_TAG_BANDWIDTH_OVERRIDE=4 LLC_FILL_BANDWIDTH_OVERRIDE=4 python3 experiments/load_store_util_sweep_direct_single_node/run_sweep.py
 ```
