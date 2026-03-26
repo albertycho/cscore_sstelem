@@ -665,7 +665,9 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
     fmt::print("[SQ] {} instr_id: {} vaddr: {:x}\n", __func__, sq_entry.instr_id, sq_entry.virtual_address);
   }
 
-  sq_entry.finish(std::begin(ROB), std::end(ROB));
+  if (!complete_stores_after_issue) {
+    sq_entry.finish(std::begin(ROB), std::end(ROB));
+  }
 
   // Release dependent loads
   for (std::optional<LSQ_ENTRY>& dependent : sq_entry.lq_depend_on_me) {
@@ -688,7 +690,11 @@ bool O3_CPU::do_complete_store(const LSQ_ENTRY& sq_entry)
     fmt::print("[SQ] {} instr_id: {} vaddr: {:x}\n", __func__, data_packet.instr_id, data_packet.v_address);
   }
 
-  return L1D_bus.issue_write(data_packet);
+  auto success = L1D_bus.issue_write(data_packet);
+  if (success && complete_stores_after_issue) {
+    sq_entry.finish(std::begin(ROB), std::end(ROB));
+  }
+  return success;
 }
 
 bool O3_CPU::execute_load(const LSQ_ENTRY& lq_entry)

@@ -1,0 +1,1167 @@
+# WORKSHEET
+
+## Instructions
+- If you believe you have exhausted all candidates, you are incorrect. Go back and keep searching.
+- Reference this worksheet throughout the investigation and keep it as the active ledger for every candidate.
+- This worksheet is the mandatory running proof ledger for the investigation.
+- Before reporting any candidate as an explanation, record it here first.
+- For every candidate explored, record:
+  1. What is the candidate
+  2. What numbers directly justify such a candidate
+  3. Why this candidate explains the exact phenomenon described in the summary
+  4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+  5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+- Repeatedly append all candidates explored here, including rejected ones.
+- Do not treat "compatible with the data" as proof.
+- Do not treat "code exists" as proof that it was active.
+- Do not stop until there is a candidate that can be reported with 100% confidence.
+
+## Problem Summary
+- Phenomenon A: At fixed aggregate bandwidth, average CXL miss latency decreases as `load_pct` increases, even though the workload becomes more directionally imbalanced. In the current direct single-node sweep, this is being observed on the `mem_pct = 100` realization of that fixed-aggregate-bandwidth experiment.
+- Phenomenon B: In the same direct single-node topology, at fixed `load_pct = 40`, average CXL miss latency first increases and then decreases as observed bandwidth increases with `mem_pct`, which should not happen under a simple monotone bottleneck-queueing story.
+- The problem is to identify the actual source-level mechanism causing these reverse trends, not merely restate that one queue or another moved.
+
+## Current Narrowing
+- The repeated trends persist in the direct single-node topology.
+- Therefore the cause is not:
+  - switch logic
+  - switch arbitration
+  - multi-node fan-in
+  - synchronized traces across multiple nodes
+- For Phenomenon A (fixed aggregate bandwidth; currently inspected via the direct `mem100` load sweep), the strongest moving terms in the direct logs are the forward-side pool-port waits:
+  - `load0 mem100`
+    - `stat.node.0.llc.avg_cxl_miss_lat = 435.009`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 62.5172`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 44.8152`
+    - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 1.55249`
+  - `load100 mem100`
+    - `stat.node.0.llc.avg_cxl_miss_lat = 388.223`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 0.0139736`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 0`
+    - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 18.1849`
+- For Phenomenon A, a stronger diagnostic fact is now explicit:
+  - the intended fixed-aggregate generator target is not the actual observed BW in the simulator
+  - direct `mem100` load sweep:
+    - `load0`: `stat.node.0.bw.host_link_total_gbps = 11.6112`, `stat.node.0.bw.interval_cycles = 626781`
+    - `load40`: `stat.node.0.bw.host_link_total_gbps = 9.69294`, `stat.node.0.bw.interval_cycles = 755399`
+    - `load100`: `stat.node.0.bw.host_link_total_gbps = 6.87658`, `stat.node.0.bw.interval_cycles = 1060133`
+  - so the downward latency trend with increasing `load_pct` is not happening at fixed observed BW; the core/model is changing the actual offered load.
+- For Phenomenon B (`load40` mem sweep), the forward-side terms get worse monotonically, but the late drop comes from the node response queue:
+  - `mem40`
+    - `stat.node.0.llc.avg_cxl_miss_lat = 439.977`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 8.10124`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 1.79801`
+    - `stat.pool.100.memq.demand.total_avg_cycles = 78.7566`
+    - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 59.0423`
+    - `stat.node.0.fabric.ingress_arrival_gap_avg_cycles = 42.278`
+    - `stat.node.0.fabric.ingress_arrival_gap_stddev_cycles = 83.3638`
+  - `mem100`
+    - `stat.node.0.llc.avg_cxl_miss_lat = 412.926`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 12.494`
+    - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 4.02223`
+    - `stat.pool.100.memq.demand.total_avg_cycles = 79.1457`
+    - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 27.263`
+    - `stat.node.0.fabric.ingress_arrival_gap_avg_cycles = 26.4113`
+    - `stat.node.0.fabric.ingress_arrival_gap_stddev_cycles = 26.1956`
+- So the current unresolved part is:
+  - Phenomenon A: whether the surviving explanation is primarily “actual observed BW falls because load-heavy traces are latency-coupled in the OOO core”, or whether the forward-only write path is still independently required beyond that
+  - Phenomenon B: why higher `mem_pct` reshapes the return stream enough to lower response queue wait after the initial rise
+- Stronger surviving structure now established from source plus direct logs:
+  - `cpu0_L1D.mshr_size = 16` in `cscore.cc:251-260`
+  - on MSHR full, `CACHE::handle_miss()` returns `false` in `src/cache.cc:512-515`
+  - `CACHE::operate()` only erases ready tag-check entries that successfully hit or miss-handle in `src/cache.cc:768-774`
+  - so an MSHR-full miss stays in `inflight_tag_check` and retries later
+  - in the direct `load40` mem sweep, the observed CXL-miss rate approaches the simple `16 / avg_cxl_miss_lat` ceiling:
+    - `mem40`: ratio `0.634`
+    - `mem60`: `0.830`
+    - `mem80`: `0.915`
+    - `mem100`: `0.942`
+  - in the direct `mem100` load sweep, the estimated outstanding CXL misses stay pinned near `14.4-15.5`, again close to the same `16`-entry L1D MSHR limit
+  - this makes L1D MSHR-full retry the strongest concrete surviving pacing mechanism upstream of the pool
+- Additional hard negatives now established for Phenomenon B:
+  - node-side remote send path is not blocking in the inspected direct `load40` mem sweep:
+    - `stat.node.0.fabric.egress_blocked_cycles = 0` at `mem10`, `mem40`, `mem60`, `mem80`, `mem100`
+    - `stat.node.0.fabric.ready_retry_count = 0` at `mem10`, `mem40`, `mem60`, `mem80`, `mem100`
+  - the pool is not rejecting requests or blocking responses in the same sweep:
+    - `stat.pool.100.node.0.request_blocked.load = 0`
+    - `stat.pool.100.node.0.request_blocked.rfo = 0`
+    - `stat.pool.100.node.0.request_blocked.write = 0`
+    - `stat.pool.100.node.0.response_blocked.load = 0`
+    - `stat.pool.100.node.0.response_blocked.rfo = 0`
+    - `stat.pool.100.response.blocked_avg_pending_pkts = 0`
+  - so the late drop is not being caused by an exposed node-port retry loop or by pool-side request/response backpressure
+
+## Candidate Ledger
+
+### Candidate 1
+1. What is the candidate
+   - The switch, switch arbitration, or multi-node fan-in is causing the reverse trend.
+2. What numbers directly justify such a candidate
+   - This candidate was tested by removing those structures entirely in the direct single-node experiment and observing the same qualitative trends.
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It does not survive the direct topology result.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The same trends persist when the topology is only `node -> pool`, so the switch, fan-in, and multi-node lockstep cannot be necessary causes.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 2
+1. What is the candidate
+   - RNG divergence or changing the future generated program is the cause of the smooth reverse trends.
+2. What numbers directly justify such a candidate
+   - None that uniquely support causality; this was only a comparison-validity concern.
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It does not explain a smooth, repeatable directional trend across a sweep.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - Different random instances can add noise or move exact points, but they do not justify stable reverse curves on their own.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 3
+1. What is the candidate
+   - The pool controller’s utilization-based latency thresholds create the late `mem_pct` drop.
+2. What numbers directly justify such a candidate
+   - Direct `load40` mem sweep:
+     - `stat.pool.100.util.mem_avg = 0.147975` at `mem40`
+     - `stat.pool.100.util.mem_avg = 0.234096` at `mem100`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It does not; the values stay below the first `0.30` threshold, so the latency function does not change regime.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It incorrectly assumes a threshold crossing that the data does not show.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 4
+1. What is the candidate
+   - Cache `WQ -> RQ -> PQ` priority is the primary source of the observed reverse trends.
+2. What numbers directly justify such a candidate
+   - No direct numbers proved sustained same-window contention at the relevant cache stages.
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It was proposed as a mechanism, but there was no direct proof that it was active enough to drive the measured curves.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It jumps from "priority exists in code" to "priority caused the trend" without proving the actual contention pattern.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 5
+1. What is the candidate
+   - At fixed aggregate bandwidth, increasing `load_pct` removes forward-only `WRITE` packets that share the node->pool path and the pool request FIFO with response-producing requests, so the demand/RFO path gets much faster even though the response direction becomes more dominant.
+2. What numbers directly justify such a candidate
+   - Direct single-node, fixed-aggregate-bandwidth realization (`mem100`) load sweep:
+     - `load0`
+       - `stat.node.0.fabric.tx_pkts.demand_req = 22294`
+       - `stat.node.0.fabric.tx_pkts.write_req = 22282`
+       - `stat.node.0.fabric.rx_pkts.response = 22310`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 62.5172`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 44.8152`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 1.55249`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 435.009`
+     - `load40`
+       - `stat.node.0.fabric.tx_pkts.demand_req = 27571`
+       - `stat.node.0.fabric.tx_pkts.write_req = 16598`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 12.494`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 4.02223`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 27.263`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 412.926`
+     - `load100`
+       - `stat.node.0.fabric.tx_pkts.demand_req = 42151`
+       - `stat.node.0.fabric.tx_pkts.write_req = 0`
+       - `stat.node.0.fabric.rx_pkts.response = 42188`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 0.0139736`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 0`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 18.1849`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 388.223`
+   - Latency histogram shift:
+     - `load0`: `p50 ~= 180-190 ns`, `p90 ~= 180-190 ns`, `p99 ~= 190-200 ns`
+     - `load100`: `p50 ~= 160-170 ns`, `p90 ~= 160-170 ns`, `p99 ~= 170-180 ns`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - In code, writes are explicitly one-way:
+     - CPU writes are issued with `response_requested = false` in `src/ooo_cpu.cc:915-923`.
+     - The pool only returns requests with `response_requested = true` in `src/my_memory_controller.cc:66-73`.
+   - Those writes still consume forward resources:
+     - the direct port has one ingress timing queue per port in `src/fabric_port.cc:493-535`
+     - the pool memory controller puts all accepted requests into the same FIFO service structure in `cxl_mempool.cc:420-477` and `src/my_memory_controller.cc:197-200`
+   - Therefore store-heavy cases inject a large class of forward-only traffic that delays demand/RFO completion but never appears in the reverse direction. Raising `load_pct` removes that class of traffic and collapses the forward-side delay term.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - Possible flaw: it must not claim the response path improves; the response queue actually gets worse than `load0` for some intermediate/high-load cases.
+   - Possible flaw: it must not claim this explains every local fluctuation, such as `load10` being slightly worse than `load0`.
+   - Possible flaw: it must not assume write queue wait is counted directly into miss latency. The correct claim is narrower: writes share the forward path with demand/RFO and delay those requests before the pool services them.
+   - None of those flaws break the central mechanism because the demand-side forward wait alone drops by over `62` cycles from `load0` to `load100`, while pool memory service stays close to flat and the response-side increase is much smaller.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: low for the main downward trend, because the code path and the dominating moving terms line up directly.
+   - Confidence: very high that this is the main cause of Phenomenon A in the direct single-node setup.
+
+### Candidate 6
+1. What is the candidate
+   - At fixed `load_pct = 40`, increasing `mem_pct` drives the pool memory FIFO from intermittently busy to almost continuously busy, and because that FIFO has constant per-request bandwidth cost and stays in the same latency regime, it regularizes departures; the pool then forwards those ready responses immediately, so the node sees a denser but much less bursty response stream, which reduces the node response-queue penalty enough to pull total miss latency back down.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep:
+     - `mem40`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 439.977`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 59.0423`
+       - `stat.node.0.fabric.ingress_arrival_gap_avg_cycles = 42.278`
+       - `stat.node.0.fabric.ingress_arrival_gap_stddev_cycles = 83.3638`
+       - `stat.node.0.fabric.ingress_queue_wait_after_nonempty_arrival_avg_cycles.response = 63.3505`
+       - `stat.pool.100.memq.queue_occ_nonempty_frac = 0.78578`
+       - `stat.pool.100.memq.queue_occ_avg_reqs = 2.86459`
+       - `stat.pool.100.memq.complete_burst_avg_pkts = 1`
+       - `stat.pool.100.memq.complete_burst_max_pkts = 1`
+       - `stat.pool.100.response.sent_nonempty_frac = 0.0230947`
+       - `1 / sent_nonempty_frac = 43.30 cycles`
+     - `mem60`
+       - `stat.node.0.fabric.ingress_arrival_gap_avg_cycles = 31.6386`
+       - `stat.node.0.fabric.ingress_arrival_gap_stddev_cycles = 49.2471`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 49.3687`
+       - `stat.pool.100.memq.queue_occ_nonempty_frac = 0.927235`
+       - `stat.pool.100.response.sent_nonempty_frac = 0.0306573`
+       - `1 / sent_nonempty_frac = 32.62 cycles`
+     - `mem80`
+       - `stat.node.0.fabric.ingress_arrival_gap_avg_cycles = 27.8875`
+       - `stat.node.0.fabric.ingress_arrival_gap_stddev_cycles = 33.823`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 37.0851`
+       - `stat.pool.100.memq.queue_occ_nonempty_frac = 0.96865`
+       - `stat.pool.100.response.sent_nonempty_frac = 0.03467`
+       - `1 / sent_nonempty_frac = 28.84 cycles`
+     - `mem100`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 412.926`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 27.263`
+       - `stat.node.0.fabric.ingress_arrival_gap_avg_cycles = 26.4113`
+       - `stat.node.0.fabric.ingress_arrival_gap_stddev_cycles = 26.1956`
+       - `stat.node.0.fabric.ingress_queue_wait_after_nonempty_arrival_avg_cycles.response = 27.3869`
+       - `stat.pool.100.memq.queue_occ_nonempty_frac = 0.98208`
+       - `stat.pool.100.memq.queue_occ_avg_reqs = 4.55232`
+       - `stat.pool.100.memq.complete_burst_avg_pkts = 1.00066`
+       - `stat.pool.100.memq.complete_burst_max_pkts = 2`
+       - `stat.pool.100.response.sent_nonempty_frac = 0.0365358`
+       - `1 / sent_nonempty_frac = 27.37 cycles`
+   - The response-producing mix stays essentially constant across the sweep:
+     - `mem40`
+       - `stat.pool.100.node.0.request_enqueued.load = 4417`
+       - `stat.pool.100.node.0.request_enqueued.rfo = 6577`
+       - load fraction among response-producing requests = `4417 / (4417 + 6577) = 40.17%`
+     - `mem100`
+       - `stat.pool.100.node.0.request_enqueued.load = 11114`
+       - `stat.pool.100.node.0.request_enqueued.rfo = 16462`
+       - load fraction among response-producing requests = `11114 / (11114 + 16462) = 40.29%`
+   - Supporting negatives:
+     - `stat.pool.100.util.mem_avg = 0.147975 -> 0.234096`, which stays below the `0.30` threshold
+     - `stat.pool.100.node.0.response_blocked.* = 0` throughout these runs
+     - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.response = 0` throughout these runs
+   - Latency histogram shift:
+     - `mem40`: `p90 ~= 210-220 ns`, `p95 ~= 230-240 ns`, `p99 ~= 250-260 ns`
+     - `mem100`: `p90 ~= 190-200 ns`, `p95 ~= 200-210 ns`, `p99 ~= 240-250 ns`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - The pool controller gives every request the same bandwidth cost:
+     - `bw_cost_fn` returns `1.0` for all requests in `src/my_memory_controller.cc:21-24`
+   - The utilization-based latency function stays in the same `72-cycle` bucket for the whole inspected range:
+     - thresholds are in `inc/my_memory_controller.h:34-40`
+     - measured utilization never reaches `0.30`
+   - The FIFO service is deterministic once backlogged:
+     - strict FIFO bandwidth service in `src/lat_bw_queue.cc:221-254`
+     - one request enters completion when its fixed bandwidth cost is paid
+   - The pool does not hold ready responses:
+     - one-port pools greedily send ready responses in `cxl_mempool.cc:284-295`
+     - there is no measured response blocking at the pool
+   - So, as the mem FIFO becomes almost continuously nonempty, departures become server-paced rather than arrival-paced. The near-identity between `1 / response.sent_nonempty_frac` and the node’s measured response interarrival gap shows that the node is directly seeing this mem-controller completion cadence. Because the node ingress throughput floor is `25 cycles / 64B` plus fixed latency, lowering arrival-gap variance sharply reduces the extra queue-wait term beyond that service floor.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - Possible flaw: it could confuse “queue occupancy is higher” with “therefore responses must be smoother.” That jump would be invalid by itself.
+   - The stronger bridge is required and present:
+     - per-request service is constant in this range
+     - pool response sending is immediate and unblocked
+     - node response interarrival gap tracks `1 / response.sent_nonempty_frac` closely across the sweep
+   - Possible flaw: it could claim the pool emits large response bursts. That is false; the measured returned/sent burst size is essentially `1`, not a large burst.
+   - Possible flaw: it could claim forward-side terms improve. They do not; this candidate is only for the late response-side reversal.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: low-to-medium. The remaining logical risk is no longer response-mix drift or pool-send bursting; it is whether some separate upstream mechanism, beyond the continuously busy fixed-service FIFO, is still needed to explain the observed reduction in arrival-gap variance.
+   - Confidence: very strong surviving candidate for Phenomenon B, but not yet marked 100%.
+
+### Candidate 7
+1. What is the candidate
+   - Warmup/phase-boundary contamination is the dominant cause of the observed reverse trends.
+2. What numbers directly justify such a candidate
+   - Code does show stats reset without draining all in-flight work:
+     - ROI reset is triggered in `cscore.cc:531-548`
+     - fabric stats are reset in `cscore.cc:541-546` and `src/fabric_port.cc:537-684`
+     - cache miss timing state is cleared in `src/cache.cc:1130-1152`
+   - Direct log check against dominant contamination:
+     - `load0 mem100`: `response_pkts = 22310`, miss-hist total = `22279`, diff = `31`
+     - `load10 mem100`: `23506` vs `23474`, diff = `32`
+     - `load40 mem100`: `27620` vs `27564`, diff = `56`
+     - `load100 mem100`: `42188` vs `42136`, diff = `52`
+     - `load40 mem40`: `11004` vs `10979`, diff = `25`
+     - `load40 mem60`: `16546` vs `16507`, diff = `39`
+     - `load40 mem80`: `22030` vs `21978`, diff = `52`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - If dominant contamination were driving the reported curves, a substantial fraction of the measured response traffic would need to come from pre-ROI work, and the response totals would diverge materially from the measured miss-latency histogram totals.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The code-level concern is real, but the numbers are too small for it to dominate these trends.
+   - A mismatch of only `25-56` packets against totals in the `11k-42k` range is not large enough to explain the observed hundred-cycle-scale queue shifts.
+   - This candidate can still be a small measurement impurity, but not the main driver of either phenomenon.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal for dominant-cause status.
+   - Confidence: rejected as a dominant explanation.
+
+### Candidate 8
+1. What is the candidate
+   - The late `mem_pct` drop at fixed `load40` is caused by a shift in the response mix, rather than by queueing dynamics.
+2. What numbers directly justify such a candidate
+   - Fixed-`load40` response-producing request mix:
+     - `mem40`: load `4417`, rfo `6577`, load share `40.17%`
+     - `mem60`: load `6630`, rfo `9900`, load share `40.10%`
+     - `mem80`: load `8858`, rfo `13136`, load share `40.27%`
+     - `mem100`: load `11114`, rfo `16462`, load share `40.29%`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It does not survive the fixed-ratio data. The response-producing mix is essentially unchanged across the sweep.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It assumes the response stream is changing because the type mixture is changing, but the measured load/RFO split among response-producing requests stays effectively constant.
+   - So the observed reduction in response arrival-gap variance must come from timing/queueing dynamics, not a compositional shift in response types.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 9
+1. What is the candidate
+   - Phenomenon A is primarily caused by the fact that the load sweep is not at fixed observed aggregate bandwidth in the simulator: as `load_pct` rises, actual offered BW falls because loads are latency-coupled to completion while stores are counted complete before their writes are accepted.
+2. What numbers directly justify such a candidate
+   - Direct single-node `mem100` load sweep:
+     - `load0`
+       - `stat.node.0.bw.host_link_total_gbps = 11.6112`
+       - `stat.node.0.bw.interval_cycles = 626781`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 435.009`
+     - `load10`
+       - `stat.node.0.bw.host_link_total_gbps = 10.1946`
+       - `stat.node.0.bw.interval_cycles = 717492`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 440.52`
+     - `load40`
+       - `stat.node.0.bw.host_link_total_gbps = 9.69294`
+       - `stat.node.0.bw.interval_cycles = 755399`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 412.926`
+     - `load70`
+       - `stat.node.0.bw.host_link_total_gbps = 8.46626`
+       - `stat.node.0.bw.interval_cycles = 861982`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 397.05`
+     - `load100`
+       - `stat.node.0.bw.host_link_total_gbps = 6.87658`
+       - `stat.node.0.bw.interval_cycles = 1060133`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 388.223`
+   - OOO source path:
+     - `operate()` order in `src/ooo_cpu.cc:34-54`
+     - ROB completion requires `completed_mem_ops == num_mem_ops()` in `src/ooo_cpu.cc:722-733`
+     - loads increment `completed_mem_ops` only on return in `src/ooo_cpu.cc:759-777`
+     - stores increment `completed_mem_ops` in `do_finish_store()` before `issue_write()` succeeds, in `src/ooo_cpu.cc:632-640`, `src/ooo_cpu.cc:659-676`, and `src/ooo_cpu.cc:900-907`
+     - actual store write acceptance is later in `src/ooo_cpu.cc:679-691`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - The generator intends fixed aggregate BW, but the simulator does not preserve that condition because the OOO core treats load and store completion differently. As `load_pct` rises, more memory instructions become return-latency-coupled loads, so the run stretches in cycles and actual host-link BW falls sharply. Once the observed BW falls from about `11.6` to `6.9` Gbps across the sweep, a decreasing latency trend is no longer paradoxical; the system is simply being offered less real load. This also matches the direct code path: stores can retire before their writes are accepted, but loads cannot retire until data returns.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It could overclaim by saying the OOO completion asymmetry is the only contributor. The direct logs also show forward-only write traffic collapsing with higher `load_pct`, so there are two source-level effects moving in the same direction.
+   - It could overclaim by treating the observed BW drop as if it fully explains every local non-monotonic bump, including `load0 -> load10`. It does not need to explain every small local fluctuation to explain the broad downward trend.
+   - It could overclaim by using intended fixed aggregate BW language as if it still held in the simulator. The data shows it does not hold.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: low for the broad downward trend in Phenomenon A. The only remaining caution is whether the write-only forward path is a co-cause rather than a side detail.
+   - Confidence: extremely high that this is a core cause of Phenomenon A in the direct single-node setup.
+
+### Candidate 10
+1. What is the candidate
+   - Phenomenon B is caused directly by the Bernoulli memory-op generator itself: as `mem_pct` rises, the generated memory-op gap distribution becomes less bursty, and that alone explains the late latency drop.
+2. What numbers directly justify such a candidate
+   - Generator law for `load_pct = 40`, `aggregate_peak_gbps = 12`, `num_nodes = 1`, from `scripts/generate_synth_trace.cpp:251-275`:
+     - `mem10`: `p = 0.009058`, geometric gap mean `109.400`, geometric gap stddev `109.899`, CV `1.005`
+     - `mem40`: `p = 0.036232`, geometric gap mean `26.600`, geometric gap stddev `27.095`, CV `1.019`
+     - `mem100`: `p = 0.090580`, geometric gap mean `10.040`, geometric gap stddev `10.528`, CV `1.049`
+   - Measured direct pool-ingress stats:
+     - `mem10`: avg `65.9476`, stddev `96.0104`, CV `1.456`
+     - `mem40`: avg `30.2514`, stddev `44.6098`, CV `1.474`
+     - `mem100`: avg `16.6675`, stddev `15.2587`, CV `0.916`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if the generator’s own gap process already showed a comparable collapse in relative burstiness as `mem_pct` rose.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The generator’s mean gap does fall with `mem_pct`, but its relative burstiness does not collapse the way the measured pool-ingress process does.
+   - The measured pool-ingress CV drops from about `1.47` to `0.92`, while the raw Bernoulli/geometric CV stays near `1`.
+   - So the generator alone cannot explain the observed magnitude of smoothing. A second amplifying mechanism in the core/cache path is still required.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal as a complete explanation.
+   - Confidence: rejected as a sufficient cause.
+
+### Candidate 11
+1. What is the candidate
+   - Phenomenon B is caused by closed-loop core self-clocking: as `mem_pct` rises at fixed `load_pct = 40`, more returned-load completions are needed to keep the ROB moving, so the core/cache path amplifies the raw generator trend and emits a denser but much less bursty remote-request stream before the pool.
+2. What numbers directly justify such a candidate
+   - Direct `load40` mem sweep:
+     - actual observed BW rises monotonically:
+       - `mem10`: `stat.node.0.bw.host_link_total_gbps = 2.57167`
+       - `mem40`: `6.12526`
+       - `mem100`: `9.69294`
+     - but ROI runtime also stretches sharply:
+       - `mem10`: `stat.node.0.bw.interval_cycles = 279877`
+       - `mem40`: `476475`
+       - `mem100`: `755399`
+     - pool-ingress request stream smooths before the pool:
+       - avg/stddev `65.9476 / 96.0104` at `mem10`
+       - `30.2514 / 44.6098` at `mem40`
+       - `16.6675 / 15.2587` at `mem100`
+     - node response stream smooths even more:
+       - avg/stddev `102.27 / 163.444` at `mem10`
+       - `42.278 / 83.3638` at `mem40`
+       - `26.4113 / 26.1956` at `mem100`
+   - Source path:
+     - the core is always kept fed from the trace in `cscore.cc:497-504`
+     - non-memory instructions execute and complete quickly through `src/ooo_cpu.cc:526-558` and `src/ooo_cpu.cc:722-733`
+     - loads only satisfy the ROB memory-completion gate when data returns in `src/ooo_cpu.cc:759-777`
+     - stores satisfy that gate earlier in `src/ooo_cpu.cc:632-640`, `src/ooo_cpu.cc:659-676`, and `src/ooo_cpu.cc:900-907`
+     - actual store write acceptance happens later in `src/ooo_cpu.cc:679-691`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - This candidate gives the missing amplifier that Candidate 10 lacked. The generator alone does not reduce relative burstiness enough, but the core is not open-loop. As `mem_pct` rises, more instructions in the ROB are memory instructions, and the load subset cannot retire until responses return. That stretches the ROI in cycles and forces issue to become more self-clocked by returning data. The direct-port stats show this smoothing is already present before the pool, which is exactly where a closed-loop CPU/cache mechanism would act.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It still makes one serious inferential jump: the logs show pre-pool smoothing, and the OOO code shows a concrete load/store completion asymmetry, but there is not yet a direct counter of “ROB stalled on returned loads” or “remote issue attempts gated by that stall” in these runs.
+   - It could also be incomplete: cache-side MSHR/tag-stage pacing may be participating alongside the core’s ROB/LSQ feedback, and the current logs do not separate those two cleanly.
+   - So this candidate is mechanically coherent and better than Candidate 10, but the last causal step is not yet fully closed.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: medium.
+   - Confidence: strong surviving candidate for the upstream smoother in Phenomenon B, but not yet 100%.
+
+### Candidate 12
+1. What is the candidate
+   - Phenomenon B is only an artifact of using total host-link BW as the x-axis; if the curve is plotted against response-direction BW or response packet rate, the inversion disappears.
+2. What numbers directly justify such a candidate
+   - Direct `load40` mem sweep response-direction traffic is monotone:
+     - `mem10`
+       - `stat.node.0.bw.switch_to_host_gbps = 1.48564`
+       - `stat.node.0.fabric.rx_pkts.response = 2707`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 394.373`
+     - `mem40`
+       - `stat.node.0.bw.switch_to_host_gbps = 3.54733`
+       - `stat.node.0.fabric.rx_pkts.response = 11004`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 439.977`
+     - `mem100`
+       - `stat.node.0.bw.switch_to_host_gbps = 5.61615`
+       - `stat.node.0.fabric.rx_pkts.response = 27620`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 412.926`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the inversion if the hump disappeared when the metric was restricted to the response direction or response packet rate.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It fails on the direct data. Response-direction BW and response packet count both rise monotonically from `mem10` through `mem100`, yet latency rises from `394.373` to `439.977` and then falls to `412.926`.
+   - So the inversion is real even against the more specific response-direction load measure. The issue is not just “wrong x-axis.”
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 13
+1. What is the candidate
+   - Phenomenon B is caused by ROI address-deck wraparound or periodic replay in the generator, which changes locality/reuse patterns as `mem_pct` rises.
+2. What numbers directly justify such a candidate
+   - Generator address deck:
+     - `kCxlWsBytes = 8 MiB` in `scripts/generate_synth_trace.cpp:55-56`
+     - line size `64 B`, so the ROI deck has `8 MiB / 64 B = 131072` lines
+     - `AddressDeck::next()` only wraps when `cursor >= line_indices.size()` in `scripts/generate_synth_trace.cpp:194-203`
+   - Direct `load40` ROI request counts stay below one full CXL deck traversal:
+     - `mem10`: demand + write = `2706 + 1640 = 4346`
+     - `mem40`: demand + write = `10989 + 6622 = 17611`
+     - `mem100`: demand + write = `27571 + 16598 = 44169`
+   - The warmup prefix is fixed across the `load40` mem sweep:
+     - `warm_cache_instrs = 200000` in `scripts/generate_synth_trace.cpp:20`
+     - warmup always runs first in `scripts/generate_synth_trace.cpp:284-305`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if higher `mem_pct` cases were wrapping the ROI address deck and therefore changing locality or writeback structure in a qualitatively different way.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It is wrong for the inspected `load40` sweep. The warmup prefix is the same across the sweep, so ROI starts from the same deck state, and the ROI itself never consumes enough requests to wrap the 8 MiB deck.
+   - So there is no late-ROI deck wrap event available to explain the `mem40 -> mem100` smoothing.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal for the inspected `load40` mem sweep.
+   - Confidence: rejected.
+
+### Candidate 14
+1. What is the candidate
+   - Same-address collapsing mechanisms inside ROI, such as channel `WQ` forwarding, channel merge, or LLC MSHR merge, are the dominant cause of Phenomenon B.
+2. What numbers directly justify such a candidate
+   - Generator / address-deck facts:
+     - CXL deck length is `131072` lines from `8 MiB / 64 B`
+     - warmup consumes exactly `200000` memory addresses, so the deck cursor at ROI start is `200000 mod 131072 = 68928`
+     - remaining lines before the next wrap are `131072 - 68928 = 62144`
+   - Direct `load40` mem sweep ROI total CXL requests:
+     - `mem10`: demand + write = `4346`
+     - `mem40`: demand + write = `17611`
+     - `mem100`: demand + write = `44169`
+   - All of those are `< 62144`
+   - Relevant collapse code exists:
+     - channel merge/forward in `src/channel.cc:72-113`
+     - cache MSHR merge in `src/cache.cc:494-510`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if many ROI requests were collapsing onto the same addresses, because that could reduce effective downstream traffic and smooth return behavior.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - For the inspected `load40` mem sweep, ROI CXL addresses do not wrap the deck, so each ROI memory operation uses a unique deck line.
+   - Without same-address duplicates inside ROI, channel `WQ` forwarding, channel duplicate merge, and LLC MSHR merge cannot be dominant explanations for the trend.
+   - Warmup can still affect initial cache state, but it does not create within-ROI duplicate-address collapse on this sweep.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal for same-address collapse as the dominant cause of Phenomenon B in the inspected sweep.
+   - Confidence: rejected.
+
+### Candidate 15
+1. What is the candidate
+   - The dominant upstream smoother for Phenomenon B is MSHR-full throttling at L2C or LLC.
+2. What numbers directly justify such a candidate
+   - Configured MSHR sizes:
+     - `cpu0_L2C.mshr_size = 32` in `cscore.cc:302`
+     - `LLC.mshr_size = 64` in `cscore.cc:190`
+   - Average outstanding demand misses from Little’s law, using direct `load40` ROI counts and average CXL miss latency:
+     - `mem40`: `10979 / 476475 * 439.977 = 10.138`
+     - `mem60`: `16507 / 539613 * 434.238 = 13.284`
+     - `mem80`: `21978 / 635163 * 423.168 = 14.643`
+     - `mem100`: `27564 / 755399 * 412.926 = 15.067`
+   - Same-address merge is already rejected in Candidate 14, so these outstanding counts represent mostly distinct misses.
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the pre-pool smoothing if the cache path were frequently hitting MSHR limits and therefore pacing new remote issues into a steadier stream.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The average number of outstanding demand misses stays far below both the `32`-entry L2C MSHR and the `64`-entry LLC MSHR.
+   - That does not prove transient-full events never happen, but it does make it hard to claim MSHR-full throttling is the dominant mechanism behind the smooth late drop.
+   - So this candidate overclaims if it says MSHR-full gating is the main source of the observed regularization.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: medium-to-high against dominance.
+   - Confidence: rejected as the dominant explanation, though transient contribution is not fully ruled out.
+
+### Candidate 16
+1. What is the candidate
+   - Phenomenon B is being created by a hidden node-side send buffer or direct-port retry loop between LLC remote issue and the direct `node -> pool` fabric hop.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep:
+     - `mem10`
+       - `stat.node.0.fabric.egress_blocked_cycles = 0`
+       - `stat.node.0.fabric.ready_retry_count = 0`
+     - `mem40`
+       - `stat.node.0.fabric.egress_blocked_cycles = 0`
+       - `stat.node.0.fabric.ready_retry_count = 0`
+     - `mem60`
+       - `stat.node.0.fabric.egress_blocked_cycles = 0`
+       - `stat.node.0.fabric.ready_retry_count = 0`
+     - `mem80`
+       - `stat.node.0.fabric.egress_blocked_cycles = 0`
+       - `stat.node.0.fabric.ready_retry_count = 0`
+     - `mem100`
+       - `stat.node.0.fabric.egress_blocked_cycles = 0`
+       - `stat.node.0.fabric.ready_retry_count = 0`
+   - Source path:
+     - remote requests are only logged at `node.request_issue` after `remote_port_.send(event)` succeeds in `cscore.cc:869-901`
+     - if `remote_port_.send(event)` fails, `enqueue_remote_request()` returns `false` and the cache miss remains unissued in `src/cache.cc:538-552`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the pre-pool smoothing if the node had an internal send/retry bottleneck that was pacing outgoing remote requests before they reached the pool.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The direct node-port stats do not show the required symptom.
+   - `egress_blocked_cycles = 0` and `ready_retry_count = 0` across the inspected sweep mean the direct node-port send path is not encountering the backpressure that this candidate requires.
+   - Because `node.request_issue` is logged only after successful send, a dominant hidden send-loop explanation would need visible send blocking or retry counts, and those are absent.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 17
+1. What is the candidate
+   - Phenomenon B is being created by pool-side request rejection or pool-side response blocking, which indirectly spaces the return stream.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep:
+     - `mem10`
+       - `stat.pool.100.node.0.request_blocked.load = 0`
+       - `stat.pool.100.node.0.request_blocked.rfo = 0`
+       - `stat.pool.100.node.0.request_blocked.write = 0`
+       - `stat.pool.100.node.0.response_blocked.load = 0`
+       - `stat.pool.100.node.0.response_blocked.rfo = 0`
+       - `stat.pool.100.response.blocked_avg_pending_pkts = 0`
+     - `mem40`
+       - same zero values
+     - `mem60`
+       - same zero values
+     - `mem80`
+       - same zero values
+     - `mem100`
+       - same zero values
+   - Source path:
+     - pool input backpressure would appear through `enqueue_mem_request()` returning `false` in `cxl_mempool.cc:420-477`
+     - ready-response blocking would appear through `try_send_response()` failing in `cxl_mempool.cc:843-917`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if the pool were intermittently refusing new requests or holding ready responses long enough to reshape the stream seen by the node.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The existing counters show neither condition.
+   - Request blocking is zero for load, rfo, and write in the inspected sweep.
+   - Response blocking is also zero, and `blocked_avg_pending_pkts = 0`.
+   - So the pool is not applying the kind of explicit accept/send backpressure that this candidate needs.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 18
+1. What is the candidate
+   - The late `mem_pct` drop in Phenomenon B is caused by the pool’s pending-response occupancy growing and then somehow reducing response latency by itself.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep:
+     - `mem10`
+       - `stat.pool.100.response.pending_occ_avg = 0.737486`
+       - `stat.pool.100.node.0.pending_age_avg_cycles = 37.6266`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 22.8236`
+     - `mem40`
+       - `stat.pool.100.response.pending_occ_avg = 1.81881`
+       - `stat.pool.100.node.0.pending_age_avg_cycles = 39.3187`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 59.0423`
+     - `mem60`
+       - `stat.pool.100.response.pending_occ_avg = 2.45131`
+       - `stat.pool.100.node.0.pending_age_avg_cycles = 40.2622`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 49.3687`
+     - `mem80`
+       - `stat.pool.100.response.pending_occ_avg = 2.76573`
+       - `stat.pool.100.node.0.pending_age_avg_cycles = 40.1933`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 37.0851`
+     - `mem100`
+       - `stat.pool.100.response.pending_occ_avg = 2.89367`
+       - `stat.pool.100.node.0.pending_age_avg_cycles = 39.7824`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 27.263`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the late drop if simply having more pending responses at the pool somehow lowered the latency of those responses at the node.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The measured pending occupancy rises monotonically, but the response queue wait first rises and then falls.
+   - Pending-response age stays nearly flat around `38-40` cycles across the sweep.
+   - So pending-response occupancy is not the missing inversion mechanism; it does not have the required non-monotonic shape and does not show a late drop of its own.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 19
+1. What is the candidate
+   - The dominant upstream smoother for Phenomenon B is channel-full retry gating in the CPU/L1D/L2C/LLC path.
+2. What numbers directly justify such a candidate
+   - Source path:
+     - `CacheBus::issue_read()` and `CacheBus::issue_write()` call `lower_level->add_rq()` / `lower_level->add_wq()` in `src/ooo_cpu.cc:905-923`
+     - `channel::add_rq()` / `add_wq()` return `false` on queue full in `src/channel.cc:118-167`
+     - the LSQ retries unissued loads and stores through `operate_lsq()` in `src/ooo_cpu.cc:625-656`
+   - Current direct logs do not expose the relevant `RQ_FULL` / `WQ_FULL` / `PQ_FULL` counters.
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the pre-pool smoothing if higher `mem_pct` cases were repeatedly hitting channel capacity and thereby spacing remote-issue attempts into a steadier cycle-by-cycle retry stream.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It currently has no direct numeric support from the inspected logs.
+   - The code path exists, but “code exists” is not proof that it was the active dominant mechanism in these runs.
+   - So using it as the explanation now would repeat the same unsupported jump that has already been rejected elsewhere in this worksheet.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal for reporting it as the cause now.
+   - Confidence: rejected as a reportable explanation with current evidence.
+
+### Candidate 20
+1. What is the candidate
+   - The strongest remaining explanation for Phenomenon B is upstream closed-loop miss-completion pacing: once `mem_pct` is high enough, the response stream is set by the system’s own completion cadence rather than by the raw Bernoulli instruction stream, and that cadence is materially smoother before the pool ever sees the requests.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep:
+     - runtime per CXL miss collapses monotonically:
+       - `mem10`: `stat.node.0.bw.interval_cycles / stat.node.0.llc.cxl_miss = 279877 / 2702 = 103.58`
+       - `mem20`: `377100 / 5384 = 70.04`
+       - `mem30`: `440113 / 8216 = 53.57`
+       - `mem40`: `476475 / 10979 = 43.40`
+       - `mem50`: `508711 / 13765 = 36.95`
+       - `mem60`: `539613 / 16507 = 32.69`
+       - `mem70`: `583779 / 19262 = 30.31`
+       - `mem80`: `635163 / 21978 = 28.90`
+       - `mem90`: `691100 / 24794 = 27.87`
+       - `mem100`: `755399 / 27564 = 27.40`
+     - node response interarrival gap tracks that cadence closely:
+       - `mem10`: `102.27`
+       - `mem20`: `68.923`
+       - `mem30`: `52.4385`
+       - `mem40`: `42.278`
+       - `mem50`: `35.8376`
+       - `mem60`: `31.6386`
+       - `mem70`: `29.2632`
+       - `mem80`: `27.8875`
+       - `mem90`: `26.8618`
+       - `mem100`: `26.4113`
+     - the same pre-pool smoothing is visible at the pool request side:
+       - pool ingress gap avg/stddev goes `65.9476 / 96.0104` at `mem10`
+       - to `30.2514 / 44.6098` at `mem40`
+       - to `16.6675 / 15.2587` at `mem100`
+     - exposed node/pool retry paths are inactive:
+       - node `egress_blocked_cycles = 0`, `ready_retry_count = 0`
+       - pool `request_blocked.* = 0`, `response_blocked.* = 0`
+   - Source path:
+     - the core is closed-loop, not open-loop: `O3_CPU::operate()` begins with `retire_rob()` and only later performs `operate_lsq()` in `src/ooo_cpu.cc:34-54`
+     - ROB completion requires `completed_mem_ops == num_mem_ops()` in `src/ooo_cpu.cc:722-733`
+     - load memory ops increment `completed_mem_ops` only on return in `src/ooo_cpu.cc:759-777` and `src/ooo_cpu.cc:892-901`
+     - stores increment `completed_mem_ops` earlier in `do_finish_store()` before `issue_write()` succeeds in `src/ooo_cpu.cc:632-640`, `src/ooo_cpu.cc:662-677`, and `src/ooo_cpu.cc:892-901`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - Phenomenon B requires an upstream smoother because the request stream is already much less bursty when it reaches the pool.
+   - The exposed node-port and pool-port retry paths are inactive, so the remaining active feedback loop is the CPU/cache completion loop.
+   - As `mem_pct` rises at fixed `load40`, more instructions become memory instructions, and the load subset cannot let the ROB advance until responses come back. That converts the cycle-time request process from sparse Bernoulli-like issuance toward completion-paced issuance. The direct logs show the resulting miss-completion cadence almost one-for-one in the node response gaps, and the node response queue shrinks once that cadence becomes smooth enough.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The remaining logical gap is that the existing logs do not directly count ROB-stall cycles attributable to returned-load gating, so the worksheet still infers the feedback loop from code structure plus the elimination of other exposed retry paths.
+   - It also does not separate “core closed-loop pacing” from any hidden cache/channel retry mechanism that is not surfaced in the current logs.
+   - So this is the strongest surviving explanation in the worksheet, but it is still not a 100% closed proof.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: medium.
+   - Confidence: strongest surviving candidate for Phenomenon B, but not yet 100%.
+
+### Candidate 21
+1. What is the candidate
+   - The dominant source of the reverse trends is raw LSQ issue-width saturation (`LQ_WIDTH` / `SQ_WIDTH`) in the OOO core.
+2. What numbers directly justify such a candidate
+   - Core widths:
+     - `LQ_WIDTH = 3`, `SQ_WIDTH = 2` in `cscore.cc:356-359`
+   - Direct single-node `load40` mem sweep average remote-request rates:
+     - `mem40`
+       - `load = 4417`, `rfo = 6577`, `write = 6624`
+       - `interval_cycles = 476475`
+       - load requests per cycle `= 0.00927`
+       - rfo requests per cycle `= 0.01380`
+       - write requests per cycle `= 0.01390`
+     - `mem100`
+       - `load = 11114`, `rfo = 16462`, `write = 16597`
+       - `interval_cycles = 755399`
+       - load requests per cycle `= 0.01471`
+       - rfo requests per cycle `= 0.02179`
+       - write requests per cycle `= 0.02197`
+   - Relevant source path:
+     - load issue in `src/ooo_cpu.cc:646-656`
+     - store issue/complete path in `src/ooo_cpu.cc:625-643`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if the core were spending a large fraction of cycles pinned at its configured LSQ issue widths, thereby smoothing memory issue into a width-limited stream.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The observed average remote-request rates are tiny relative to `LQ_WIDTH = 3` and `SQ_WIDTH = 2`.
+   - That does not prove bursts never hit those limits, but it makes it hard to claim raw LSQ width saturation is the dominant mechanism behind the broad trends.
+   - So this candidate overclaims if it treats configured width alone as the cause.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: high against dominance.
+   - Confidence: rejected as a dominant explanation.
+
+### Candidate 22
+1. What is the candidate
+   - The dominant upstream smoother for Phenomenon B is raw cache tag-bandwidth saturation at L2C or LLC.
+2. What numbers directly justify such a candidate
+   - Cache tag bandwidths:
+     - `LLC.tag_bandwidth = 1` in `cscore.cc:193`
+     - `cpu0_L2C.tag_bandwidth = 1` in `cscore.cc:305`
+   - Direct single-node `load40` mem sweep response-producing miss rates:
+     - `mem40`
+       - `stat.node.0.llc.cxl_miss = 10979`
+       - `stat.node.0.bw.interval_cycles = 476475`
+       - remote misses per cycle `= 0.02304`
+     - `mem100`
+       - `stat.node.0.llc.cxl_miss = 27564`
+       - `stat.node.0.bw.interval_cycles = 755399`
+       - remote misses per cycle `= 0.03649`
+   - Pool-accept gap averages are still tens of cycles:
+     - `mem40`: pool ingress gap avg `30.2514`
+     - `mem100`: pool ingress gap avg `16.6675`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if the relevant remote-miss stream were spending substantial time pinned against one-tag-per-cycle admission and therefore being shaped mainly by that limit.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The average remote-miss rates in the inspected sweep are far below one remote miss per cycle.
+   - That does not prove tag bandwidth never matters to any cycle, but it does undermine any claim that raw one-tag-per-cycle admission is the dominant explanation for the broad reverse trends by itself.
+   - So this candidate is another “constant model limit exists” explanation that lacks the required activity evidence.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: high against dominance.
+   - Confidence: rejected as a dominant explanation.
+
+### Candidate 23
+1. What is the candidate
+   - The late `mem_pct` reversal in Phenomenon B is being caused mainly by changing MSHR-merge/coalescing behavior rather than by a pacing limit.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep:
+     - `mem10`
+       - `stat.node.0.llc.cxl_miss = 2702`
+       - `stat.node.0.fabric.tx_pkts.demand_req = 2706`
+       - difference `= 4`
+     - `mem20`
+       - `5384` vs `5388`
+       - difference `= 4`
+     - `mem30`
+       - `8216` vs `8222`
+       - difference `= 6`
+     - `mem40`
+       - `10979` vs `10989`
+       - difference `= 10`
+     - `mem50`
+       - `13765` vs `13776`
+       - difference `= 11`
+     - `mem60`
+       - `16507` vs `16519`
+       - difference `= 12`
+     - `mem70`
+       - `19262` vs `19275`
+       - difference `= 13`
+     - `mem80`
+       - `21978` vs `21992`
+       - difference `= 14`
+     - `mem90`
+       - `24794` vs `24809`
+       - difference `= 15`
+     - `mem100`
+       - `27564` vs `27571`
+       - difference `= 7`
+   - Source path:
+     - MSHR merges are counted in `sim_stats.mshr_merge` in `src/cache.cc:507-508`
+     - an already-inflight miss merges only when `matches_address()` finds an existing MSHR entry in `src/cache.cc:491-510`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if higher `mem_pct` materially changed how many response-producing misses were merged away before they became remote requests, because that would reshape the request stream before the pool.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The observed remote demand-request count stays almost one-for-one with LLC CXL misses across the sweep.
+   - That makes large changes in merge/coalescing behavior implausible as the dominant source of the dramatic response-gap smoothing.
+   - The candidate would need a large hidden difference between “LLC CXL miss” accounting and “actual remote demand emission,” but the measured gap is only `4-15` packets across `2700-27500` misses.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal as a dominant explanation.
+   - Confidence: rejected.
+
+### Candidate 24
+1. What is the candidate
+   - The strongest concrete remaining mechanism for Phenomenon B is L1D MSHR-full retry self-clocking: at high `mem_pct`, the response-producing miss stream runs close to the `cpu0_L1D` MSHR limit, so new misses increasingly issue only when old misses complete, which smooths the downstream response arrivals.
+2. What numbers directly justify such a candidate
+   - Source configuration:
+     - `cpu0_L1D.mshr_size = 16` in `cscore.cc:251-260`
+     - `cpu0_L2C.mshr_size = 32` in `cscore.cc:297-306`
+     - `LLC.mshr_size = 64` in `cscore.cc:185-194`
+   - Source retry path:
+     - `handle_miss()` computes `mshr_full = (MSHR.size() >= MSHR_SIZE)` in `src/cache.cc:491-492`
+     - on full, it returns `false` immediately in `src/cache.cc:512-515`
+     - `CACHE::operate()` only erases tag-check entries that succeeded in `try_hit()` or `do_handle_miss()` in `src/cache.cc:768-774`
+     - therefore a ready miss that fails because of `mshr_full` remains in `inflight_tag_check` and is retried on later cycles
+   - Direct single-node `load40` mem sweep, using Little’s-law estimate `lambda * W` for average concurrent CXL misses:
+     - `mem40`
+       - miss rate `= 10979 / 476475 = 0.02304 misses/cycle`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 439.977`
+       - estimated outstanding misses `= 10.138`
+       - `stat.node.0.fabric.ingress_arrival_gap_stddev_cycles = 83.3638`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 59.0423`
+     - `mem60`
+       - miss rate `= 16507 / 539613 = 0.03059`
+       - avg miss lat `= 434.238`
+       - estimated outstanding `= 13.284`
+       - response-gap stddev `= 49.2471`
+       - response qwait `= 49.3687`
+     - `mem80`
+       - miss rate `= 21978 / 635163 = 0.03460`
+       - avg miss lat `= 423.168`
+       - estimated outstanding `= 14.643`
+       - response-gap stddev `= 33.823`
+       - response qwait `= 37.0851`
+     - `mem100`
+       - miss rate `= 27564 / 755399 = 0.03649`
+       - avg miss lat `= 412.926`
+       - estimated outstanding `= 15.067`
+       - simple L1D-MSHR concurrency ceiling `= 16 / 412.926 = 0.03875 misses/cycle`
+       - observed / ceiling `= 0.942`
+       - response-gap stddev `= 26.1956`
+       - response qwait `= 27.263`
+   - The same ceiling comparison tightens as `mem_pct` rises:
+     - `mem40`: observed miss rate `0.02304`, ceiling `0.03637`, ratio `0.634`
+     - `mem60`: observed miss rate `0.03059`, ceiling `0.03685`, ratio `0.830`
+     - `mem80`: observed miss rate `0.03460`, ceiling `0.03781`, ratio `0.915`
+     - `mem100`: observed miss rate `0.03649`, ceiling `0.03875`, ratio `0.942`
+   - Supporting negatives:
+     - node direct-port retry path is inactive: `stat.node.0.fabric.ready_retry_count = 0`, `egress_blocked_cycles = 0`
+     - pool request/response blocking is inactive: `request_blocked.* = 0`, `response_blocked.* = 0`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - Phenomenon B needs a source of stronger smoothing at high `mem_pct` than the raw Bernoulli generator alone provides.
+   - The code contains an exact self-clocking mechanism at cache level: once a cache MSHR bank is full, new misses do not disappear; they stall in `inflight_tag_check` and retry later.
+   - Among the configured cache levels, `cpu0_L1D` is the only one whose MSHR size (`16`) is numerically close to the estimated average concurrent CXL misses at the high-`mem_pct` end (`~15`), while L2C (`32`) and LLC (`64`) are much farther away.
+   - That makes L1D the first concrete place in the audited code where high-`mem_pct` runs can become completion-paced instead of raw-arrival-paced, which is exactly the type of smoothing needed to shrink the node response queue late in the sweep.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The key remaining gap is that `lambda * W ≈ 15` is an average concurrency estimate, not a direct occupancy trace proving that `cpu0_L1D` spends substantial time at exactly `16/16`.
+   - The current logs do not expose `RQ_FULL`, `WQ_FULL`, or per-cache MSHR occupancy counters, even though those counters exist in code.
+   - So this candidate is far stronger than the earlier generic “upstream pacing” story, because it identifies an exact retry site and a numerical bottleneck candidate, but it is still not a 100% closed proof.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: medium.
+   - Confidence: strongest surviving concrete candidate for Phenomenon B, but not yet 100%.
+
+### Candidate 25
+1. What is the candidate
+   - The high-`mem_pct` self-clocking in Phenomenon B is dominated by L2C or LLC MSHR-full retry, not by L1D.
+2. What numbers directly justify such a candidate
+   - Source configuration:
+     - `cpu0_L2C.mshr_size = 32` in `cscore.cc:297-306`
+     - `LLC.mshr_size = 64` in `cscore.cc:185-194`
+   - Direct single-node `load40` mem sweep:
+     - estimated average concurrent CXL misses peaks around `15.067` at `mem100`
+     - earlier sweep points are lower: `10.138`, `13.284`, `14.643`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if the late smoothing were caused primarily by retry on a larger downstream MSHR bank rather than the smaller upstream L1D bank.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The estimated average concurrent remote-miss count is numerically close to the L1D limit and far from the L2C/LLC limits.
+   - That does not prove L2C/LLC never contribute, but it makes them much weaker candidates for the first active bottleneck than L1D.
+   - So treating L2C or LLC as the dominant retry site would ignore the only cache level whose configured MSHR size is actually in range of the observed concurrency.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: high against dominance.
+   - Confidence: rejected as the dominant retry site, relative to L1D.
+
+### Candidate 26
+1. What is the candidate
+   - Phenomenon A in the direct single-node sweep is best explained by two source-level effects acting together: the response-producing demand stream is already pinned near the `cpu0_L1D` MSHR limit across the whole `mem100` load sweep, while increasing `load_pct` removes one-way writes from the forward path and pool queueing terms.
+2. What numbers directly justify such a candidate
+   - Source configuration:
+     - `cpu0_L1D.mshr_size = 16` in `cscore.cc:251-260`
+   - Direct single-node `mem100` load sweep:
+     - `load0`
+       - `stat.node.0.llc.cxl_miss = 22279`
+       - `stat.node.0.bw.interval_cycles = 626781`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 435.009`
+       - estimated outstanding CXL misses `= (22279 / 626781) * 435.009 = 15.462`
+       - simple L1D-MSHR concurrency ceiling `= 16 / 435.009 = 0.03678 misses/cycle`
+       - observed miss rate `= 22279 / 626781 = 0.03555`
+       - observed / ceiling `= 0.966`
+       - `stat.node.0.fabric.tx_pkts.write_req = 22282`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.demand_req = 62.5172`
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 44.8152`
+       - `stat.node.0.llc.avg_cxl_miss_lat = 435.009`
+     - `load10`
+       - estimated outstanding `= 14.412`
+       - `write_req = 21176`
+       - demand/write qwait `= 26.7678 / 13.6612`
+       - avg miss lat `= 440.52`
+     - `load40`
+       - estimated outstanding `= 15.067`
+       - observed / ceiling `= 0.942`
+       - `write_req = 16598`
+       - demand/write qwait `= 12.494 / 4.02223`
+       - avg miss lat `= 412.926`
+     - `load70`
+       - estimated outstanding `= 15.332`
+       - observed / ceiling `= 0.958`
+       - `write_req = 10015`
+       - demand/write qwait `= 5.52611 / 1.43084`
+       - avg miss lat `= 397.05`
+     - `load100`
+       - estimated outstanding `= 15.430`
+       - observed / ceiling `= 0.964`
+       - `write_req = 0`
+       - demand/write qwait `= 0.0139736 / 0`
+       - avg miss lat `= 388.223`
+   - Supporting pool-memory numbers stay comparatively flat:
+     - `stat.pool.100.memq.demand.total_avg_cycles = 76.9132, 84.882, 79.1457, 76.2887, 76.019`
+     - `stat.pool.100.memq.demand.ahead_pkts_avg.write = 3.00027, 2.75539, 2.07162, 1.11721, 0`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - The demand-response side of the system is not freely scaling with `load_pct`; it stays numerically pinned near about `15` concurrent CXL misses, which is almost exactly the `cpu0_L1D` MSHR capacity of `16`.
+   - That means the response-producing stream is already bounded by the core/cache path across the load sweep.
+   - What changes sharply with `load_pct` is the one-way write stream: those writes occupy forward resources and sit ahead of demand at the pool, but they never create return responses.
+   - So the downward latency trend is not “directional imbalance helps.” It is “the demand side stays near the same bounded concurrency, while forward-only write pollution collapses as `load_pct` rises.”
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The main caution is that the estimated outstanding-miss value is derived from averages, not from a direct per-cycle L1D MSHR occupancy trace.
+   - So this candidate should not claim that `cpu0_L1D` is proven full on nearly every cycle.
+   - The claim is narrower: across the load sweep, the demand-response side stays close to the same bounded-concurrency regime, while the forward-only write term drops dramatically and explains the latency decrease.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: low for the explanation of the broad downward trend.
+   - Confidence: very high that this is a correct explanation of Phenomenon A in the direct single-node setup.
+
+### Candidate 27
+1. What is the candidate
+   - The late `mem_pct` reversal in Phenomenon B is only an occupancy-metric illusion: the node response queue is actually “more full” at high `mem_pct`, and the lower queue-wait statistic is therefore misleading.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep, node response-port buckets:
+     - `mem40`
+       - `stat.node.0.fabric.ingress_pre_occ_bucket.response.0 = 743`
+       - `1_64 = 1012`
+       - `65_256 = 3727`
+       - `257_1024 = 5522`
+       - `stat.node.0.fabric.ingress_queue_wait_bucket.response.0 = 2236`
+       - `1_63 = 4778`
+       - `64_255 = 3958`
+       - `256_1023 = 27`
+     - `mem100`
+       - `stat.node.0.fabric.ingress_pre_occ_bucket.response.0 = 119`
+       - `1_64 = 200`
+       - `65_256 = 1745`
+       - `257_1024 = 25556`
+       - `stat.node.0.fabric.ingress_queue_wait_bucket.response.0 = 6419`
+       - `1_63 = 18148`
+       - `64_255 = 3027`
+       - `256_1023 = 26`
+   - Source queue semantics:
+     - packets increase `occupancy_bytes` immediately on enqueue in `src/lat_bw_queue.cc:55-77`
+     - occupancy is only decreased when a ready entry is finally consumed in `src/lat_bw_queue.cc:193-203`
+     - while in between, packets can sit in `blocked_queue`, `active_queue`, and `ready_queue`, including fixed latency plus serialization in `src/lat_bw_queue.cc:207-235`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if the lower response queue-wait statistic were merely an accounting artifact, with high pre-arrival occupancy proving that the queue is actually worse at high `mem_pct`.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - In this model, “occupancy” is not the same thing as “queueing delay.”
+   - Occupancy includes packets that have already started service and packets still paying fixed latency, not just packets waiting in front of the serializer.
+   - The bucket data itself shows the distinction: from `mem40` to `mem100`, high pre-arrival occupancy becomes much more common, yet long queue-wait buckets do not increase, and zero/short wait buckets increase sharply.
+   - So interpreting the occupancy histogram as if it directly contradicted the queue-wait metric is a category error.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 28
+1. What is the candidate
+   - Translation or miscellaneous `other_req` traffic is the hidden source of the reverse trends in the direct single-node sweep.
+2. What numbers directly justify such a candidate
+   - Direct single-node runs show `other_req` is numerically tiny:
+     - `run_load040_mem010.out`
+       - `stat.node.0.fabric.tx_pkts.other_req = 5`
+       - `stat.pool.100.memq.other.queue_wait_avg_cycles = 1`
+       - `stat.pool.100.memq.other.total_avg_cycles = 76`
+     - `run_load040_mem040.out`
+       - `tx_pkts.other_req = 10`
+       - `other.queue_wait_avg_cycles = 1.4`
+       - `other.total_avg_cycles = 76.4`
+     - `run_load040_mem100.out`
+       - `tx_pkts.other_req = 41`
+       - `other.queue_wait_avg_cycles = 1.60976`
+       - `other.total_avg_cycles = 77.7805`
+     - `run_load000_mem100.out`
+       - `tx_pkts.other_req = 16`
+     - `run_load100_mem100.out`
+       - `tx_pkts.other_req = 37`
+   - For scale, the same runs have thousands to tens of thousands of demand/response packets:
+     - `run_load040_mem100.out`
+       - `stat.node.0.fabric.tx_pkts.demand_req = 27571`
+       - `stat.node.0.fabric.tx_pkts.write_req = 16598`
+       - `stat.node.0.fabric.rx_pkts.response = 27620`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trend if a small amount of translation or “other” traffic were somehow injecting disproportionate jitter or queueing into the direct path.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The packet counts are too small by orders of magnitude to drive the broad latency curves.
+   - Their service times stay near the same base `~76-78` cycle range as other requests and do not exhibit a trend that matches either inversion.
+   - So `other_req` traffic is present, but it is not a credible dominant cause of either phenomenon.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal.
+   - Confidence: rejected.
+
+### Candidate 29
+1. What is the candidate
+   - The late downward turn in Phenomenon B is being caused directly by the write stream, despite fixed `load_pct = 40`.
+2. What numbers directly justify such a candidate
+   - Direct single-node `load40` mem sweep:
+     - write rate grows monotonically:
+       - `mem10`: `1640 / 279877 = 0.00586 writes/cycle`
+       - `mem20`: `3264 / 377100 = 0.00866`
+       - `mem30`: `4959 / 440113 = 0.01127`
+       - `mem40`: `6622 / 476475 = 0.01390`
+       - `mem50`: `8291 / 508711 = 0.01630`
+       - `mem60`: `9953 / 539613 = 0.01844`
+       - `mem70`: `11593 / 583779 = 0.01986`
+       - `mem80`: `13224 / 635163 = 0.02082`
+       - `mem90`: `14889 / 691100 = 0.02154`
+       - `mem100`: `16598 / 755399 = 0.02197`
+     - forward write-side delay also grows monotonically:
+       - `stat.pool.100.port.core.0.ingress_queue_wait_avg_cycles.write_req = 0.165345, 0.712186, 1.28848, 1.79801, 2.55216, 3.01275, 3.50401, 3.81479, 3.91865, 4.02223`
+     - write pressure seen ahead of demand in the memq also grows monotonically:
+       - `stat.pool.100.memq.demand.ahead_pkts_avg.write = 0.790896, 1.28189, 1.51295, 1.62925, 1.73107, 1.87153, 1.95346, 2.01323, 2.04878, 2.07162`
+     - but the response queue term peaks and then falls:
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 22.8236, 47.0499, 57.4755, 59.0423, 56.4658, 49.3687, 43.4229, 37.0851, 30.9291, 27.263`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the reversal if the same write stream that grows with `mem_pct` were somehow also responsible for the late shrink in node response queueing.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The write-side terms move in the wrong direction.
+   - Every exposed write metric gets worse monotonically with `mem_pct`, while the late miss-latency drop requires some term to improve late in the sweep.
+   - So writes are clearly contributing to the forward-side penalty, but they cannot be the mechanism that creates the response-side reversal after `mem40`.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal as an explanation of the late downward turn.
+   - Confidence: rejected.
+
+### Candidate 30
+1. What is the candidate
+   - The reverse trends are being caused mainly by the response-type mix changing between load responses and RFO responses.
+2. What numbers directly justify such a candidate
+   - Direct `mem100` load sweep:
+     - `load0`
+       - `stat.pool.100.node.0.request_enqueued.load = 0`
+       - `stat.pool.100.node.0.request_enqueued.rfo = 22294`
+       - `stat.node.0.fabric.ingress_queue_wait_avg_cycles.response = 1.55249`
+     - `load40`
+       - `request_enqueued.load = 11114`
+       - `request_enqueued.rfo = 16462`
+       - response qwait `= 27.263`
+     - `load100`
+       - `request_enqueued.load = 42151`
+       - `request_enqueued.rfo = 0`
+       - response qwait `= 18.1849`
+   - Response construction path:
+     - the memory controller only returns when `req.response_requested` is true in `src/my_memory_controller.cc:69`
+     - the pool always emits `out.msg_bytes = 64` for returned responses in `cxl_mempool.cc:857-866`
+     - timeline/debug response packets also set `msg_bytes = 64` in `cxl_mempool.cc:800-813`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trends if load responses and RFO responses had materially different return-path service cost or scheduling behavior.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - In the return path they are the same packet class for queueing purposes: both come back as `64B` responses.
+   - So changing the load/RFO response mix does not change response serialization cost by itself.
+   - The response-type mix can matter indirectly through upstream generation dynamics, but it is not itself the direct service-side explanation.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: fatal as a direct queueing explanation.
+   - Confidence: rejected.
+
+### Candidate 31
+1. What is the candidate
+   - The dominant upstream smoother is raw cache fill-bandwidth saturation rather than an MSHR-limited retry effect.
+2. What numbers directly justify such a candidate
+   - Source configuration:
+     - `cpu0_L1D.fill_bandwidth = 2` in `cscore.cc:257-260`
+     - `cpu0_L2C.fill_bandwidth = 1` in `cscore.cc:303-306`
+     - `LLC.fill_bandwidth = 1` in `cscore.cc:191-194`
+   - Direct single-node `load40` mem sweep remote-miss rates:
+     - `mem40`: `10979 / 476475 = 0.02304 misses/cycle`
+     - `mem60`: `16507 / 539613 = 0.03059`
+     - `mem80`: `21978 / 635163 = 0.03460`
+     - `mem100`: `27564 / 755399 = 0.03649`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It would explain the trends if return/fill processing were spending substantial time pinned at a one-fill-per-cycle or two-fills-per-cycle limit, thereby shaping the response stream.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - The observed remote-miss return rates are far below even the narrowest configured fill-bandwidth limits.
+   - That does not prove fill bandwidth never matters in any individual cycle, but it does rule out raw fill-bandwidth saturation as the dominant explanation for the broad reverse trends.
+   - The MSHR-concurrency ceiling is numerically much tighter than the fill-bandwidth ceiling, so treating fill bandwidth as the primary limiter would ignore the stronger bound.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: high against dominance.
+   - Confidence: rejected.
+
+### Candidate 32
+1. What is the candidate
+   - The earlier explanation was wrong because it treated stores as if they did not still incur an RFO/fill path; the real asymmetry is narrower: store misses still generate an RFO and line fill, but the core marks the store complete before that path has finished.
+2. What numbers directly justify such a candidate
+   - Source path:
+     - the core issues stores as `WRITE` with `response_requested = false` in `src/ooo_cpu.cc:914-923`
+     - in the cache miss path, a `WRITE` is converted into `RFO` in `src/cache.cc:413-429`
+     - for normal demand accesses, the forwarded packet sets `response_requested = true` in `src/cache.cc:428-430`
+     - so a store miss still becomes an RFO that gets a returning fill in the cache hierarchy
+     - however the core increments `completed_mem_ops` in `do_finish_store()` before `issue_write()` succeeds in `src/ooo_cpu.cc:632-640`, `662-677`, and `892-901`
+     - the actual write acceptance attempt is later in `src/ooo_cpu.cc:679-691`
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It corrects the key misunderstanding in the earlier narrative.
+   - The asymmetry is not “stores avoid the RFO/response path.”
+   - The asymmetry is “stores still create that lower-level path, but the ROB-side instruction completion rule is looser for stores than for loads.”
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - This candidate is not a standalone explanation of either phenomenon.
+   - It is a correction that removes an earlier incorrect jump and replaces it with the narrower, source-backed asymmetry that should be used in later reasoning.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: none as a correction.
+   - Confidence: full confidence that this correction is true from the source.
+
+### Implementation Note A
+1. What is the candidate
+   - Add a direct A/B toggle that delays the store instruction's ROB-side memory completion until `issue_write()` succeeds, while preserving dependent-load forwarding timing.
+2. What numbers directly justify such a candidate
+   - This is a perturbation test for the surviving store/load completion asymmetry candidate rather than a data-fit explanation.
+   - The relevant source points are now:
+     - `inc/ooo_cpu.h:101` adds `complete_stores_after_issue`
+     - `src/ooo_cpu.cc:668-670` keeps the original early `sq_entry.finish(...)` only when the toggle is off
+     - `src/ooo_cpu.cc:693-696` moves the store instruction's `sq_entry.finish(...)` to the successful `issue_write()` path when the toggle is on
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It isolates the exact core-side asymmetry under test without changing the cache-side fact that store misses still become RFOs and fills.
+   - Dependent loads are still released in `do_finish_store()`, so the toggle does not redefine store-to-load forwarding semantics.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It is not itself an explanation of the phenomenon.
+   - It is a controlled code perturbation that cleanly tests whether the ROB-side store completion rule is causal.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: none as a test mechanism.
+   - Confidence: full confidence that the toggle isolates the intended asymmetry.
+
+### Implementation Note B
+1. What is the candidate
+   - Add a direct A/B toggle that overrides `cpu0_L1D.mshr_size` in the direct single-node experiment.
+2. What numbers directly justify such a candidate
+   - This is a perturbation test for the surviving L1D-MSHR-window candidate rather than a data-fit explanation.
+   - The relevant source points are now:
+     - `cscore.cc:145-148` reads `l1d_mshr_size_override` and `complete_stores_after_issue` from params
+     - `cscore.cc:260` applies `l1d_mshr_size_override` to `cpu0_L1D`
+     - `cscore.cc:386` applies `complete_stores_after_issue` to the constructed core
+     - `experiments/load_store_util_sweep_direct_single_node/pool_sweep.py:23-24` reads both env knobs
+     - `experiments/load_store_util_sweep_direct_single_node/pool_sweep.py:67-68` passes them into `csimCore`
+     - `experiments/load_store_util_sweep_direct_single_node/run_sweep.py:37-38` captures the env overrides for the sweep
+     - `experiments/load_store_util_sweep_direct_single_node/run_sweep.py:107-108` forwards them to each SST run
+3. Why this candidate explains the exact phenomenon described in the summary
+   - It creates the minimal A/B needed to test whether the late `mem_pct` downturn is tied to the `16`-entry `cpu0_L1D` miss window.
+4. What your response is to "Why is this candidate logically flawed? What incorrect jumps, assumptions, or unreasonable claims does it make?"
+   - It is not itself an explanation of the phenomenon.
+   - It is a direct perturbation test; if the downturn stays fixed after a large L1D MSHR increase, then the current strongest candidate should be rejected.
+5. The severity of #4, and whether or not you have full confidence this is the correct candidate
+   - Severity: none as a test mechanism.
+   - Confidence: full confidence that the toggle tests the intended mechanism.

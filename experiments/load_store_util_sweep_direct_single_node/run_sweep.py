@@ -34,6 +34,8 @@ WARM_CACHE_INSTS = 200_000
 SEED = 0x12345678
 CXL_PCT = 100
 AGGREGATE_PEAK_GBPS = 12.0
+COMPLETE_STORES_AFTER_ISSUE = os.environ.get("COMPLETE_STORES_AFTER_ISSUE", "0")
+L1D_MSHR_SIZE_OVERRIDE = os.environ.get("L1D_MSHR_SIZE_OVERRIDE", "16")
 
 # Must match pool_sweep.py
 WARMUP_MAIN_INSTS = 100_000
@@ -102,6 +104,8 @@ def run_sst(trace_path: Path, cxl_config: Path, out_path: Path, err_path: Path) 
     env = os.environ.copy()
     env["TRACE_PATH"] = str(trace_path)
     env["CXL_CONFIG_PATH"] = str(cxl_config)
+    env["COMPLETE_STORES_AFTER_ISSUE"] = str(COMPLETE_STORES_AFTER_ISSUE)
+    env["L1D_MSHR_SIZE_OVERRIDE"] = str(L1D_MSHR_SIZE_OVERRIDE)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.touch(exist_ok=True)
@@ -121,6 +125,8 @@ def run_sst(trace_path: Path, cxl_config: Path, out_path: Path, err_path: Path) 
 def main() -> int:
     print("[STATUS] Starting direct single-node load/store/util sweep")
     print(f"[STATUS] Using fixed aggregate synth target peak: {AGGREGATE_PEAK_GBPS} GB/s")
+    print(f"[STATUS] COMPLETE_STORES_AFTER_ISSUE={COMPLETE_STORES_AFTER_ISSUE}")
+    print(f"[STATUS] L1D_MSHR_SIZE_OVERRIDE={L1D_MSHR_SIZE_OVERRIDE}")
     print(
         "[STATUS] Warmup split: "
         f"warm_cache={WARM_CACHE_INSTS}, "
@@ -175,4 +181,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

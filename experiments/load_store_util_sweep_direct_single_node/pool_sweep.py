@@ -20,6 +20,8 @@ DRAM_BW_CYCLES_PER_REQ = 4
 # Inputs (must be set by the sweep runner)
 TRACE_PATH = os.environ["TRACE_PATH"]
 CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
+COMPLETE_STORES_AFTER_ISSUE = int(os.environ.get("COMPLETE_STORES_AFTER_ISSUE", "0"))
+L1D_MSHR_SIZE_OVERRIDE = int(os.environ.get("L1D_MSHR_SIZE_OVERRIDE", "16"))
 
 # Output
 LIGHTWEIGHT_OUTPUT = 1
@@ -62,6 +64,8 @@ sock.addParams({
     "cxl_link_queue_size": REMOTE_LINK_QUEUE_SIZE,
     "lightweight_output": LIGHTWEIGHT_OUTPUT,
     "print_latency_hist": PRINT_LAT_HIST,
+    "complete_stores_after_issue": COMPLETE_STORES_AFTER_ISSUE,
+    "l1d_mshr_size_override": L1D_MSHR_SIZE_OVERRIDE,
 })
 
 link_node_to_pool = sst.Link("s0_to_pool0")
@@ -69,4 +73,3 @@ link_node_to_pool.connect(
     (sock, "port_handler_cxl", "1ns"),
     (pool, "port_handler_nodes0", "1ns"),
 )
-

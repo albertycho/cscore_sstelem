@@ -98,6 +98,7 @@ class O3_CPU : public champsim::operable
 {
 public:
   uint32_t cpu = 0;
+  bool complete_stores_after_issue = false;
 
   // cycle
   champsim::chrono::clock::time_point begin_phase_time{};

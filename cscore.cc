@@ -142,6 +142,10 @@ namespace SST {
                 params.find<int64_t>("cxl_link_egress_buffer_size", legacy_cxl_link_queue_size);
             cxl_link_credit_window_size_ =
                 params.find<int64_t>("cxl_link_credit_window_size", legacy_cxl_link_queue_size);
+            const auto l1d_mshr_size_override =
+                static_cast<std::size_t>(params.find<uint64_t>("l1d_mshr_size_override", 16));
+            const bool complete_stores_after_issue =
+                params.find<int>("complete_stores_after_issue", 0) != 0;
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -253,7 +257,7 @@ namespace SST {
 				.sets(64)
 				.ways(12)
 				.pq_size(8)
-				.mshr_size(16)
+				.mshr_size(l1d_mshr_size_override)
 				.latency(5)
 				.fill_latency(1)
 				.tag_bandwidth(champsim::bandwidth::maximum_type{2})
@@ -379,6 +383,7 @@ namespace SST {
 			.dib_window(16);
 
 			cores.push_back(O3_CPU(o3corebuilder));
+			cores.back().complete_stores_after_issue = complete_stores_after_issue;
 			
 			/* DONE Populating CORES */
 
