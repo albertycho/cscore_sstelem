@@ -29,7 +29,7 @@ Environment overrides:
 - `TRACE_ROOT`: optional directory for the generated pointer-chase trace
 - `MAX_PARALLEL`: max concurrent SST runs
 
-The injector bandwidth knob is request-direction bandwidth only and is set as:
+The injector bandwidth knob is request-direction bandwidth in Gbps and is set as:
 
 ```text
 inject_bandwidth_gbps = (mem_pct / 100) * 12.0

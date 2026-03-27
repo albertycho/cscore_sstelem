@@ -14,6 +14,10 @@ namespace csimCore {
 
 namespace {
 bool is_write_request(const csEvent& ev) {
+    if (ev.payload.size() > 11) {
+        const auto type = static_cast<access_type>(ev.payload[11]);
+        return type == access_type::WRITE;
+    }
     if (ev.payload.size() <= 10) {
         return false;
     }

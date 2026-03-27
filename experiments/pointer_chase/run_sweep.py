@@ -97,7 +97,7 @@ def main() -> int:
     print("[STATUS] Starting pointer-chase injector sweep")
     print(f"[STATUS] Pointer trace instructions={NUM_INSTRS}")
     print("[STATUS] SST warmup=1000 main=5000")
-    print(f"[STATUS] Injector request-bandwidth peak target={INJECT_PEAK_GBPS} GB/s")
+    print(f"[STATUS] Injector request-bandwidth peak target={INJECT_PEAK_GBPS} Gbps")
 
     build_generator()
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)
