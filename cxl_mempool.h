@@ -70,6 +70,8 @@ private:
         uint32_t sst_cpu = 0;
         uint32_t src_node = std::numeric_limits<uint32_t>::max();
         uint32_t dst_node = std::numeric_limits<uint32_t>::max();
+        uint64_t instr_id = 0;
+        uint64_t trace_tag = 0;
     };
 
     bool clock_tick(SST::Cycle_t current);

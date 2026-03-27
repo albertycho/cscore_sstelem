@@ -202,7 +202,14 @@ bool CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
     }
     next_tag_++;
     if (request.response_requested) {
-        pending_[tag] = OutstandingRequest{request.cpu, request.sst_cpu, request.src_node, request.dst_node};
+        pending_[tag] = OutstandingRequest{
+            request.cpu,
+            request.sst_cpu,
+            request.src_node,
+            request.dst_node,
+            request.instr_id,
+            request.trace_tag,
+        };
     }
     ++total_enqueued_;
     return true;
@@ -311,7 +318,9 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::request_type& res
                      response.data.to<uint64_t>(),
                      response.pf_metadata,
                      route.cpu,
-                     route.sst_cpu);
+                     route.sst_cpu,
+                     route.instr_id,
+                     route.trace_tag);
     out.msg_bytes = 64;
     out.src_node = pool_node_id_;
     out.dst_node = route.src_node == std::numeric_limits<uint32_t>::max()
