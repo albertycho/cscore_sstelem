@@ -107,6 +107,9 @@ namespace SST {
             cxl_link_bw_cycles_ = params.find<int64_t>("cxl_link_bw_cycles", 0);
             cxl_link_latency_cycles_ = params.find<int64_t>("cxl_link_latency_cycles", 0);
             cxl_link_queue_size_ = params.find<int64_t>("cxl_link_queue_size", 0);
+            const bool inject_enable = params.find<int>("inject_enable", 0) != 0;
+            const double inject_bandwidth_gbps = params.find<double>("inject_bandwidth_gbps", 0.0);
+            const uint64_t inject_load_pct = std::min<uint64_t>(params.find<uint64_t>("inject_load_pct", 100), 100);
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -401,6 +404,25 @@ namespace SST {
 			} else {
 				vmem.set_address_map(nullptr, static_cast<uint32_t>(node_id), pool_pa_base);
 			}
+            if (inject_enable) {
+                const double clock_ghz = parse_clock_ghz(clock_frequency_str);
+                if (clock_ghz <= 0.0) {
+                    throw std::runtime_error("csimCore: inject_enable requires a parseable clock frequency.");
+                }
+                if (address_map_path.empty()) {
+                    throw std::runtime_error("csimCore: inject_enable requires address_map_config.");
+                }
+                const auto inject_entry = address_map.lookup(static_cast<uint32_t>(node_id), pool_pa_base);
+                if (!inject_entry.has_value() || inject_entry->type != AddressType::Pool) {
+                    throw std::runtime_error("csimCore: inject_enable requires pool_pa_base to map to a Pool entry.");
+                }
+                injector_.configure(inject_bandwidth_gbps / (8.0 * clock_ghz),
+                                    inject_load_pct,
+                                    static_cast<uint32_t>(node_id),
+                                    inject_entry->target,
+                                    inject_entry->start,
+                                    inject_entry->size);
+            }
 
 
             auto* cxl_link = configureLink(
@@ -444,6 +466,9 @@ namespace SST {
             remote_port_.tick(cycle_u);
             remote_port_.try_receive(cycle_u, [this](csEvent* ev) {
                 return handle_remote_event(ev);
+            });
+            injector_.tick([this](const sst_request& req) {
+                return enqueue_remote_request(req);
             });
 			
 
@@ -578,6 +603,18 @@ namespace SST {
                 printer.print(stats);
             }
 
+            if (lightweight_output_) {
+                for (std::size_t cpu_idx = 0; cpu_idx < cores.size(); ++cpu_idx) {
+                    const auto& st = warmup_done ? cores[cpu_idx].roi_stats : cores[cpu_idx].sim_stats;
+                    const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".cpu." + std::to_string(cpu_idx) + ".";
+                    const double avg_load_issue_to_complete_lat = (st.load_issue_to_complete_count > 0)
+                        ? static_cast<double>(st.load_issue_to_complete_sum_cycles) / static_cast<double>(st.load_issue_to_complete_count)
+                        : 0.0;
+                    std::cout << prefix << "load_issue_to_complete_count = " << st.load_issue_to_complete_count << '\n';
+                    std::cout << prefix << "avg_load_issue_to_complete_lat = " << avg_load_issue_to_complete_lat << '\n';
+                }
+            }
+
             // StarNUMA-style LLC demand-miss summary (LOAD+RFO only), post-merge (MSHR return).
             const auto demand_return_count = [](const CACHE::stats_type& st) {
                 uint64_t total = 0;
@@ -588,7 +625,6 @@ namespace SST {
                 }
                 return total;
             };
-
             for (const auto& cache : caches) {
                 if (cache.NAME != "LLC") {
                     continue;
@@ -664,6 +700,10 @@ namespace SST {
                 return true;
             }
             auto resp = convert_event_to_response(*ev);
+            if (injector_.owns_response(resp)) {
+                delete ev;
+                return true;
+            }
             if (!deliver_remote_response(resp)) {
                 return false;
             }
@@ -683,8 +723,10 @@ namespace SST {
 
 		bool csimCore::enqueue_remote_request(const sst_request& req)
 		{
+            const bool injected_req = (req.trace_tag & TrafficInjector::kTraceTagBit) != 0;
 			const uint64_t retired = (!cores.empty()) ? static_cast<uint64_t>(cores.front().num_retired) : 0;
 			const bool bypass_phase =
+                !injected_req &&
 				(warmup_insts > 0) &&
 				!warmup_done &&
 				(retired < warm_cache_insts_);

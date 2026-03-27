@@ -43,6 +43,7 @@
 
 #include "convert_ev_packet.h"
 #include "address_map.h"
+#include "traffic_injector.h"
 #include "timing_utility.h"
 #include "fabric_port.h"
 
@@ -89,6 +90,9 @@ namespace SST {
             { "warmup_insts", "Warmup instructions before stats collection (0 disables warmup)", "0" },
             { "sim_insts", "Simulation instructions to run after warmup (0 = run until trace EOF)", "0" },
             { "warm_cache_insts", "Initial instructions where remote requests are satisfied locally (cache warm only, no fabric traffic). Clamped to warmup_insts.", "0 (defaults to warmup_insts)" },
+            { "inject_enable", "Enable direct synthetic CXL request injection on the node link", "0" },
+            { "inject_bandwidth_gbps", "Injected node->network request bandwidth in Gbps", "0" },
+            { "inject_load_pct", "Percent of injected requests that are loads; stores are injected as no-response WRITEs", "100" },
             { "lightweight_output", "If set, emit stat.* summaries only", "0" },
             { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" }
             
@@ -176,6 +180,7 @@ namespace SST {
         bool final_stats_printed = false;
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
+        TrafficInjector injector_;
         std::chrono::steady_clock::time_point wall_start_{};
         std::chrono::steady_clock::duration active_time_{};
         uint64_t active_calls_ = 0;

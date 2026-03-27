@@ -107,6 +107,10 @@ void O3_CPU::begin_phase()
   stats.begin_instrs = num_retired;
   stats.begin_cycles = begin_phase_time.time_since_epoch() / clock_period;
   sim_stats = stats;
+
+  for (auto& entry : ROB) {
+    entry.load_issue_time = champsim::chrono::clock::time_point::max();
+  }
 }
 
 void O3_CPU::end_phase(unsigned finished_cpu)
@@ -702,11 +706,26 @@ bool O3_CPU::execute_load(const LSQ_ENTRY& lq_entry)
     fmt::print("[LQ] {} instr_id: {} vaddr: {:#x}\n", __func__, data_packet.instr_id, data_packet.v_address);
   }
 
-  return L1D_bus.issue_read(data_packet);
+  const bool success = L1D_bus.issue_read(data_packet);
+  if (success) {
+    auto rob_it = std::find_if(std::begin(ROB), std::end(ROB), ooo_model_instr::matches_id(lq_entry.instr_id));
+    if (rob_it != std::end(ROB) && rob_it->load_issue_time == champsim::chrono::clock::time_point::max()) {
+      rob_it->load_issue_time = current_time;
+    }
+  }
+
+  return success;
 }
 
 void O3_CPU::do_complete_execution(ooo_model_instr& instr)
 {
+  if (instr.load_issue_time != champsim::chrono::clock::time_point::max()) {
+    const auto latency_cycles = static_cast<uint64_t>((current_time - instr.load_issue_time) / clock_period);
+    sim_stats.load_issue_to_complete_sum_cycles += latency_cycles;
+    sim_stats.load_issue_to_complete_count++;
+    instr.load_issue_time = champsim::chrono::clock::time_point::max();
+  }
+
   for (auto dreg : instr.destination_registers) {
     // mark physical register's data as valid
     reg_allocator.complete_dest_register(dreg);
