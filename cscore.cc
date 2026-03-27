@@ -46,6 +46,33 @@ int64_t resolve_dram_bw_cycles(uint64_t cycles_per_req, uint64_t bytes_per_cycle
     return cycles_per_request_from_bw_bytes(bytes_per_cycle);
 }
 
+double parse_clock_ghz(std::string clock_str) {
+    clock_str.erase(std::remove_if(clock_str.begin(), clock_str.end(),
+                                   [](unsigned char ch) { return std::isspace(ch) != 0; }),
+                    clock_str.end());
+    const auto pos = clock_str.find_first_not_of("0123456789.");
+    if (pos == std::string::npos) {
+        return 0.0;
+    }
+    const double value = std::stod(clock_str.substr(0, pos));
+    std::string unit = clock_str.substr(pos);
+    std::transform(unit.begin(), unit.end(), unit.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (unit == "ghz") {
+        return value;
+    }
+    if (unit == "mhz") {
+        return value / 1000.0;
+    }
+    if (unit == "khz") {
+        return value / 1000000.0;
+    }
+    if (unit == "hz") {
+        return value / 1000000000.0;
+    }
+    return 0.0;
+}
+
 MY_MEMORY_CONTROLLER::latency_function_type select_latency_fn(SST::Params& params, const char* model_key, const char* fixed_key,
                                                                int64_t default_fixed_cycles) {
     auto model = params.find<std::string>(model_key, "fixed");
