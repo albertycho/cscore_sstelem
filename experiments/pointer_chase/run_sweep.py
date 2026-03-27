@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import concurrent.futures
-import itertools
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -23,15 +23,18 @@ DEFAULT_MAX_PARALLEL = min(20, max(1, MAX_CORE_BUDGET // max(MPI_RANKS, 1)))
 MAX_PARALLEL = int(os.environ.get("MAX_PARALLEL", DEFAULT_MAX_PARALLEL))
 
 LOAD_PCTS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-MEM_PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
 NUM_INSTRS = 10_000
 SEED = 0x12345678
 CXL_BASE = 64 << 30
 CXL_WS_BYTES = 8 << 20
-INJECT_PEAK_GBPS = 12.0
+CLOCK_GHZ = 2.4
+LINK_BW_CYCLES = 25
+BW_STEP_GBPS = float(os.environ.get("BW_STEP_GBPS", "1.0"))
+LATENCY_JUMP_THRESHOLD = float(os.environ.get("LATENCY_JUMP_THRESHOLD", "100.0"))
 
 SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
+LOAD_LAT_RE = re.compile(r"stat\.node\.0\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9eE+.\-]+)")
 
 
 def build_generator() -> None:
@@ -93,44 +96,120 @@ def run_sst(trace_path: Path, cxl_config: Path, out_path: Path, err_path: Path, 
     return proc.returncode
 
 
+def link_peak_gbps() -> float:
+    bits_per_cycle = 64.0 * 8.0 / LINK_BW_CYCLES
+    return bits_per_cycle * (CLOCK_GHZ * 1e9) / 1e9
+
+
+def theoretical_request_peak_gbps(load_pct: int) -> float:
+    load_frac = load_pct / 100.0
+    fwd_bytes = (8.0 * load_frac) + (64.0 * (1.0 - load_frac))
+    rev_bytes = 64.0 * load_frac
+    peak = link_peak_gbps()
+    if rev_bytes <= 0.0:
+        return peak
+    return min(peak, peak * (fwd_bytes / rev_bytes))
+
+
+def format_bw_token(inject_bw: float) -> str:
+    return f"{inject_bw:05.2f}".replace(".", "p")
+
+
+def parse_load_latency(out_path: Path) -> float | None:
+    text = out_path.read_text()
+    match = LOAD_LAT_RE.search(text)
+    if match is None:
+        return None
+    return float(match.group(1))
+
+
+def bandwidth_points(load_pct: int) -> list[float]:
+    theoretical_peak = theoretical_request_peak_gbps(load_pct)
+    points: list[float] = []
+    bw = BW_STEP_GBPS
+    while bw <= theoretical_peak + 1e-9:
+        points.append(round(bw, 6))
+        bw += BW_STEP_GBPS
+    if not points or abs(points[-1] - theoretical_peak) > 1e-9:
+        points.append(round(theoretical_peak, 6))
+    return points
+
+
+def run_load_sweep(trace_path: Path, cxl_config: Path, load_pct: int) -> int:
+    prev_latency: float | None = None
+    run_count = 0
+    theoretical_peak = theoretical_request_peak_gbps(load_pct)
+    print(
+        f"[STATUS] load_pct={load_pct}: stepping bandwidth by {BW_STEP_GBPS} Gbps "
+        f"up to theoretical request peak {theoretical_peak:.3f} Gbps"
+    )
+
+    for inject_bw in bandwidth_points(load_pct):
+        bw_token = format_bw_token(inject_bw)
+        out_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_bw{bw_token}.out"
+        err_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_bw{bw_token}.err"
+        rc = run_sst(trace_path, cxl_config, out_path, err_path, inject_bw, load_pct)
+        run_count += 1
+        if rc != 0:
+            print(f"[FAIL] {SIM_SCRIPT.name} -> {out_path} (rc={rc})")
+            return 1
+
+        latency = parse_load_latency(out_path)
+        if latency is None:
+            print(f"[FAIL] missing avg_load_issue_to_complete_lat in {out_path}")
+            return 1
+
+        print(
+            f"[STATUS] load_pct={load_pct} bw={inject_bw:.3f} "
+            f"avg_load_issue_to_complete_lat={latency:.3f}"
+        )
+
+        if prev_latency is not None and (latency - prev_latency) >= LATENCY_JUMP_THRESHOLD:
+            print(
+                f"[STATUS] load_pct={load_pct}: stopping after bw={inject_bw:.3f} "
+                f"because latency jumped by {latency - prev_latency:.3f} cycles"
+            )
+            break
+
+        prev_latency = latency
+
+    print(f"[STATUS] load_pct={load_pct}: completed {run_count} runs")
+    return 0
+
+
 def main() -> int:
     print("[STATUS] Starting pointer-chase injector sweep")
     print(f"[STATUS] Pointer trace instructions={NUM_INSTRS}")
     print("[STATUS] SST warmup=1000 main=5000")
-    print(f"[STATUS] Injector request-bandwidth peak target={INJECT_PEAK_GBPS} Gbps")
+    print(f"[STATUS] Link peak per direction={link_peak_gbps():.3f} Gbps")
+    print(f"[STATUS] Bandwidth step={BW_STEP_GBPS} Gbps")
+    print(f"[STATUS] Latency jump stop threshold={LATENCY_JUMP_THRESHOLD} cycles")
 
     build_generator()
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     trace_path = generate_trace(TRACE_ROOT)
 
-    tasks = []
-    for load_pct, mem_pct in itertools.product(LOAD_PCTS, MEM_PCTS):
-        inject_bw = (mem_pct / 100.0) * INJECT_PEAK_GBPS
-        out_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}.out"
-        err_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_mem{mem_pct:03d}.err"
-        tasks.append((trace_path, CONFIG_PATH, out_path, err_path, inject_bw, load_pct))
-
-    total_tasks = len(tasks)
-    print(f"[STATUS] Launching {total_tasks} runs with up to {MAX_PARALLEL} in parallel")
+    total_lanes = len(LOAD_PCTS)
+    parallel_lanes = min(MAX_PARALLEL, total_lanes)
+    print(f"[STATUS] Launching {total_lanes} load_pct lanes with up to {parallel_lanes} in parallel")
     failures = 0
     completed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as executor:
-        future_to_task = {executor.submit(run_sst, *task): task for task in tasks}
-        for future in concurrent.futures.as_completed(future_to_task):
-            _, _, out_path, _, _, _ = future_to_task[future]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_lanes) as executor:
+        future_to_load = {executor.submit(run_load_sweep, trace_path, CONFIG_PATH, load_pct): load_pct for load_pct in LOAD_PCTS}
+        for future in concurrent.futures.as_completed(future_to_load):
+            load_pct = future_to_load[future]
             try:
                 rc = future.result()
             except Exception as exc:
-                print(f"[FAIL] {SIM_SCRIPT.name} -> {out_path}: {exc}")
+                print(f"[FAIL] load_pct={load_pct}: {exc}")
                 failures += 1
                 continue
             if rc != 0:
-                print(f"[FAIL] {SIM_SCRIPT.name} -> {out_path} (rc={rc})")
+                print(f"[FAIL] load_pct={load_pct} lane failed")
                 failures += 1
             completed += 1
-            if completed % 10 == 0 or completed == total_tasks:
-                print(f"[STATUS] Completed {completed}/{total_tasks}")
+            print(f"[STATUS] Completed {completed}/{total_lanes} load_pct lanes")
 
     if failures:
         print(f"Completed with {failures} failures.")
