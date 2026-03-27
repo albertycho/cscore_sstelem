@@ -11,7 +11,7 @@ MPI_THREAD = 0
 # Latency/bandwidth (cycles per 64B) for the CXL links.
 T_CXL = 120
 BW_CXL_CYCLES = 25
-REMOTE_LINK_QUEUE_SIZE = 8192
+REMOTE_LINK_QUEUE_SIZE = 512
 
 # Memory sizing
 DRAM_SIZE_BYTES = 68719476736  # 64 GiB

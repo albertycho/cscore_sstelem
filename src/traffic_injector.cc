@@ -16,13 +16,14 @@ void TrafficInjector::configure(double bytes_per_cycle,
     bytes_per_cycle_ = bytes_per_cycle;
     byte_budget_ = 0.0;
     load_pct_ = std::min<uint64_t>(load_pct, 100);
-    mix_phase_ = 0;
     next_trace_tag_ = 1;
     node_id_ = node_id;
     dst_node_ = dst_node;
     addr_base_ = addr_base;
     addr_size_ = addr_size;
-    next_addr_ = addr_base;
+    const uint64_t line_count = std::max<uint64_t>(addr_size_ / 64, 1);
+    mix_phase_ = (static_cast<uint64_t>(node_id_) * 17) % 100;
+    next_addr_ = addr_base_ + ((static_cast<uint64_t>(node_id_) % line_count) * 64);
     reset_stats();
 }
 
