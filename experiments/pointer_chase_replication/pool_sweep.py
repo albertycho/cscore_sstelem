@@ -30,8 +30,8 @@ REPLICATE_WRITES = int(os.environ["REPLICATE_WRITES"])
 # Output and run length
 LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
-WARMUP_INSTS = 1000
-SIM_INSTS = 5000
+WARMUP_INSTS = 400
+SIM_INSTS = 400
 
 sst.setProgramOption("partitioner", "sst.self")
 
@@ -77,7 +77,7 @@ for i in range(NUM_NODES):
         "dram_latency_model": "utilization-based",
         "pool_pa_base": POOL_PA_BASE,
         "cache_heartbeat_period": 0,
-        "cpu_heartbeat_period": 0,
+        "cpu_heartbeat_period": 100_000,
         "clock": "2.4GHz",
         "warmup_insts": WARMUP_INSTS,
         "warm_cache_insts": 0,

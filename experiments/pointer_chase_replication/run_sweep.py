@@ -38,11 +38,11 @@ CXL_WS_BYTES = 8 << 20
 CLOCK_GHZ = 2.4
 LINK_BW_CYCLES = 25
 
-LATENCY_THRESHOLD = float(os.environ.get("LATENCY_THRESHOLD", "750.0"))
+LATENCY_THRESHOLD = float(os.environ.get("LATENCY_THRESHOLD", "1000.0"))
 SEARCH_LEFT_FRAC = float(os.environ.get("SEARCH_LEFT_FRAC", "0.85"))
 SEARCH_RIGHT_FRAC = float(os.environ.get("SEARCH_RIGHT_FRAC", "1.15"))
 SEARCH_SHRINK_FRAC = float(os.environ.get("SEARCH_SHRINK_FRAC", "0.25"))
-MAX_SEARCH_ITERS = int(os.environ.get("MAX_SEARCH_ITERS", "18"))
+MAX_SEARCH_ITERS = int(os.environ.get("MAX_SEARCH_ITERS", "15"))
 FULL_CAPACITY_GBPS = float(os.environ.get("FULL_CAPACITY_GBPS", "49.152"))
 
 LAT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9eE+.\-]+)")
