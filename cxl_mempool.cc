@@ -223,8 +223,11 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
             return true;
         }
         sst_request req = convert_event_to_request(*ev);
+        if (!enqueue_mem_request(req)) {
+            return false;
+        }
         delete ev;
-        return enqueue_mem_request(req);
+        return true;
     };
 
     for_each_port([&](FabricPort& port) {
