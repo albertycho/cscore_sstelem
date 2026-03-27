@@ -140,12 +140,48 @@ def parse_aggregate_gbps(out_path: Path) -> float | None:
 def run_load_sweep(trace_path: Path, cxl_config: Path, load_pct: int) -> int:
     left = ratio_target_request_gbps(load_pct) * SEARCH_LEFT_FRAC
     right = ratio_target_request_gbps(load_pct) * SEARCH_RIGHT_FRAC
-    seen_midpoints: set[float] = set()
+    sampled_bws: set[float] = set()
     run_count = 0
     print(
         f"[STATUS] load_pct={load_pct}: target request bw={ratio_target_request_gbps(load_pct):.3f} Gbps, "
         f"search window=[{left:.3f}, {right:.3f}]"
     )
+
+    def run_sample(label: str, inject_bw: float) -> tuple[int, float]:
+        nonlocal run_count
+        inject_bw = round(inject_bw, 6)
+        sampled_bws.add(inject_bw)
+        bw_token = format_bw_token(inject_bw)
+        out_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_{label}_bw{bw_token}.out"
+        err_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_{label}_bw{bw_token}.err"
+        rc = run_sst(trace_path, cxl_config, out_path, err_path, inject_bw, load_pct)
+        run_count += 1
+        if rc != 0:
+            print(f"[FAIL] {SIM_SCRIPT.name} -> {out_path} (rc={rc})")
+            return rc, 0.0
+
+        latency = parse_load_latency(out_path)
+        if latency is None:
+            print(f"[FAIL] missing avg_load_issue_to_complete_lat in {out_path}")
+            return 1, 0.0
+        agg_gbps = parse_aggregate_gbps(out_path)
+        if agg_gbps is None:
+            print(f"[FAIL] missing injector aggregate_gbps in {out_path}")
+            return 1, 0.0
+
+        print(
+            f"[STATUS] load_pct={load_pct} label={label} req_bw={inject_bw:.3f} "
+            f"agg_bw={agg_gbps:.3f} avg_load_issue_to_complete_lat={latency:.3f}"
+        )
+        return 0, latency
+
+    for label, inject_bw in (("base", 1.0), ("left", left), ("right", right)):
+        inject_bw = round(inject_bw, 6)
+        if inject_bw in sampled_bws:
+            continue
+        rc, _ = run_sample(label, inject_bw)
+        if rc != 0:
+            return 1
 
     for iter_idx in range(MAX_SEARCH_ITERS):
         window = right - left
@@ -157,36 +193,14 @@ def run_load_sweep(trace_path: Path, cxl_config: Path, load_pct: int) -> int:
             break
 
         inject_bw = round((left + right) / 2.0, 6)
-        if inject_bw in seen_midpoints:
+        if inject_bw in sampled_bws:
             print(
                 f"[STATUS] load_pct={load_pct}: stopping because midpoint {inject_bw:.6f} repeated"
             )
             break
-        seen_midpoints.add(inject_bw)
-
-        bw_token = format_bw_token(inject_bw)
-        iter_token = f"{iter_idx:02d}"
-        out_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_iter{iter_token}_bw{bw_token}.out"
-        err_path = OUTPUT_ROOT / f"run_load{load_pct:03d}_iter{iter_token}_bw{bw_token}.err"
-        rc = run_sst(trace_path, cxl_config, out_path, err_path, inject_bw, load_pct)
-        run_count += 1
+        rc, latency = run_sample(f"iter{iter_idx:02d}", inject_bw)
         if rc != 0:
-            print(f"[FAIL] {SIM_SCRIPT.name} -> {out_path} (rc={rc})")
             return 1
-
-        latency = parse_load_latency(out_path)
-        if latency is None:
-            print(f"[FAIL] missing avg_load_issue_to_complete_lat in {out_path}")
-            return 1
-        agg_gbps = parse_aggregate_gbps(out_path)
-        if agg_gbps is None:
-            print(f"[FAIL] missing injector aggregate_gbps in {out_path}")
-            return 1
-
-        print(
-            f"[STATUS] load_pct={load_pct} iter={iter_idx} req_bw={inject_bw:.3f} "
-            f"agg_bw={agg_gbps:.3f} avg_load_issue_to_complete_lat={latency:.3f}"
-        )
 
         shift = window * SEARCH_SHRINK_FRAC
         if latency > LATENCY_THRESHOLD:
