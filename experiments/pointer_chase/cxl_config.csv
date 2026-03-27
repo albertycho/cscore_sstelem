@@ -1,2 +1,2 @@
 # node_id,start,size,type,target
-0,0x1000000000,0x800000,pool,100
+0,0x1000000000,0x1000000,pool,100

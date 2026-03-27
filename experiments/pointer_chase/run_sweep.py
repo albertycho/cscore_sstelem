@@ -28,7 +28,8 @@ MEM_PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 NUM_INSTRS = 10_000
 SEED = 0x12345678
 CXL_BASE = 64 << 30
-CXL_WS_BYTES = 8 << 20
+TRACE_WS_BYTES = 8 << 20
+CXL_REGION_BYTES = 16 << 20
 INJECT_PEAK_GBPS = 12.0
 
 SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
@@ -60,8 +61,8 @@ def generate_trace(out_dir: Path) -> Path:
         "--out-name", trace_path.name,
         "--num-instrs", str(NUM_INSTRS),
         "--base-addr", hex(CXL_BASE),
-        "--region-size", hex(CXL_WS_BYTES),
-        "--working-set-bytes", hex(CXL_WS_BYTES),
+        "--region-size", hex(CXL_REGION_BYTES),
+        "--working-set-bytes", hex(TRACE_WS_BYTES),
         "--seed", hex(SEED),
     ]
     subprocess.check_call(cmd)

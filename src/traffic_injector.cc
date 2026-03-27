@@ -5,6 +5,10 @@
 namespace SST {
 namespace csimCore {
 
+namespace {
+constexpr uint64_t kLineSize = 64;
+}
+
 void TrafficInjector::configure(double bytes_per_cycle,
                                 uint64_t load_pct,
                                 uint32_t node_id,
@@ -12,7 +16,17 @@ void TrafficInjector::configure(double bytes_per_cycle,
                                 uint64_t addr_base,
                                 uint64_t addr_size)
 {
-    enabled_ = (bytes_per_cycle > 0.0) && (addr_size > 0);
+    uint64_t inject_base = addr_base;
+    uint64_t inject_size = addr_size;
+    if (addr_size >= (2 * kLineSize)) {
+        const uint64_t half_size = (addr_size / 2 / kLineSize) * kLineSize;
+        if (half_size > 0) {
+            inject_base = addr_base + half_size;
+            inject_size = half_size;
+        }
+    }
+
+    enabled_ = (bytes_per_cycle > 0.0) && (inject_size > 0);
     bytes_per_cycle_ = bytes_per_cycle;
     byte_budget_ = 0.0;
     load_pct_ = std::min<uint64_t>(load_pct, 100);
@@ -20,9 +34,9 @@ void TrafficInjector::configure(double bytes_per_cycle,
     next_trace_tag_ = 1;
     node_id_ = node_id;
     dst_node_ = dst_node;
-    addr_base_ = addr_base;
-    addr_size_ = addr_size;
-    next_addr_ = addr_base;
+    addr_base_ = inject_base;
+    addr_size_ = inject_size;
+    next_addr_ = inject_base;
 }
 
 void TrafficInjector::tick(const std::function<bool(const sst_request&)>& send_request)

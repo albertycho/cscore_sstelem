@@ -4,11 +4,14 @@ This experiment runs a single-node direct `node -> pool` topology with:
 - a fixed pointer-chase trace
 - direct injected traffic on the same node CXL link
 - sweeps over injected utilization (`mem_pct`) and injected load ratio (`load_pct`)
+- a split pool region so the probe trace and injected traffic do not target the same lines
 
 The pointer-chase trace is generated once per run:
 - `10,000` total instructions
 - all dependent loads
-- CXL-address range only
+- lower half of the mapped CXL-address range
+
+The injector uses the upper half of the same mapped pool region.
 
 The SST run uses:
 - `1,000` warmup instructions
