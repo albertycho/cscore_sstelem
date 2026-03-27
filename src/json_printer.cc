@@ -36,6 +36,9 @@ void to_json(nlohmann::json& j, const O3_CPU::stats_type& stats)
   j = nlohmann::json{{"instructions", stats.instrs()},
                      {"cycles", stats.cycles()},
                      {"Avg ROB occupancy at mispredict", std::ceil(stats.total_rob_occupancy_at_branch_mispredict) / std::ceil(total_mispredictions)},
+                     {"load issue to complete latency", std::ceil(stats.load_issue_to_complete_sum_cycles) /
+                                                              std::max<uint64_t>(1, stats.load_issue_to_complete_count)},
+                     {"load issue to complete count", stats.load_issue_to_complete_count},
                      {"mispredict", mpki}};
 }
 

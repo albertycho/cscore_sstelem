@@ -67,6 +67,7 @@ libcscore_la_SOURCES = \
     inc/cxl_request_buffer.h \
     inc/deadlock.h \
     inc/defaults.hpp \
+    inc/traffic_injector.h \
     inc/dram_controller.h \
     inc/dram_stats.h \
     inc/environment.h \
@@ -143,6 +144,7 @@ libcscore_la_SOURCES = \
     src/chrono.cc \
     src/core_stats.cc \
     src/cxl_request_buffer.cc \
+    src/traffic_injector.cc \
     src/dram_controller.cc \
     src/dram_stats.cc \
     src/extent.cc \

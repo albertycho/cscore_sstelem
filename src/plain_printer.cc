@@ -76,6 +76,11 @@ std::vector<std::string> champsim::plain_printer::format(O3_CPU::stats_type stat
                               ::print_ratio(std::kilo::num * total_mispredictions, stats.instrs()),
                               ::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions)));
 
+  lines.push_back(fmt::format("{} Load Issue->Complete Latency: {} cycles (count {})",
+                              stats.name,
+                              ::print_ratio(stats.load_issue_to_complete_sum_cycles, stats.load_issue_to_complete_count),
+                              stats.load_issue_to_complete_count));
+
   lines.emplace_back("Branch type MPKI");
   for (auto idx : types) {
     lines.push_back(fmt::format("{}: {}", branch_type_names.at(champsim::to_underlying(idx)),
