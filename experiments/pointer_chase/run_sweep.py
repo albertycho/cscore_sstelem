@@ -41,6 +41,11 @@ FULL_CAPACITY_GBPS = float(os.environ.get("FULL_CAPACITY_GBPS", "49.152"))
 SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
 LOAD_LAT_RE = re.compile(r"stat\.node\.0\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9eE+.\-]+)")
 AGG_BW_RE = re.compile(r"stat\.node\.0\.injector\.aggregate_gbps\s*=\s*([0-9eE+.\-]+)")
+REQ_BW_RE = re.compile(r"stat\.node\.0\.injector\.request_gbps\s*=\s*([0-9eE+.\-]+)")
+RESP_BW_RE = re.compile(r"stat\.node\.0\.injector\.response_gbps\s*=\s*([0-9eE+.\-]+)")
+PHASE_CYCLES_RE = re.compile(r"stat\.node\.0\.injector\.phase_cycles\s*=\s*([0-9eE+.\-]+)")
+REQ_BYTES_RE = re.compile(r"stat\.node\.0\.injector\.request_bytes\s*=\s*([0-9eE+.\-]+)")
+RESP_BYTES_RE = re.compile(r"stat\.node\.0\.injector\.response_bytes\s*=\s*([0-9eE+.\-]+)")
 
 
 def build_generator() -> None:
@@ -132,9 +137,24 @@ def parse_load_latency(out_path: Path) -> float | None:
 def parse_aggregate_gbps(out_path: Path) -> float | None:
     text = out_path.read_text()
     match = AGG_BW_RE.search(text)
-    if match is None:
-        return None
-    return float(match.group(1))
+    if match is not None:
+        return float(match.group(1))
+
+    req_bw = REQ_BW_RE.search(text)
+    resp_bw = RESP_BW_RE.search(text)
+    if req_bw is not None and resp_bw is not None:
+        return float(req_bw.group(1)) + float(resp_bw.group(1))
+
+    phase_cycles = PHASE_CYCLES_RE.search(text)
+    req_bytes = REQ_BYTES_RE.search(text)
+    resp_bytes = RESP_BYTES_RE.search(text)
+    if phase_cycles is not None and req_bytes is not None and resp_bytes is not None:
+        cycles = float(phase_cycles.group(1))
+        if cycles > 0.0:
+            total_bytes = float(req_bytes.group(1)) + float(resp_bytes.group(1))
+            return (total_bytes * 8.0 * CLOCK_GHZ) / cycles
+
+    return None
 
 
 def run_load_sweep(trace_path: Path, cxl_config: Path, load_pct: int) -> int:
@@ -166,7 +186,11 @@ def run_load_sweep(trace_path: Path, cxl_config: Path, load_pct: int) -> int:
             return 1, 0.0
         agg_gbps = parse_aggregate_gbps(out_path)
         if agg_gbps is None:
-            print(f"[FAIL] missing injector aggregate_gbps in {out_path}")
+            print(
+                f"[FAIL] missing injector bandwidth stats in {out_path}; "
+                f"the installed libcscore.so likely predates commit 991b13a "
+                f"and needs rebuild/reinstall"
+            )
             return 1, 0.0
 
         print(
