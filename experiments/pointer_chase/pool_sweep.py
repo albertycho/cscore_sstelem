@@ -27,6 +27,7 @@ LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
 WARMUP_INSTS = 1_000
 SIM_INSTS = 5_000
+CPU_HEARTBEAT_PERIOD = 10_000
 
 pool = sst.Component("cxl_pool0", "cscore.CXLMemoryPool")
 pool.addParams({
@@ -51,7 +52,7 @@ sock.addParams({
     "dram_latency_model": "utilization-based",
     "pool_pa_base": POOL_PA_BASE,
     "cache_heartbeat_period": 0,
-    "cpu_heartbeat_period": 0,
+    "cpu_heartbeat_period": CPU_HEARTBEAT_PERIOD,
     "clock": "2.4GHz",
     "warmup_insts": WARMUP_INSTS,
     "warm_cache_insts": 0,
