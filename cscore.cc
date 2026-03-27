@@ -494,9 +494,6 @@ namespace SST {
             remote_port_.try_receive(cycle_u, [this](csEvent* ev) {
                 return handle_remote_event(ev);
             });
-            injector_.tick([this](const sst_request& req) {
-                return enqueue_remote_request(req);
-            });
 			
 
 			/* OPERABLES:  DRAM, ptws, caches, cores*/
@@ -539,8 +536,12 @@ namespace SST {
 					std::cout << core_prefix << "cycles = " << heartbeat_count << '\n';
 				}
 
-				curr_core_id++;
-			}
+					curr_core_id++;
+				}
+
+            injector_.tick([this](const sst_request& req) {
+                return enqueue_remote_request(req);
+            });
 
             if (!cores.empty() && sim_insts > 0) {
                 auto retired = static_cast<uint64_t>(cores.front().num_retired);

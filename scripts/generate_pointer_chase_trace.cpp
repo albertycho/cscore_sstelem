@@ -149,7 +149,7 @@ int main(int argc, char** argv)
 
     for (uint64_t i = 0; i < cfg.num_instrs; ++i) {
         input_instr instr{};
-        instr.ip = kBaseIp + (4 * i);
+        instr.ip = kBaseIp;
         instr.is_branch = 0;
         instr.branch_taken = 0;
         instr.source_registers[0] = kPtrReg;
