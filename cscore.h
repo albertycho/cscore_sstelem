@@ -181,6 +181,7 @@ namespace SST {
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
         TrafficInjector injector_;
+        uint64_t stats_phase_start_cycle_ = 0;
         std::chrono::steady_clock::time_point wall_start_{};
         std::chrono::steady_clock::duration active_time_{};
         uint64_t active_calls_ = 0;

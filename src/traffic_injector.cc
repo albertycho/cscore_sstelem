@@ -23,6 +23,7 @@ void TrafficInjector::configure(double bytes_per_cycle,
     addr_base_ = addr_base;
     addr_size_ = addr_size;
     next_addr_ = addr_base;
+    reset_stats();
 }
 
 void TrafficInjector::tick(const std::function<bool(const sst_request&)>& send_request)
@@ -56,6 +57,7 @@ void TrafficInjector::tick(const std::function<bool(const sst_request&)>& send_r
             break;
         }
 
+        request_bytes_sent_ += req.msg_bytes;
         byte_budget_ -= static_cast<double>(req_bytes);
         mix_phase_ = is_load ? (next_mix_phase - 100) : next_mix_phase;
         next_trace_tag_++;
@@ -64,6 +66,20 @@ void TrafficInjector::tick(const std::function<bool(const sst_request&)>& send_r
             next_addr_ = addr_base_;
         }
     }
+}
+
+void TrafficInjector::note_response(const sst_response& resp)
+{
+    if (!owns_response(resp)) {
+        return;
+    }
+    response_bytes_received_ += resp.msg_bytes;
+}
+
+void TrafficInjector::reset_stats()
+{
+    request_bytes_sent_ = 0;
+    response_bytes_received_ = 0;
 }
 
 } // namespace csimCore

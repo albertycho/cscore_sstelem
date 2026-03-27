@@ -554,6 +554,8 @@ namespace SST {
                     for (auto& cpu : cores) {
                         cpu.begin_phase();
                     }
+                    injector_.reset_stats();
+                    stats_phase_start_cycle_ = heartbeat_count;
                     warmup_done = true;
                 }
 
@@ -641,6 +643,31 @@ namespace SST {
                     std::cout << prefix << "load_issue_to_complete_count = " << st.load_issue_to_complete_count << '\n';
                     std::cout << prefix << "avg_load_issue_to_complete_lat = " << avg_load_issue_to_complete_lat << '\n';
                 }
+                const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".injector.";
+                const uint64_t phase_cycles = (heartbeat_count >= stats_phase_start_cycle_)
+                    ? (heartbeat_count - stats_phase_start_cycle_)
+                    : 0;
+                const uint64_t request_bytes = injector_.request_bytes_sent();
+                const uint64_t response_bytes = injector_.response_bytes_received();
+                const uint64_t aggregate_bytes = request_bytes + response_bytes;
+                const double phase_cycles_d = static_cast<double>(phase_cycles);
+                const double clock_ghz = parse_clock_ghz(clock_frequency_str);
+                const double request_gbps = (phase_cycles_d > 0.0)
+                    ? (static_cast<double>(request_bytes) * 8.0 * clock_ghz) / phase_cycles_d
+                    : 0.0;
+                const double response_gbps = (phase_cycles_d > 0.0)
+                    ? (static_cast<double>(response_bytes) * 8.0 * clock_ghz) / phase_cycles_d
+                    : 0.0;
+                const double aggregate_gbps = (phase_cycles_d > 0.0)
+                    ? (static_cast<double>(aggregate_bytes) * 8.0 * clock_ghz) / phase_cycles_d
+                    : 0.0;
+                std::cout << prefix << "phase_cycles = " << phase_cycles << '\n';
+                std::cout << prefix << "request_bytes = " << request_bytes << '\n';
+                std::cout << prefix << "response_bytes = " << response_bytes << '\n';
+                std::cout << prefix << "aggregate_bytes = " << aggregate_bytes << '\n';
+                std::cout << prefix << "request_gbps = " << request_gbps << '\n';
+                std::cout << prefix << "response_gbps = " << response_gbps << '\n';
+                std::cout << prefix << "aggregate_gbps = " << aggregate_gbps << '\n';
             }
 
             // StarNUMA-style LLC demand-miss summary (LOAD+RFO only), post-merge (MSHR return).
@@ -729,6 +756,7 @@ namespace SST {
             }
             auto resp = convert_event_to_response(*ev);
             if (injector_.owns_response(resp)) {
+                injector_.note_response(resp);
                 delete ev;
                 return true;
             }

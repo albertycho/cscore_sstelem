@@ -26,6 +26,10 @@ public:
     }
 
     void tick(const std::function<bool(const sst_request&)>& send_request);
+    void note_response(const sst_response& resp);
+    void reset_stats();
+    uint64_t request_bytes_sent() const { return request_bytes_sent_; }
+    uint64_t response_bytes_received() const { return response_bytes_received_; }
 
 private:
     bool enabled_ = false;
@@ -39,6 +43,8 @@ private:
     uint64_t addr_base_ = 0;
     uint64_t addr_size_ = 0;
     uint64_t next_addr_ = 0;
+    uint64_t request_bytes_sent_ = 0;
+    uint64_t response_bytes_received_ = 0;
 };
 
 } // namespace csimCore
