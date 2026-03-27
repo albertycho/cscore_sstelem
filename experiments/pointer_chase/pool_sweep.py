@@ -25,8 +25,8 @@ INJECT_LOAD_PCT = os.environ["INJECT_LOAD_PCT"]
 # Output
 LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
-WARMUP_INSTS = 300
-SIM_INSTS = 500
+WARMUP_INSTS = 400
+SIM_INSTS = 600
 # CPU_HEARTBEAT_PERIOD = 10_000
 
 pool = sst.Component("cxl_pool0", "cscore.CXLMemoryPool")

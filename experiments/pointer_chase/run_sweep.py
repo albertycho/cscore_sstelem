@@ -31,11 +31,11 @@ CXL_WS_BYTES = 8 << 20
 CLOCK_GHZ = 2.4
 LINK_BW_CYCLES = 25
 LATENCY_THRESHOLD = float(os.environ.get("LATENCY_THRESHOLD", "750.0"))
-SEARCH_LEFT_FRAC = float(os.environ.get("SEARCH_LEFT_FRAC", "0.75"))
-SEARCH_RIGHT_FRAC = float(os.environ.get("SEARCH_RIGHT_FRAC", "1.25"))
+SEARCH_LEFT_FRAC = float(os.environ.get("SEARCH_LEFT_FRAC", "0.85"))
+SEARCH_RIGHT_FRAC = float(os.environ.get("SEARCH_RIGHT_FRAC", "1.15"))
 SEARCH_SHRINK_FRAC = float(os.environ.get("SEARCH_SHRINK_FRAC", "0.25"))
-MAX_SEARCH_ITERS = int(os.environ.get("MAX_SEARCH_ITERS", "8"))
-MIN_WINDOW_GBPS = float(os.environ.get("MIN_WINDOW_GBPS", "0.25"))
+MAX_SEARCH_ITERS = int(os.environ.get("MAX_SEARCH_ITERS", "18"))
+# MIN_WINDOW_GBPS = float(os.environ.get("MIN_WINDOW_GBPS", "0.05"))
 FULL_CAPACITY_GBPS = float(os.environ.get("FULL_CAPACITY_GBPS", "49.152"))
 
 SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
@@ -185,12 +185,12 @@ def run_load_sweep(trace_path: Path, cxl_config: Path, load_pct: int) -> int:
 
     for iter_idx in range(MAX_SEARCH_ITERS):
         window = right - left
-        if window <= MIN_WINDOW_GBPS:
-            print(
-                f"[STATUS] load_pct={load_pct}: stopping because window narrowed to "
-                f"{window:.3f} Gbps"
-            )
-            break
+        # if window <= MIN_WINDOW_GBPS:
+        #     print(
+        #         f"[STATUS] load_pct={load_pct}: stopping because window narrowed to "
+        #         f"{window:.3f} Gbps"
+        #     )
+        #     break
 
         inject_bw = round((left + right) / 2.0, 6)
         if inject_bw in sampled_bws:
@@ -219,10 +219,10 @@ def main() -> int:
     print(f"[STATUS] Link peak per direction={link_peak_gbps():.3f} Gbps")
     print(f"[STATUS] Full-capacity reference={FULL_CAPACITY_GBPS:.3f} Gbps")
     print(f"[STATUS] Latency threshold={LATENCY_THRESHOLD} cycles")
-    print(
-        f"[STATUS] Search window fractions=[{SEARCH_LEFT_FRAC:.2f}, {SEARCH_RIGHT_FRAC:.2f}], "
-        f"shrink={SEARCH_SHRINK_FRAC:.2f}, max_iters={MAX_SEARCH_ITERS}, min_window={MIN_WINDOW_GBPS:.3f} Gbps"
-    )
+    # print(
+    #     f"[STATUS] Search window fractions=[{SEARCH_LEFT_FRAC:.2f}, {SEARCH_RIGHT_FRAC:.2f}], "
+    #     f"shrink={SEARCH_SHRINK_FRAC:.2f}, max_iters={MAX_SEARCH_ITERS}, min_window={MIN_WINDOW_GBPS:.3f} Gbps"
+    # )
 
     build_generator()
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)

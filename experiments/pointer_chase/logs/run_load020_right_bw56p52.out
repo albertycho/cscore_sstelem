@@ -1,0 +1,23 @@
+stat.node.0.cpu.0.load_issue_to_complete_count = 599
+stat.node.0.cpu.0.avg_load_issue_to_complete_lat = 7212.67
+stat.node.0.injector.phase_cycles = 4334506
+stat.node.0.injector.request_bytes = 11091232
+stat.node.0.injector.response_bytes = 2688768
+stat.node.0.injector.aggregate_bytes = 13780000
+stat.node.0.injector.request_gbps = 49.1294
+stat.node.0.injector.response_gbps = 11.9101
+stat.node.0.injector.aggregate_gbps = 61.0395
+stat.node.0.llc.cxl_miss = 600
+stat.node.0.llc.total_miss = 600
+stat.node.0.llc.avg_miss_lat = 6606.61
+stat.node.0.llc.avg_cxl_lat = 6606.61
+stat.node.0.llc.miss_lat_hist_bin_ns = 10
+stat.node.0.llc.miss_lat_hist = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,24,530,46]
+stat.node.0.util.dram_avg = 2.85793e-06
+stat.node.0.walltime_s = 449.129
+stat.node.0.active_time_s = 427.079
+stat.pool.100.util.mem_avg = 0.194436
+stat.pool.100.util.req_link_avg = 0.999982
+stat.pool.100.walltime_s = 449.129
+stat.pool.100.active_time_s = 15.3791
+Simulation is complete, simulated time: 3.50184 ms
