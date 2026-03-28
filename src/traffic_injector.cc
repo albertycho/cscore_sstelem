@@ -5,6 +5,11 @@
 namespace SST {
 namespace csimCore {
 
+namespace {
+constexpr uint64_t kStartDelayStepCycles = 3;
+constexpr uint64_t kStartDelaySlots[] = {3, 0, 6, 1, 7, 4, 2, 5};
+}
+
 void TrafficInjector::configure(double bytes_per_cycle,
                                 uint64_t load_pct,
                                 uint32_t node_id,
@@ -21,15 +26,22 @@ void TrafficInjector::configure(double bytes_per_cycle,
     dst_node_ = dst_node;
     addr_base_ = addr_base;
     addr_size_ = addr_size;
-    const uint64_t line_count = std::max<uint64_t>(addr_size_ / 64, 1);
-    mix_phase_ = (static_cast<uint64_t>(node_id_) * 17) % 100;
-    next_addr_ = addr_base_ + ((static_cast<uint64_t>(node_id_) % line_count) * 64);
+    start_delay_cycles_ =
+        kStartDelaySlots[static_cast<std::size_t>(node_id_) % std::size(kStartDelaySlots)] *
+        kStartDelayStepCycles;
+    mix_phase_ = 0;
+    next_addr_ = addr_base_;
     reset_stats();
 }
 
 void TrafficInjector::tick(const std::function<bool(const sst_request&)>& send_request)
 {
     if (!enabled_) {
+        return;
+    }
+
+    if (start_delay_cycles_ > 0) {
+        --start_delay_cycles_;
         return;
     }
 

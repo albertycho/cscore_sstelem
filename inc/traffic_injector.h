@@ -35,6 +35,7 @@ private:
     bool enabled_ = false;
     double bytes_per_cycle_ = 0.0;
     double byte_budget_ = 0.0;
+    uint64_t start_delay_cycles_ = 0;
     uint64_t load_pct_ = 100;
     uint64_t mix_phase_ = 0;
     uint64_t next_trace_tag_ = 1;

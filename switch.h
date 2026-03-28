@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <vector>
 #include <chrono>
 
@@ -67,6 +68,9 @@ private:
     bool clock_tick(SST::Cycle_t cycle);
     void reset_stats_and_broadcast();
     bool try_route_event(csEvent* ev);
+    bool try_accept_node_event(csEvent* ev);
+    bool try_enqueue_request(csEvent* ev);
+    bool service_request_fifo();
     std::size_t pick_pool_index(const csEvent* probe);
 
     int num_nodes_ = 0;
@@ -82,9 +86,12 @@ private:
     int64_t link_latency_cycles_ = 0;
     int64_t link_egress_buffer_size_ = 0;
     int64_t link_credit_window_size_ = 0;
+    int64_t request_fifo_max_bytes_ = 0;
+    int64_t request_fifo_bytes_ = 0;
     bool lightweight_output_ = false;
     std::vector<FabricPort> node_ports_;
     std::vector<FabricPort> pool_ports_;
+    std::deque<csEvent*> request_fifo_;
     uint64_t replicated_count_ = 0;
     uint64_t tick_count_ = 0;
     uint64_t last_cycle_ = 0;
