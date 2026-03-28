@@ -93,6 +93,7 @@ namespace SST {
             { "inject_enable", "Enable direct synthetic CXL request injection on the node link", "0" },
             { "inject_bandwidth_gbps", "Injected node->network request bandwidth in Gbps", "0" },
             { "inject_load_pct", "Percent of injected requests that are loads; stores are injected as no-response WRITEs", "100" },
+            { "max_avg_load_issue_to_complete_lat", "If >0, treat this node as complete once the running ROI average load issue-to-complete latency exceeds this many cycles; SST ends when all nodes are complete", "0" },
             { "lightweight_output", "If set, emit stat.* summaries only", "0" },
             { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" }
             
@@ -179,6 +180,7 @@ namespace SST {
         int64_t cxl_link_queue_size_ = 0;
         bool final_stats_printed = false;
         bool local_target_reached_ = false;
+        uint64_t max_avg_load_issue_to_complete_lat_ = 0;
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
         TrafficInjector injector_;
@@ -206,7 +208,8 @@ namespace SST {
         public:
         bool enqueue_remote_request(const sst_request& req);
         void print_final_stats();
-    
+        void finish_local_run();
+
         bool handle_remote_event(csEvent* ev);
         bool deliver_remote_response(const sst_response& resp);
     };

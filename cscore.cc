@@ -137,6 +137,8 @@ namespace SST {
             const bool inject_enable = params.find<int>("inject_enable", 0) != 0;
             const double inject_bandwidth_gbps = params.find<double>("inject_bandwidth_gbps", 0.0);
             const uint64_t inject_load_pct = std::min<uint64_t>(params.find<uint64_t>("inject_load_pct", 100), 100);
+            max_avg_load_issue_to_complete_lat_ =
+                params.find<uint64_t>("max_avg_load_issue_to_complete_lat", 0);
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -543,6 +545,21 @@ namespace SST {
                 return enqueue_remote_request(req);
             });
 
+            if (warmup_done &&
+                !local_target_reached_ &&
+                max_avg_load_issue_to_complete_lat_ > 0 &&
+                !cores.empty()) {
+                const auto& st = cores.front().sim_stats;
+                if (st.load_issue_to_complete_count > 0) {
+                    const double avg_lat =
+                        static_cast<double>(st.load_issue_to_complete_sum_cycles) /
+                        static_cast<double>(st.load_issue_to_complete_count);
+                    if (avg_lat > static_cast<double>(max_avg_load_issue_to_complete_lat_)) {
+                        finish_local_run();
+                    }
+                }
+            }
+
             if (!cores.empty() && sim_insts > 0) {
                 auto retired = static_cast<uint64_t>(cores.front().num_retired);
                 if (!warmup_done && warmup_insts > 0 && retired >= warmup_insts) {
@@ -560,15 +577,7 @@ namespace SST {
                 }
 
                 if (!local_target_reached_ && retired >= (warmup_insts + sim_insts)) {
-                    for (auto& cache : caches) {
-                        cache.end_phase(0);
-                    }
-                    for (auto& cpu : cores) {
-                        cpu.end_phase(0);
-                    }
-                    print_final_stats();
-                    local_target_reached_ = true;
-                    primaryComponentOKToEndSim();
+                    finish_local_run();
                 }
             }
 
@@ -584,15 +593,7 @@ namespace SST {
                     }
                 }
                 if (!local_target_reached_ && trace.eof() && drained) {
-                    for (auto& cache : caches) {
-                        cache.end_phase(0);
-                    }
-                    for (auto& cpu : cores) {
-                        cpu.end_phase(0);
-                    }
-                    print_final_stats();
-                    local_target_reached_ = true;
-                    primaryComponentOKToEndSim();
+                    finish_local_run();
                 }
             }
 
@@ -745,6 +746,22 @@ namespace SST {
                     std::cout << "  csimCore active time (s): " << active_sec << '\n';
                 }
             }
+        }
+
+        void csimCore::finish_local_run()
+        {
+            if (local_target_reached_) {
+                return;
+            }
+            for (auto& cache : caches) {
+                cache.end_phase(0);
+            }
+            for (auto& cpu : cores) {
+                cpu.end_phase(0);
+            }
+            print_final_stats();
+            local_target_reached_ = true;
+            primaryComponentOKToEndSim();
         }
 
         bool csimCore::handle_remote_event(csEvent* ev)
