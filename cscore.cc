@@ -559,7 +559,7 @@ namespace SST {
                     warmup_done = true;
                 }
 
-                if (retired >= (warmup_insts + sim_insts)) {
+                if (!local_target_reached_ && retired >= (warmup_insts + sim_insts)) {
                     for (auto& cache : caches) {
                         cache.end_phase(0);
                     }
@@ -567,8 +567,8 @@ namespace SST {
                         cpu.end_phase(0);
                     }
                     print_final_stats();
+                    local_target_reached_ = true;
                     primaryComponentOKToEndSim();
-                    return true;
                 }
             }
 
@@ -583,7 +583,7 @@ namespace SST {
                         break;
                     }
                 }
-                if (trace.eof() && drained) {
+                if (!local_target_reached_ && trace.eof() && drained) {
                     for (auto& cache : caches) {
                         cache.end_phase(0);
                     }
@@ -591,8 +591,8 @@ namespace SST {
                         cpu.end_phase(0);
                     }
                     print_final_stats();
+                    local_target_reached_ = true;
                     primaryComponentOKToEndSim();
-                    return true;
                 }
             }
 

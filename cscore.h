@@ -178,6 +178,7 @@ namespace SST {
         int64_t cxl_link_latency_cycles_ = 0;
         int64_t cxl_link_queue_size_ = 0;
         bool final_stats_printed = false;
+        bool local_target_reached_ = false;
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
         TrafficInjector injector_;
