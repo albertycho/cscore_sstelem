@@ -80,7 +80,8 @@ private:
     enum class PoolSelectPolicy { Fixed0, RoundRobin };
     PoolSelectPolicy pool_select_policy_ = PoolSelectPolicy::RoundRobin;
     std::size_t rr_pool_idx_ = 0;
-    std::size_t rr_input_idx_ = 0;
+    std::size_t rr_node_input_idx_ = 0;
+    std::size_t rr_pool_input_idx_ = 0;
     std::string clock_frequency_{"2.4GHz"};
     int64_t link_bw_cycles_ = 0;
     int64_t link_latency_cycles_ = 0;

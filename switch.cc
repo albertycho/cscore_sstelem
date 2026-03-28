@@ -160,7 +160,8 @@ void Switch::setup() {
     active_calls_ = 0;
     tick_count_ = 0;
     last_cycle_ = 0;
-    rr_input_idx_ = 0;
+    rr_node_input_idx_ = 0;
+    rr_pool_input_idx_ = 0;
     request_fifo_bytes_ = 0;
 }
 
@@ -176,28 +177,23 @@ bool Switch::clock_tick(SST::Cycle_t cycle)
     for (auto& port : pool_ports_) {
         port.advance(cycle_u);
     }
-    const std::size_t total_ports = node_ports_.size() + pool_ports_.size();
-    for (std::size_t offset = 0; offset < total_ports; ++offset) {
-        const std::size_t flat_idx = (rr_input_idx_ + offset) % total_ports;
-        FabricPort* port = nullptr;
-        const bool is_node_port = flat_idx < node_ports_.size();
-        if (flat_idx < node_ports_.size()) {
-            port = &node_ports_[flat_idx];
-        } else {
-            port = &pool_ports_[flat_idx - node_ports_.size()];
-        }
-        if (is_node_port) {
-            port->try_receive_ready(cycle_u, [this](csEvent* ev) {
-                return try_accept_node_event(ev);
-            });
-        } else {
-            port->try_receive_ready(cycle_u, [this](csEvent* ev) {
-                return try_route_event(ev);
-            });
-        }
+    for (std::size_t offset = 0; offset < node_ports_.size(); ++offset) {
+        const std::size_t idx = (rr_node_input_idx_ + offset) % node_ports_.size();
+        node_ports_[idx].try_receive_ready(cycle_u, [this](csEvent* ev) {
+            return try_accept_node_event(ev);
+        });
     }
-    if (total_ports > 0) {
-        rr_input_idx_ = (rr_input_idx_ + 1) % total_ports;
+    if (!node_ports_.empty()) {
+        rr_node_input_idx_ = (rr_node_input_idx_ + 1) % node_ports_.size();
+    }
+    for (std::size_t offset = 0; offset < pool_ports_.size(); ++offset) {
+        const std::size_t idx = (rr_pool_input_idx_ + offset) % pool_ports_.size();
+        pool_ports_[idx].try_receive_ready(cycle_u, [this](csEvent* ev) {
+            return try_route_event(ev);
+        });
+    }
+    if (!pool_ports_.empty()) {
+        rr_pool_input_idx_ = (rr_pool_input_idx_ + 1) % pool_ports_.size();
     }
     while (service_request_fifo()) {
     }
