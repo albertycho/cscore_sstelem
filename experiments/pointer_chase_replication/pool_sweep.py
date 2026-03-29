@@ -1,9 +1,8 @@
 import os
 import sst
 
-# Topology: 8 nodes -> switch -> 2 pools
+# Topology: 8 nodes -> switch -> {1,2} pools
 NUM_NODES = 8
-NUM_POOLS = 2
 POOL_NODE_ID_BASE = 100
 MPI_RANKS = int(os.environ.get("MPI_RANKS", "8"))
 MPI_THREAD = 0
@@ -26,6 +25,7 @@ CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 INJECT_BANDWIDTH_GBPS = os.environ["INJECT_BANDWIDTH_GBPS"]
 INJECT_LOAD_PCT = os.environ["INJECT_LOAD_PCT"]
 REPLICATE_WRITES = int(os.environ["REPLICATE_WRITES"])
+NUM_POOLS = 2 if REPLICATE_WRITES else 1
 MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT = int(os.environ.get("MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT", "5000"))
 MIN_RETIRED_BEFORE_LATENCY_CUTOFF = int(os.environ.get("MIN_RETIRED_BEFORE_LATENCY_CUTOFF", "50"))
 

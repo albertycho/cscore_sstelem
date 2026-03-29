@@ -19,7 +19,6 @@ GEN_SRC = REPO_ROOT / "scripts" / "generate_pointer_chase_trace.cpp"
 SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
 
 NUM_NODES = 8
-NUM_POOLS = 2
 MPI_RANKS = int(os.environ.get("MPI_RANKS", str(NUM_NODES)))
 MAX_CORE_BUDGET = 160
 DEFAULT_MAX_PARALLEL = min(20, max(1, MAX_CORE_BUDGET // max(MPI_RANKS, 1)))
@@ -101,15 +100,20 @@ def request_mix_fractions(load_pct: int) -> tuple[float, float, float]:
     return load_request_frac, store_request_frac, response_to_request_ratio
 
 
+def num_pools_for_config(replicate_writes: bool) -> int:
+    return 2 if replicate_writes else 1
+
+
 def ratio_target_request_gbps(load_pct: int, replicate_writes: bool) -> float:
     load_request_frac, store_request_frac, response_ratio = request_mix_fractions(load_pct)
-    nodes_per_pool = NUM_NODES / NUM_POOLS
+    num_pools = num_pools_for_config(replicate_writes)
+    nodes_per_pool = NUM_NODES / num_pools
 
     node_forward_factor = 1.0
     node_reverse_factor = response_ratio
 
     if replicate_writes:
-        pool_forward_factor = NUM_NODES * (store_request_frac + (load_request_frac / NUM_POOLS))
+        pool_forward_factor = NUM_NODES * (store_request_frac + (load_request_frac / num_pools))
     else:
         pool_forward_factor = nodes_per_pool
     pool_reverse_factor = nodes_per_pool * response_ratio
@@ -217,9 +221,11 @@ def run_config_load_sweep(trace_path: Path, config_name: str, replicate_writes: 
     right = target_bw * SEARCH_RIGHT_FRAC
     sampled_bws: set[float] = set()
     run_count = 0
+    num_pools = num_pools_for_config(bool(replicate_writes))
 
     print(
-        f"[STATUS] config={config_name} load_pct={load_pct}: target per-node request bw={target_bw:.3f} Gbps, "
+        f"[STATUS] config={config_name} load_pct={load_pct} num_pools={num_pools}: "
+        f"target per-node request bw={target_bw:.3f} Gbps, "
         f"search window=[{left:.3f}, {right:.3f}]"
     )
 

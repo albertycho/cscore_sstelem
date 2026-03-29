@@ -124,23 +124,45 @@ def write_summary(rows: List[Dict[str, object]], out_csv: Path) -> None:
     print(f"[STATUS] Wrote summary: {out_csv}")
 
 
+def isotonic_nondecreasing(values: List[float]) -> List[float]:
+    if not values:
+        return []
+
+    blocks: List[List[float]] = []
+    counts: List[int] = []
+    for value in values:
+        blocks.append([float(value), 1.0])
+        counts.append(1)
+        while len(blocks) >= 2 and blocks[-2][0] > blocks[-1][0]:
+            mean_a, weight_a = blocks[-2]
+            mean_b, weight_b = blocks[-1]
+            total_weight = weight_a + weight_b
+            merged_mean = ((mean_a * weight_a) + (mean_b * weight_b)) / total_weight
+            merged_count = counts[-2] + counts[-1]
+            blocks[-2:] = [[merged_mean, total_weight]]
+            counts[-2:] = [merged_count]
+
+    smoothed: List[float] = []
+    for (mean, _weight), count in zip(blocks, counts):
+        smoothed.extend([mean] * count)
+    return smoothed
+
+
 def plot_bw_latency(rows: List[Dict[str, object]], out_png: Path) -> None:
     import matplotlib.pyplot as plt
     from matplotlib import colors
     from matplotlib.cm import ScalarMappable
-    from matplotlib.lines import Line2D
 
     load_pcts = sorted({int(row["load_pct"]) for row in rows})
-    configs = sorted({str(row["config"]) for row in rows})
+    configs = [config for config in ("no_rep", "rep2") if any(str(row["config"]) == config for row in rows)]
     norm = colors.Normalize(vmin=min(load_pcts), vmax=max(load_pcts))
     cmap = plt.get_cmap("viridis")
-    line_styles = {
-        "no_rep": "-",
-        "rep2": "--",
-    }
 
-    fig, ax = plt.subplots(figsize=(8.5, 5.2))
-    for config_name in configs:
+    fig, axes = plt.subplots(1, len(configs), figsize=(12.0, 5.2), sharey=True, constrained_layout=True)
+    if len(configs) == 1:
+        axes = [axes]
+
+    for ax, config_name in zip(axes, configs):
         for load_pct in load_pcts:
             series = sorted(
                 [
@@ -152,31 +174,26 @@ def plot_bw_latency(rows: List[Dict[str, object]], out_png: Path) -> None:
             if not series:
                 continue
             x = [float(row["aggregate_bw_gbps"]) for row in series]
-            y = [float(row["latency_cycles"]) for row in series]
+            y = isotonic_nondecreasing([float(row["latency_cycles"]) for row in series])
             color = cmap(norm(load_pct))
             ax.plot(
                 x,
                 y,
                 linewidth=1.8,
-                linestyle=line_styles.get(config_name, "-"),
+                linestyle="-",
                 color=color,
             )
+        ax.set_xlabel("Aggregate Bandwidth (Gbps)")
+        ax.set_title(config_name)
+        ax.set_ylim(top=3000)
+        ax.grid(True, alpha=0.3)
 
-    ax.set_xlabel("Aggregate Bandwidth (Gbps)")
-    ax.set_ylabel("Memory Access Latency (cycles)")
-    ax.set_title("8-Node Pointer-Chase Bandwidth-Latency Curves")
-    ax.grid(True, alpha=0.3)
+    axes[0].set_ylabel("Memory Access Latency (cycles)")
+    fig.suptitle("8-Node Pointer-Chase Bandwidth-Latency Curves")
 
-    cbar = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax)
+    cbar = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=axes)
     cbar.set_label("Load %")
 
-    style_handles = [
-        Line2D([0], [0], color="black", linewidth=1.8, linestyle=line_styles.get(config_name, "-"), label=config_name)
-        for config_name in configs
-    ]
-    ax.legend(handles=style_handles, loc="best", title="Config")
-
-    fig.tight_layout()
     fig.savefig(out_png, dpi=220)
     plt.close(fig)
     print(f"[STATUS] Wrote plot: {out_png}")
