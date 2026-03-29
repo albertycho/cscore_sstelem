@@ -545,8 +545,7 @@ namespace SST {
                 return enqueue_remote_request(req);
             });
 
-            if (warmup_done &&
-                !local_target_reached_ &&
+            if (!local_target_reached_ &&
                 max_avg_load_issue_to_complete_lat_ > 0 &&
                 !cores.empty()) {
                 const auto& st = cores.front().sim_stats;
