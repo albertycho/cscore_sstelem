@@ -44,6 +44,7 @@ SEARCH_RIGHT_FRAC = float(os.environ.get("SEARCH_RIGHT_FRAC", "1.15"))
 SEARCH_SHRINK_FRAC = float(os.environ.get("SEARCH_SHRINK_FRAC", "0.25"))
 MAX_SEARCH_ITERS = int(os.environ.get("MAX_SEARCH_ITERS", "15"))
 FULL_CAPACITY_GBPS = float(os.environ.get("FULL_CAPACITY_GBPS", "49.152"))
+MAX_GRAPH_BROADCAST_RETRIES = int(os.environ.get("MAX_GRAPH_BROADCAST_RETRIES", "2"))
 
 LAT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9eE+.\-]+)")
 LAT_COUNT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.load_issue_to_complete_count\s*=\s*([0-9eE+.\-]+)")
@@ -126,6 +127,15 @@ def format_bw_token(inject_bw: float) -> str:
     return f"{inject_bw:05.2f}".replace(".", "p")
 
 
+def is_retryable_startup_failure(out_path: Path, err_path: Path) -> bool:
+    if not out_path.exists() or not err_path.exists():
+        return False
+    if out_path.stat().st_size != 0:
+        return False
+    err_text = err_path.read_text(errors="ignore")
+    return "Error encountered during graph broadcast" in err_text
+
+
 def run_sst(
     trace_path: Path,
     inject_bw: float,
@@ -150,14 +160,25 @@ def run_sst(
         f"[STATUS] Launching {SIM_SCRIPT.name} -> {out_path.name} "
         f"(config={config_name}, inject_bw={inject_bw}, load_pct={inject_load_pct})"
     )
-    with out_path.open("w") as out_f, err_path.open("w") as err_f:
-        proc = subprocess.run(
-            ["mpirun", "-n", str(MPI_RANKS), SST_BIN, str(SIM_SCRIPT)],
-            cwd=str(SCRIPT_DIR),
-            env=env,
-            stdout=out_f,
-            stderr=err_f,
-        )
+    max_attempts = 1 + max(0, MAX_GRAPH_BROADCAST_RETRIES)
+    for attempt_idx in range(max_attempts):
+        if attempt_idx > 0:
+            print(
+                f"[STATUS] Retrying {out_path.name} after graph-broadcast startup failure "
+                f"(attempt {attempt_idx + 1}/{max_attempts})"
+            )
+        with out_path.open("w") as out_f, err_path.open("w") as err_f:
+            proc = subprocess.run(
+                ["mpirun", "-n", str(MPI_RANKS), SST_BIN, str(SIM_SCRIPT)],
+                cwd=str(SCRIPT_DIR),
+                env=env,
+                stdout=out_f,
+                stderr=err_f,
+            )
+        if proc.returncode == 0:
+            return 0
+        if not is_retryable_startup_failure(out_path, err_path):
+            return proc.returncode
     return proc.returncode
 
 

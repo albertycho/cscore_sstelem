@@ -94,6 +94,7 @@ namespace SST {
             { "inject_bandwidth_gbps", "Injected node->network request bandwidth in Gbps", "0" },
             { "inject_load_pct", "Percent of injected requests that are loads; stores are injected as no-response WRITEs", "100" },
             { "max_avg_load_issue_to_complete_lat", "If >0, treat this node as complete once the running ROI average load issue-to-complete latency exceeds this many cycles; SST ends when all nodes are complete", "0" },
+            { "min_retired_before_latency_cutoff", "Minimum retired instructions before max_avg_load_issue_to_complete_lat can trigger", "0" },
             { "lightweight_output", "If set, emit stat.* summaries only", "0" },
             { "print_latency_hist", "If set, print LLC miss latency histogram (LLC_MISS_LAT_HIST)", "1" }
             
@@ -181,6 +182,7 @@ namespace SST {
         bool final_stats_printed = false;
         bool local_target_reached_ = false;
         uint64_t max_avg_load_issue_to_complete_lat_ = 0;
+        uint64_t min_retired_before_latency_cutoff_ = 0;
         bool lightweight_output_ = false;
         bool print_latency_hist_ = true;
         TrafficInjector injector_;

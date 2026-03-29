@@ -139,6 +139,8 @@ namespace SST {
             const uint64_t inject_load_pct = std::min<uint64_t>(params.find<uint64_t>("inject_load_pct", 100), 100);
             max_avg_load_issue_to_complete_lat_ =
                 params.find<uint64_t>("max_avg_load_issue_to_complete_lat", 0);
+            min_retired_before_latency_cutoff_ =
+                params.find<uint64_t>("min_retired_before_latency_cutoff", 0);
 
 			// Older version registered this as primary component
 			registerAsPrimaryComponent();
@@ -545,8 +547,11 @@ namespace SST {
                 return enqueue_remote_request(req);
             });
 
+            const uint64_t retired = (!cores.empty()) ? static_cast<uint64_t>(cores.front().num_retired) : 0;
+
             if (!local_target_reached_ &&
                 max_avg_load_issue_to_complete_lat_ > 0 &&
+                retired >= min_retired_before_latency_cutoff_ &&
                 !cores.empty()) {
                 const auto& st = cores.front().sim_stats;
                 if (st.load_issue_to_complete_count > 0) {
@@ -560,7 +565,6 @@ namespace SST {
             }
 
             if (!cores.empty() && sim_insts > 0) {
-                auto retired = static_cast<uint64_t>(cores.front().num_retired);
                 if (!warmup_done && warmup_insts > 0 && retired >= warmup_insts) {
                     // Start ROI stats at warmup boundary. This excludes warm-cache bypass traffic
                     // from reported LLC miss/cxl-lat metrics while preserving functional state.

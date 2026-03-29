@@ -27,6 +27,7 @@ INJECT_BANDWIDTH_GBPS = os.environ["INJECT_BANDWIDTH_GBPS"]
 INJECT_LOAD_PCT = os.environ["INJECT_LOAD_PCT"]
 REPLICATE_WRITES = int(os.environ["REPLICATE_WRITES"])
 MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT = int(os.environ.get("MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT", "5000"))
+MIN_RETIRED_BEFORE_LATENCY_CUTOFF = int(os.environ.get("MIN_RETIRED_BEFORE_LATENCY_CUTOFF", "50"))
 
 # Output and run length
 LIGHTWEIGHT_OUTPUT = 1
@@ -92,6 +93,7 @@ for i in range(NUM_NODES):
         "inject_bandwidth_gbps": INJECT_BANDWIDTH_GBPS,
         "inject_load_pct": INJECT_LOAD_PCT,
         "max_avg_load_issue_to_complete_lat": MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT,
+        "min_retired_before_latency_cutoff": MIN_RETIRED_BEFORE_LATENCY_CUTOFF,
     })
     sock.setRank(i % max(MPI_RANKS, 1), MPI_THREAD)
 

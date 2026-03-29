@@ -22,6 +22,7 @@ CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 INJECT_BANDWIDTH_GBPS = os.environ["INJECT_BANDWIDTH_GBPS"]
 INJECT_LOAD_PCT = os.environ["INJECT_LOAD_PCT"]
 MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT = int(os.environ.get("MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT", "5000"))
+MIN_RETIRED_BEFORE_LATENCY_CUTOFF = int(os.environ.get("MIN_RETIRED_BEFORE_LATENCY_CUTOFF", "50"))
 
 # Output
 LIGHTWEIGHT_OUTPUT = 1
@@ -67,6 +68,7 @@ sock.addParams({
     "inject_bandwidth_gbps": INJECT_BANDWIDTH_GBPS,
     "inject_load_pct": INJECT_LOAD_PCT,
     "max_avg_load_issue_to_complete_lat": MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT,
+    "min_retired_before_latency_cutoff": MIN_RETIRED_BEFORE_LATENCY_CUTOFF,
 })
 
 link_node_to_pool = sst.Link("s0_to_pool0")
