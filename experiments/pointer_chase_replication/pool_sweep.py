@@ -26,6 +26,7 @@ CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 INJECT_BANDWIDTH_GBPS = os.environ["INJECT_BANDWIDTH_GBPS"]
 INJECT_LOAD_PCT = os.environ["INJECT_LOAD_PCT"]
 REPLICATE_WRITES = int(os.environ["REPLICATE_WRITES"])
+MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT = int(os.environ.get("MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT", "0"))
 
 # Output and run length
 LIGHTWEIGHT_OUTPUT = 1
@@ -90,6 +91,7 @@ for i in range(NUM_NODES):
         "inject_enable": 1,
         "inject_bandwidth_gbps": INJECT_BANDWIDTH_GBPS,
         "inject_load_pct": INJECT_LOAD_PCT,
+        "max_avg_load_issue_to_complete_lat": MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT,
     })
     sock.setRank(i % max(MPI_RANKS, 1), MPI_THREAD)
 

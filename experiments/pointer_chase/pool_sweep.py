@@ -21,6 +21,7 @@ TRACE_PATH = os.environ["TRACE_PATH"]
 CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 INJECT_BANDWIDTH_GBPS = os.environ["INJECT_BANDWIDTH_GBPS"]
 INJECT_LOAD_PCT = os.environ["INJECT_LOAD_PCT"]
+MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT = int(os.environ.get("MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT", "0"))
 
 # Output
 LIGHTWEIGHT_OUTPUT = 1
@@ -65,6 +66,7 @@ sock.addParams({
     "inject_enable": 1,
     "inject_bandwidth_gbps": INJECT_BANDWIDTH_GBPS,
     "inject_load_pct": INJECT_LOAD_PCT,
+    "max_avg_load_issue_to_complete_lat": MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT,
 })
 
 link_node_to_pool = sst.Link("s0_to_pool0")
