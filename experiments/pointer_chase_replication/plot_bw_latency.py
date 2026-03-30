@@ -2,7 +2,7 @@
 import csv
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # use: python3 experiments/pointer_chase_replication/plot_bw_latency.py
 
@@ -43,7 +43,7 @@ def derive_class_bandwidths(load_pct: int, request_gbps: float, response_gbps: f
     }
 
 
-def parse_run(path: Path) -> Dict[str, object] | None:
+def parse_run(path: Path) -> Optional[Dict[str, object]]:
     match = OUT_FILE_RE.match(path.name)
     if match is None:
         return None
@@ -124,35 +124,15 @@ def write_summary(rows: List[Dict[str, object]], out_csv: Path) -> None:
     print(f"[STATUS] Wrote summary: {out_csv}")
 
 
-def isotonic_nondecreasing(values: List[float]) -> List[float]:
-    if not values:
-        return []
-
-    blocks: List[List[float]] = []
-    counts: List[int] = []
-    for value in values:
-        blocks.append([float(value), 1.0])
-        counts.append(1)
-        while len(blocks) >= 2 and blocks[-2][0] > blocks[-1][0]:
-            mean_a, weight_a = blocks[-2]
-            mean_b, weight_b = blocks[-1]
-            total_weight = weight_a + weight_b
-            merged_mean = ((mean_a * weight_a) + (mean_b * weight_b)) / total_weight
-            merged_count = counts[-2] + counts[-1]
-            blocks[-2:] = [[merged_mean, total_weight]]
-            counts[-2:] = [merged_count]
-
-    smoothed: List[float] = []
-    for (mean, _weight), count in zip(blocks, counts):
-        smoothed.extend([mean] * count)
-    return smoothed
-
-
 def plot_bw_latency(rows: List[Dict[str, object]], out_png: Path) -> None:
     import matplotlib.pyplot as plt
     from matplotlib import colors
     from matplotlib.cm import ScalarMappable
 
+    title_map = {
+        "no_rep": "No Replication (1 pool)",
+        "rep2": "Replication (2 pools)",
+    }
     load_pcts = sorted({int(row["load_pct"]) for row in rows})
     configs = [config for config in ("no_rep", "rep2") if any(str(row["config"]) == config for row in rows)]
     norm = colors.Normalize(vmin=min(load_pcts), vmax=max(load_pcts))
@@ -174,7 +154,7 @@ def plot_bw_latency(rows: List[Dict[str, object]], out_png: Path) -> None:
             if not series:
                 continue
             x = [float(row["aggregate_bw_gbps"]) for row in series]
-            y = isotonic_nondecreasing([float(row["latency_cycles"]) for row in series])
+            y = [float(row["latency_cycles"]) for row in series]
             color = cmap(norm(load_pct))
             ax.plot(
                 x,
@@ -184,8 +164,8 @@ def plot_bw_latency(rows: List[Dict[str, object]], out_png: Path) -> None:
                 color=color,
             )
         ax.set_xlabel("Aggregate Bandwidth (Gbps)")
-        ax.set_title(config_name)
-        ax.set_ylim(top=3000)
+        ax.set_title(title_map.get(config_name, config_name))
+        ax.set_ylim(0, 3000)
         ax.grid(True, alpha=0.3)
 
     axes[0].set_ylabel("Memory Access Latency (cycles)")
