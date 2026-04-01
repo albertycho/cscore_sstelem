@@ -32,8 +32,8 @@ MIN_RETIRED_BEFORE_LATENCY_CUTOFF = int(os.environ.get("MIN_RETIRED_BEFORE_LATEN
 # Output and run length
 LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
-WARMUP_INSTS = 500
-SIM_INSTS = 1500
+WARMUP_INSTS = 1000
+SIM_INSTS = 4000
 
 sst.setProgramOption("partitioner", "sst.self")
 
