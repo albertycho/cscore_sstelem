@@ -8,6 +8,16 @@ namespace csimCore {
 namespace {
 constexpr uint64_t kStartDelayStepCycles = 3;
 constexpr uint64_t kStartDelaySlots[] = {3, 0, 6, 1, 7, 4, 2, 5};
+
+double request_rate_per_cycle(double bytes_per_cycle, uint64_t load_pct)
+{
+    const double load_frac = static_cast<double>(std::min<uint64_t>(load_pct, 100)) / 100.0;
+    const double avg_request_bytes = (8.0 * load_frac) + (64.0 * (1.0 - load_frac));
+    if (avg_request_bytes <= 0.0) {
+        return 0.0;
+    }
+    return bytes_per_cycle / avg_request_bytes;
+}
 }
 
 void TrafficInjector::configure(double bytes_per_cycle,
@@ -18,9 +28,12 @@ void TrafficInjector::configure(double bytes_per_cycle,
                                 uint64_t addr_size)
 {
     enabled_ = (bytes_per_cycle > 0.0) && (addr_size > 0);
-    bytes_per_cycle_ = bytes_per_cycle;
-    byte_budget_ = 0.0;
-    load_pct_ = std::min<uint64_t>(load_pct, 100);
+    const uint64_t clamped_load_pct = std::min<uint64_t>(load_pct, 100);
+    const double reqs_per_cycle = request_rate_per_cycle(bytes_per_cycle, clamped_load_pct);
+    load_requests_per_cycle_ = reqs_per_cycle * (static_cast<double>(clamped_load_pct) / 100.0);
+    store_requests_per_cycle_ = reqs_per_cycle - load_requests_per_cycle_;
+    load_request_budget_ = 0.0;
+    store_request_budget_ = 0.0;
     next_trace_tag_ = 1;
     node_id_ = node_id;
     dst_node_ = dst_node;
@@ -29,7 +42,6 @@ void TrafficInjector::configure(double bytes_per_cycle,
     start_delay_cycles_ =
         kStartDelaySlots[static_cast<std::size_t>(node_id_) % std::size(kStartDelaySlots)] *
         kStartDelayStepCycles;
-    mix_phase_ = 0;
     next_addr_ = addr_base_;
     reset_stats();
 }
@@ -45,14 +57,31 @@ void TrafficInjector::tick(const std::function<bool(const sst_request&)>& send_r
         return;
     }
 
-    byte_budget_ += bytes_per_cycle_;
+    load_request_budget_ += load_requests_per_cycle_;
+    store_request_budget_ += store_requests_per_cycle_;
     while (true) {
-        const uint64_t next_mix_phase = mix_phase_ + load_pct_;
-        const bool is_load = next_mix_phase >= 100;
-        const uint16_t req_bytes = is_load ? 8 : 64;
-        if (byte_budget_ + 1e-9 < static_cast<double>(req_bytes)) {
+        const bool load_ready = load_request_budget_ + 1e-9 >= 1.0;
+        const bool store_ready = store_request_budget_ + 1e-9 >= 1.0;
+        if (!load_ready && !store_ready) {
             break;
         }
+
+        bool is_load = false;
+        if (load_ready && !store_ready) {
+            is_load = true;
+        } else if (!load_ready && store_ready) {
+            is_load = false;
+        } else {
+            const double load_lag =
+                (load_requests_per_cycle_ > 0.0) ? (load_request_budget_ / load_requests_per_cycle_) :
+                                                   0.0;
+            const double store_lag =
+                (store_requests_per_cycle_ > 0.0) ? (store_request_budget_ / store_requests_per_cycle_) :
+                                                    0.0;
+            is_load = (load_lag >= store_lag);
+        }
+
+        const uint16_t req_bytes = is_load ? 8 : 64;
 
         sst_request req;
         req.src_node = node_id_;
@@ -71,8 +100,11 @@ void TrafficInjector::tick(const std::function<bool(const sst_request&)>& send_r
         }
 
         request_bytes_sent_ += req.msg_bytes;
-        byte_budget_ -= static_cast<double>(req_bytes);
-        mix_phase_ = is_load ? (next_mix_phase - 100) : next_mix_phase;
+        if (is_load) {
+            load_request_budget_ = std::max(0.0, load_request_budget_ - 1.0);
+        } else {
+            store_request_budget_ = std::max(0.0, store_request_budget_ - 1.0);
+        }
         next_trace_tag_++;
         next_addr_ += 64;
         if (next_addr_ >= addr_base_ + addr_size_) {

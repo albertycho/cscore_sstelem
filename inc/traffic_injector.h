@@ -33,11 +33,11 @@ public:
 
 private:
     bool enabled_ = false;
-    double bytes_per_cycle_ = 0.0;
-    double byte_budget_ = 0.0;
+    double load_requests_per_cycle_ = 0.0;
+    double store_requests_per_cycle_ = 0.0;
+    double load_request_budget_ = 0.0;
+    double store_request_budget_ = 0.0;
     uint64_t start_delay_cycles_ = 0;
-    uint64_t load_pct_ = 100;
-    uint64_t mix_phase_ = 0;
     uint64_t next_trace_tag_ = 1;
     uint32_t node_id_ = 0;
     uint32_t dst_node_ = std::numeric_limits<uint32_t>::max();
