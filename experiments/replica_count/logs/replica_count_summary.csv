@@ -1,11 +1,5 @@
-config,replicas,max_node_walltime_s,weighted_avg_cxl_lat_cycles,total_cxl_miss,switch_replicated_messages,switch_pool_ingress_avg,avg_pool_req_link_util
-no_rep,1,89.5256,1207.4425,119248.0,0.0,0.820837,0.576679
-no_rep,2,66.084,694.2861250000001,119248.0,0.0,0.559659,0.393188
-no_rep,4,65.3366,646.8199999999998,119248.0,0.0,0.290661,0.204204
-no_rep,8,65.6929,640.957,119248.0,0.0,0.146593,0.102989
-no_rep,16,66.6733,633.0,119248.0,0.0,0.0737416,0.05180720000000001
-rep,1,89.2913,1207.4425,119248.0,73104.0,0.820837,0.576679
-rep,2,71.7751,793.0201250000001,119248.0,146208.0,0.51149,0.654759
-rep,4,81.0689,874.0312500000002,119248.0,292416.0,0.239136,0.582345
-rep,8,88.8527,1004.4449999999996,119248.0,584832.0,0.107811,0.511609
-rep,16,99.6948,1174.35,119248.0,1169664.0,0.0480777,0.4502870000000001
+config,replicas,num_nodes,load_pct,requested_request_gbps_per_node,weighted_avg_load_lat_cycles,request_gbps,response_gbps,aggregate_bw_gbps,switch_replicated_messages,log_path
+no_rep,1,8,80,1.5,840.4241249999999,11.999680000000001,31.999629999999996,43.99932,0.0,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replica_count/logs/run_replica001_no_rep.out
+rep,2,8,80,1.5,770.632,12.00069,32.00103,44.00172,53888.0,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replica_count/logs/run_replica002_rep.out
+rep,4,8,80,1.5,754.72425,12.00078,32.00018,44.00098,106144.0,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replica_count/logs/run_replica004_rep.out
+rep,8,8,80,1.5,750.1813750000001,12.000699999999998,31.999969999999998,44.00066,210624.0,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/replica_count/logs/run_replica008_rep.out

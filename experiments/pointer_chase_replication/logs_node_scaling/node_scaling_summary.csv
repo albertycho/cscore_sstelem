@@ -1,0 +1,9 @@
+config,num_nodes,load_pct,requested_request_gbps_per_node,request_gbps,response_gbps,aggregate_bw_gbps,latency_cycles,log_path
+no_rep,1,80,1.5,1.49993,4.00009,5.50001,735.383,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes001_no_rep_load080_bw01p50.out
+no_rep,2,80,1.5,3.00022,8.000319999999999,11.00054,738.1735,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes002_no_rep_load080_bw01p50.out
+no_rep,4,80,1.5,5.99935,16.00005,21.999409999999997,751.56475,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes004_no_rep_load080_bw01p50.out
+no_rep,8,80,1.5,11.999680000000001,31.999629999999996,43.99932,840.4241249999999,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes008_no_rep_load080_bw01p50.out
+rep2,1,80,1.5,1.50009,3.99996,5.50005,734.945,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes001_rep2_load080_bw01p50.out
+rep2,2,80,1.5,2.99992,7.99952,10.99943,735.6365,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes002_rep2_load080_bw01p50.out
+rep2,4,80,1.5,5.9999,16.00002,21.99993,740.9295,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes004_rep2_load080_bw01p50.out
+rep2,8,80,1.5,12.00069,32.00103,44.00172,770.632,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_node_scaling/run_nodes008_rep2_load080_bw01p50.out
