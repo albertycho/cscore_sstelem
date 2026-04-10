@@ -18,10 +18,10 @@ stat.node.0.llc.avg_cxl_lat = 354.664
 stat.node.0.llc.miss_lat_hist_bin_ns = 10
 stat.node.0.llc.miss_lat_hist = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,3219,727,54]
 stat.node.0.util.dram_avg = 9.53723e-06
-stat.node.0.walltime_s = 131.24
-stat.node.0.active_time_s = 124.834
+stat.node.0.walltime_s = 131.237
+stat.node.0.active_time_s = 125.163
 stat.pool.100.util.mem_avg = 0.0972387
 stat.pool.100.util.req_link_avg = 0.124573
-stat.pool.100.walltime_s = 131.24
-stat.pool.100.active_time_s = 4.42253
+stat.pool.100.walltime_s = 131.237
+stat.pool.100.active_time_s = 4.02633
 Simulation is complete, simulated time: 1.04936 ms
