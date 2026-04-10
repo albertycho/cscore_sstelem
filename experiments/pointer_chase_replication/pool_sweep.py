@@ -1,10 +1,10 @@
 import os
 import sst
 
-# Topology: 8 nodes -> switch -> {1,2} pools
-NUM_NODES = 8
+# Topology: N nodes -> switch -> P pools
+NUM_NODES = int(os.environ.get("NUM_NODES", "8"))
 POOL_NODE_ID_BASE = 100
-MPI_RANKS = int(os.environ.get("MPI_RANKS", "8"))
+MPI_RANKS = int(os.environ.get("MPI_RANKS", str(NUM_NODES)))
 MPI_THREAD = 0
 
 # Latency/bandwidth (cycles per 64B) for the CXL links.
@@ -25,15 +25,16 @@ CXL_CONFIG_PATH = os.environ["CXL_CONFIG_PATH"]
 INJECT_BANDWIDTH_GBPS = os.environ["INJECT_BANDWIDTH_GBPS"]
 INJECT_LOAD_PCT = os.environ["INJECT_LOAD_PCT"]
 REPLICATE_WRITES = int(os.environ["REPLICATE_WRITES"])
-NUM_POOLS = 2 if REPLICATE_WRITES else 1
+DEFAULT_NUM_POOLS = 2 if REPLICATE_WRITES else 1
+NUM_POOLS = int(os.environ.get("NUM_POOLS", str(DEFAULT_NUM_POOLS)))
 MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT = int(os.environ.get("MAX_AVG_LOAD_ISSUE_TO_COMPLETE_LAT", "0"))
 MIN_RETIRED_BEFORE_LATENCY_CUTOFF = int(os.environ.get("MIN_RETIRED_BEFORE_LATENCY_CUTOFF", "100"))
 
 # Output and run length
 LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
-WARMUP_INSTS = 1000
-SIM_INSTS = 4000
+WARMUP_INSTS = int(os.environ.get("WARMUP_INSTS", "1000"))
+SIM_INSTS = int(os.environ.get("SIM_INSTS", "4000"))
 
 sst.setProgramOption("partitioner", "sst.self")
 

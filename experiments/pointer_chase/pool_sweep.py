@@ -7,7 +7,7 @@ POOL_NODE_ID_BASE = 100
 # Latency/bandwidth (cycles per 64B) for the CXL links.
 T_CXL = 120
 BW_CXL_CYCLES = 25
-REMOTE_LINK_QUEUE_SIZE = 8192
+REMOTE_LINK_QUEUE_SIZE = 512
 
 # Memory sizing
 DRAM_SIZE_BYTES = 68719476736  # 64 GiB
@@ -27,9 +27,8 @@ MIN_RETIRED_BEFORE_LATENCY_CUTOFF = int(os.environ.get("MIN_RETIRED_BEFORE_LATEN
 # Output
 LIGHTWEIGHT_OUTPUT = 1
 PRINT_LAT_HIST = 1
-WARMUP_INSTS = 500
-SIM_INSTS = 500
-# CPU_HEARTBEAT_PERIOD = 10_000
+WARMUP_INSTS = int(os.environ.get("WARMUP_INSTS", "1000"))
+SIM_INSTS = int(os.environ.get("SIM_INSTS", "4000"))
 
 pool = sst.Component("cxl_pool0", "cscore.CXLMemoryPool")
 pool.addParams({
@@ -54,7 +53,7 @@ sock.addParams({
     "dram_latency_model": "utilization-based",
     "pool_pa_base": POOL_PA_BASE,
     "cache_heartbeat_period": 0,
-    "cpu_heartbeat_period": 0,
+    "cpu_heartbeat_period": 1_000_000,
     "clock": "2.4GHz",
     "warmup_insts": WARMUP_INSTS,
     "warm_cache_insts": 0,

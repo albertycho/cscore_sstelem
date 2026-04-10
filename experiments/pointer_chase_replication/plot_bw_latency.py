@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOG_DIR = SCRIPT_DIR / "logs"
+NUM_NODES = 8
 
 OUT_FILE_RE = re.compile(
     r"run_(?P<config>.+?)_load(?P<load_pct>\d{3})(?:_(?P<label>[^_]+))?_bw(?P<req_bw>[0-9]+p[0-9]+)\.out$"
@@ -59,7 +60,13 @@ def parse_run(path: Path) -> Optional[Dict[str, object]]:
     req_bw_by_node = parse_scalars(REQ_BW_RE, text)
     resp_bw_by_node = parse_scalars(RESP_BW_RE, text)
     agg_bw_by_node = parse_scalars(AGG_BW_RE, text)
-    if not lat_by_node or not lat_count_by_node or not req_bw_by_node or not resp_bw_by_node or not agg_bw_by_node:
+    if (
+        len(lat_by_node) != NUM_NODES
+        or len(lat_count_by_node) != NUM_NODES
+        or len(req_bw_by_node) != NUM_NODES
+        or len(resp_bw_by_node) != NUM_NODES
+        or len(agg_bw_by_node) != NUM_NODES
+    ):
         return None
 
     weighted_lat_sum = 0.0

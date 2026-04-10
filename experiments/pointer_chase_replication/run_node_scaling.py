@@ -6,34 +6,30 @@ import re
 import subprocess
 from pathlib import Path
 
-# use: python3 experiments/replica_count/run_replica_count.py
+# use: python3 experiments/pointer_chase_replication/run_node_scaling.py
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 TRACE_ROOT = Path(os.environ.get("TRACE_ROOT", "/shared/kshan/CXL_sst_traces_pointer_chase"))
-OUTPUT_ROOT = SCRIPT_DIR / "logs"
-CONFIG_PATH = OUTPUT_ROOT / "cxl_config.csv"
+OUTPUT_ROOT = SCRIPT_DIR / "logs_node_scaling"
 SST_BIN = "sst"
 GEN_BIN = REPO_ROOT / "scripts" / "gen_pointer_chase"
 GEN_SRC = REPO_ROOT / "scripts" / "generate_pointer_chase_trace.cpp"
-SIM_SCRIPT = REPO_ROOT / "experiments" / "pointer_chase_replication" / "pool_sweep.py"
-
-NUM_NODES = int(os.environ.get("NUM_NODES", "8"))
-MPI_RANKS = int(os.environ.get("MPI_RANKS", str(NUM_NODES)))
-POOL_NODE_ID_BASE = 100
-REPLICA_COUNTS = [int(value) for value in os.environ.get("REPLICA_COUNTS", "2,4,8").split(",") if value.strip()]
+SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
 
 MAX_CORE_BUDGET = 160
-DEFAULT_MAX_PARALLEL = min(20, max(1, MAX_CORE_BUDGET // max(MPI_RANKS, 1)))
-MAX_PARALLEL = int(os.environ.get("MAX_PARALLEL", str(DEFAULT_MAX_PARALLEL)))
-
+NODE_COUNTS = [int(value) for value in os.environ.get("NODE_COUNTS", "1,2,4,8").split(",") if value.strip()]
+CONFIGS = [value.strip() for value in os.environ.get("CONFIGS", "no_rep,rep2").split(",") if value.strip()]
 LOAD_PCT = int(os.environ.get("LOAD_PCT", "80"))
 INJECT_BANDWIDTH_GBPS = float(os.environ.get("INJECT_BANDWIDTH_GBPS", "1.50"))
+MAX_PARALLEL = int(os.environ.get("MAX_PARALLEL", str(min(8, len(NODE_COUNTS) * max(1, len(CONFIGS))))))
+
 NUM_INSTRS = 10_000
 SEED = 0x12345678
 CXL_BASE = 64 << 30
 CXL_WS_BYTES = 8 << 20
+POOL_NODE_ID_BASE = 100
 MAX_GRAPH_BROADCAST_RETRIES = int(os.environ.get("MAX_GRAPH_BROADCAST_RETRIES", "2"))
 
 LAT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9eE+.\-]+)")
@@ -41,7 +37,6 @@ LAT_COUNT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.load_issue_to_complete_co
 REQ_BW_RE = re.compile(r"stat\.node\.(\d+)\.injector\.request_gbps\s*=\s*([0-9eE+.\-]+)")
 RESP_BW_RE = re.compile(r"stat\.node\.(\d+)\.injector\.response_gbps\s*=\s*([0-9eE+.\-]+)")
 AGG_BW_RE = re.compile(r"stat\.node\.(\d+)\.injector\.aggregate_gbps\s*=\s*([0-9eE+.\-]+)")
-SW_REPL_RE = re.compile(r"stat\.switch\.replicated_messages = ([0-9.eE+-]+)")
 
 
 def build_generator() -> None:
@@ -78,12 +73,24 @@ def generate_trace(out_dir: Path) -> Path:
     return trace_path
 
 
-def write_cxl_config(path: Path) -> None:
+def write_cxl_config(path: Path, num_nodes: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         f.write("# node_id,start,size,type,target\n")
-        for node in range(NUM_NODES):
+        for node in range(num_nodes):
             f.write(f"{node},0x{CXL_BASE:x},0x{CXL_WS_BYTES:x},pool,{POOL_NODE_ID_BASE}\n")
+
+
+def parse_config_name(config_name: str) -> tuple[int, int]:
+    if config_name == "no_rep":
+        return 0, 1
+    if config_name.startswith("rep"):
+        return 1, int(config_name[3:])
+    raise ValueError(f"unsupported config name: {config_name}")
+
+
+def format_bw_token(inject_bw: float) -> str:
+    return f"{inject_bw:05.2f}".replace(".", "p")
 
 
 def is_retryable_startup_failure(out_path: Path, err_path: Path) -> bool:
@@ -98,29 +105,31 @@ def is_retryable_startup_failure(out_path: Path, err_path: Path) -> bool:
 def run_sst(
     trace_path: Path,
     cxl_config_path: Path,
-    replicate_writes: int,
-    num_pools: int,
+    num_nodes: int,
+    config_name: str,
+    inject_bw: float,
     out_path: Path,
     err_path: Path,
 ) -> int:
+    replicate_writes, num_pools = parse_config_name(config_name)
+    mpi_ranks = int(os.environ.get("MPI_RANKS", str(num_nodes)))
+
     env = os.environ.copy()
     env["TRACE_PATH"] = str(trace_path)
     env["CXL_CONFIG_PATH"] = str(cxl_config_path)
-    env["NUM_NODES"] = str(NUM_NODES)
-    env["MPI_RANKS"] = str(MPI_RANKS)
+    env["INJECT_BANDWIDTH_GBPS"] = str(inject_bw)
+    env["INJECT_LOAD_PCT"] = str(LOAD_PCT)
     env["REPLICATE_WRITES"] = str(replicate_writes)
     env["NUM_POOLS"] = str(num_pools)
-    env["INJECT_BANDWIDTH_GBPS"] = str(INJECT_BANDWIDTH_GBPS)
-    env["INJECT_LOAD_PCT"] = str(LOAD_PCT)
+    env["NUM_NODES"] = str(num_nodes)
+    env["MPI_RANKS"] = str(mpi_ranks)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.touch(exist_ok=True)
     err_path.touch(exist_ok=True)
-
     print(
-        f"[STATUS] Launching {out_path.name} "
-        f"(replicate_writes={replicate_writes}, num_pools={num_pools}, "
-        f"load_pct={LOAD_PCT}, inject_bw={INJECT_BANDWIDTH_GBPS})"
+        f"[STATUS] Launching {SIM_SCRIPT.name} -> {out_path.name} "
+        f"(config={config_name}, num_nodes={num_nodes}, inject_bw={inject_bw}, load_pct={LOAD_PCT})"
     )
 
     max_attempts = 1 + max(0, MAX_GRAPH_BROADCAST_RETRIES)
@@ -132,7 +141,7 @@ def run_sst(
             )
         with out_path.open("w") as out_f, err_path.open("w") as err_f:
             proc = subprocess.run(
-                ["mpirun", "-n", str(MPI_RANKS), SST_BIN, str(SIM_SCRIPT)],
+                ["mpirun", "-n", str(mpi_ranks), SST_BIN, str(SIM_SCRIPT)],
                 cwd=str(SCRIPT_DIR),
                 env=env,
                 stdout=out_f,
@@ -149,23 +158,21 @@ def parse_scalars(pattern: re.Pattern[str], text: str) -> dict[int, float]:
     return {int(m.group(1)): float(m.group(2)) for m in pattern.finditer(text)}
 
 
-def parse_run_metrics(path: Path) -> dict[str, float] | None:
+def parse_metrics(path: Path, expected_nodes: int) -> tuple[float | None, float | None, float | None, float | None]:
     text = path.read_text(errors="ignore")
     lat_by_node = parse_scalars(LAT_RE, text)
     lat_count_by_node = parse_scalars(LAT_COUNT_RE, text)
     req_bw_by_node = parse_scalars(REQ_BW_RE, text)
     resp_bw_by_node = parse_scalars(RESP_BW_RE, text)
     agg_bw_by_node = parse_scalars(AGG_BW_RE, text)
-    sw_repl = [float(m.group(1)) for m in SW_REPL_RE.finditer(text)]
-
     if (
-        len(lat_by_node) != NUM_NODES
-        or len(lat_count_by_node) != NUM_NODES
-        or len(req_bw_by_node) != NUM_NODES
-        or len(resp_bw_by_node) != NUM_NODES
-        or len(agg_bw_by_node) != NUM_NODES
+        len(lat_by_node) != expected_nodes
+        or len(lat_count_by_node) != expected_nodes
+        or len(req_bw_by_node) != expected_nodes
+        or len(resp_bw_by_node) != expected_nodes
+        or len(agg_bw_by_node) != expected_nodes
     ):
-        return None
+        return None, None, None, None
 
     weighted_lat_sum = 0.0
     weighted_lat_count = 0.0
@@ -174,34 +181,30 @@ def parse_run_metrics(path: Path) -> dict[str, float] | None:
         weighted_lat_sum += lat * count
         weighted_lat_count += count
     if weighted_lat_count <= 0.0:
-        return None
+        return None, None, None, None
 
-    return {
-        "weighted_avg_load_lat_cycles": weighted_lat_sum / weighted_lat_count,
-        "request_gbps": sum(req_bw_by_node.values()),
-        "response_gbps": sum(resp_bw_by_node.values()),
-        "aggregate_bw_gbps": sum(agg_bw_by_node.values()),
-        "switch_replicated_messages": sw_repl[-1] if sw_repl else 0.0,
-    }
+    return (
+        weighted_lat_sum / weighted_lat_count,
+        sum(req_bw_by_node.values()),
+        sum(resp_bw_by_node.values()),
+        sum(agg_bw_by_node.values()),
+    )
 
 
-def write_summary(rows: list[dict[str, object]]) -> None:
-    out_csv = OUTPUT_ROOT / "replica_count_summary.csv"
-    rows_sorted = sorted(rows, key=lambda row: (str(row["config"]), int(row["replicas"])))
+def write_summary(rows: list[dict[str, object]], out_csv: Path) -> None:
+    rows_sorted = sorted(rows, key=lambda row: (str(row["config"]), int(row["num_nodes"])))
     with out_csv.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
             fieldnames=[
                 "config",
-                "replicas",
                 "num_nodes",
                 "load_pct",
                 "requested_request_gbps_per_node",
-                "weighted_avg_load_lat_cycles",
                 "request_gbps",
                 "response_gbps",
                 "aggregate_bw_gbps",
-                "switch_replicated_messages",
+                "latency_cycles",
                 "log_path",
             ],
         )
@@ -211,80 +214,86 @@ def write_summary(rows: list[dict[str, object]]) -> None:
 
 
 def main() -> int:
-    print("[STATUS] Starting pointer-chase replica-count experiment")
-    print(
-        f"[STATUS] num_nodes={NUM_NODES} load_pct={LOAD_PCT} "
-        f"inject_bw={INJECT_BANDWIDTH_GBPS} replica_counts={REPLICA_COUNTS}"
-    )
+    print("[STATUS] Starting pointer-chase node-count scaling experiment")
+    print(f"[STATUS] configs={CONFIGS} node_counts={NODE_COUNTS} load_pct={LOAD_PCT} inject_bw={INJECT_BANDWIDTH_GBPS}")
     build_generator()
-    trace_path = generate_trace(TRACE_ROOT)
-    write_cxl_config(CONFIG_PATH)
+    TRACE_ROOT.mkdir(parents=True, exist_ok=True)
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    trace_path = generate_trace(TRACE_ROOT)
+    for num_nodes in NODE_COUNTS:
+        write_cxl_config(OUTPUT_ROOT / f"cxl_config_nodes{num_nodes:03d}.csv", num_nodes)
 
-    tasks = [
-        ("no_rep", 1, 0, 1, OUTPUT_ROOT / "run_replica001_no_rep.out", OUTPUT_ROOT / "run_replica001_no_rep.err"),
-    ]
-    for replicas in REPLICA_COUNTS:
-        out_path = OUTPUT_ROOT / f"run_replica{replicas:03d}_rep.out"
-        err_path = OUTPUT_ROOT / f"run_replica{replicas:03d}_rep.err"
-        tasks.append(("rep", replicas, 1, replicas, out_path, err_path))
-
+    tasks = [(config_name, num_nodes) for config_name in CONFIGS for num_nodes in NODE_COUNTS]
     failures = 0
-    results: list[dict[str, object]] = []
+    rows: list[dict[str, object]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(tasks))) as executor:
         future_to_task = {}
-        for config, replicas, replicate_writes, num_pools, out_path, err_path in tasks:
+        for config_name, num_nodes in tasks:
+            bw_token = format_bw_token(INJECT_BANDWIDTH_GBPS)
+            out_path = OUTPUT_ROOT / (
+                f"run_nodes{num_nodes:03d}_{config_name}_load{LOAD_PCT:03d}_bw{bw_token}.out"
+            )
+            err_path = OUTPUT_ROOT / (
+                f"run_nodes{num_nodes:03d}_{config_name}_load{LOAD_PCT:03d}_bw{bw_token}.err"
+            )
+            config_path = OUTPUT_ROOT / f"cxl_config_nodes{num_nodes:03d}.csv"
             future = executor.submit(
                 run_sst,
                 trace_path,
-                CONFIG_PATH,
-                replicate_writes,
-                num_pools,
+                config_path,
+                num_nodes,
+                config_name,
+                INJECT_BANDWIDTH_GBPS,
                 out_path,
                 err_path,
             )
-            future_to_task[future] = (config, replicas, out_path)
+            future_to_task[future] = (config_name, num_nodes, out_path)
 
         completed = 0
         for future in concurrent.futures.as_completed(future_to_task):
-            config, replicas, out_path = future_to_task[future]
+            config_name, num_nodes, out_path = future_to_task[future]
             try:
                 rc = future.result()
             except Exception as exc:
-                print(f"[FAIL] replicas={replicas} {config}: {exc}")
+                print(f"[FAIL] config={config_name} num_nodes={num_nodes}: {exc}")
                 failures += 1
                 completed += 1
                 continue
 
             if rc != 0:
-                print(f"[FAIL] replicas={replicas} {config}: rc={rc}")
+                print(f"[FAIL] config={config_name} num_nodes={num_nodes}: rc={rc}")
                 failures += 1
             else:
-                metrics = parse_run_metrics(out_path)
-                if metrics is None:
-                    print(f"[FAIL] replicas={replicas} {config}: missing complete stats")
+                avg_latency, req_bw, resp_bw, agg_bw = parse_metrics(out_path, num_nodes)
+                if avg_latency is None or req_bw is None or resp_bw is None or agg_bw is None:
+                    print(f"[FAIL] missing complete stats in {out_path}")
                     failures += 1
                 else:
-                    row = {
-                        "config": config,
-                        "replicas": replicas,
-                        "num_nodes": NUM_NODES,
+                    rows.append({
+                        "config": config_name,
+                        "num_nodes": num_nodes,
                         "load_pct": LOAD_PCT,
                         "requested_request_gbps_per_node": INJECT_BANDWIDTH_GBPS,
+                        "request_gbps": req_bw,
+                        "response_gbps": resp_bw,
+                        "aggregate_bw_gbps": agg_bw,
+                        "latency_cycles": avg_latency,
                         "log_path": str(out_path),
-                    }
-                    row.update(metrics)
-                    results.append(row)
+                    })
+                    print(
+                        f"[STATUS] config={config_name} num_nodes={num_nodes} total_agg_bw={agg_bw:.3f} "
+                        f"avg_load_issue_to_complete_lat={avg_latency:.3f}"
+                    )
             completed += 1
             print(f"[STATUS] Completed {completed}/{len(tasks)}")
 
-    if results:
-        write_summary(results)
+    if rows:
+        write_summary(rows, OUTPUT_ROOT / "node_scaling_summary.csv")
 
     if failures:
-        print(f"Replica-count experiment finished with {failures} failures.")
+        print(f"Node-count scaling experiment finished with {failures} failures.")
         return 1
-    print("Replica-count experiment complete.")
+    print("Node-count scaling experiment complete.")
     return 0
 
 

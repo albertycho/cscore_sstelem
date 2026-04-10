@@ -198,7 +198,13 @@ def parse_metrics(out_path: Path) -> tuple[float | None, float | None, float | N
     resp_bw_by_node = parse_scalars(RESP_BW_RE, text)
     agg_bw_by_node = parse_scalars(AGG_BW_RE, text)
 
-    if not lat_by_node or not lat_count_by_node or not req_bw_by_node or not resp_bw_by_node or not agg_bw_by_node:
+    if (
+        len(lat_by_node) != NUM_NODES
+        or len(lat_count_by_node) != NUM_NODES
+        or len(req_bw_by_node) != NUM_NODES
+        or len(resp_bw_by_node) != NUM_NODES
+        or len(agg_bw_by_node) != NUM_NODES
+    ):
         return None, None, None, None
 
     weighted_lat_sum = 0.0
@@ -295,7 +301,7 @@ def run_config_load_sweep(trace_path: Path, config_name: str, replicate_writes: 
 def main() -> int:
     print("[STATUS] Starting 8-node pointer-chase replication sweep")
     print(f"[STATUS] Pointer trace instructions={NUM_INSTRS}")
-    print("[STATUS] SST warmup=1000 main=5000")
+    print("[STATUS] SST warmup=1000 main=4000")
     print(f"[STATUS] Link peak per direction={link_peak_gbps():.3f} Gbps")
     print(f"[STATUS] Full-capacity reference={FULL_CAPACITY_GBPS:.3f} Gbps")
     print(f"[STATUS] Latency threshold={LATENCY_THRESHOLD} cycles")
