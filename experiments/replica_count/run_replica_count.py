@@ -224,16 +224,14 @@ def parse_metrics(path: Path) -> tuple[float | None, float | None, float | None,
 
 def clear_previous_outputs() -> None:
     removed = 0
-    for pattern in ("run_replica*.out", "run_replica*.err", "run_nodes*.out", "run_nodes*.err", "cxl_config_nodes*.csv"):
+    for pattern in ("run_replica*_load*_bw*.out", "run_replica*_load*_bw*.err"):
         for path in OUTPUT_ROOT.glob(pattern):
             path.unlink()
             removed += 1
     for path in (
+        OUTPUT_ROOT / "cxl_config.csv",
         OUTPUT_ROOT / "replica_sweep_bw_latency.csv",
         OUTPUT_ROOT / "replica_sweep_bw_latency.png",
-        OUTPUT_ROOT / "replica_count_summary.csv",
-        OUTPUT_ROOT / "replica_count_latency_vs_count.png",
-        OUTPUT_ROOT / "replica_count_latency_cdf_overlay.png",
     ):
         if path.exists():
             path.unlink()
