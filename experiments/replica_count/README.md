@@ -5,9 +5,9 @@ methodology:
 
 - pointer-chase probe trace
 - background injector traffic
-- `8` nodes behind one switch
-- one `no_rep` baseline with `1` pool
-- replicated runs with `repN` using `N` pools
+- `1, 2, 4, 8, and 16` nodes behind one switch
+- one `no_rep` baseline with `1` pool for each node count
+- replicated runs with `repN` using `N` pools for each node count
 
 Run:
 
@@ -18,7 +18,7 @@ python3 experiments/replica_count/run_replica_count.py
 Useful overrides:
 
 ```bash
-REPLICA_COUNTS=2,4,8 LOAD_PCT=80 INJECT_BANDWIDTH_GBPS=1.50 python3 experiments/replica_count/run_replica_count.py
+NODE_COUNTS=1,2,4,8,16 REPLICA_COUNTS=2,4,8,16 LOAD_PCT=80 INJECT_BANDWIDTH_GBPS=1.50 python3 experiments/replica_count/run_replica_count.py
 ```
 
 Plot:

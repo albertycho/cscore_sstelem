@@ -10,6 +10,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 LOG_DIR = SCRIPT_DIR / "logs"
 BLUE_CMAP = "Blues"
 
+OUT_FILE_RE = re.compile(r"run_nodes(\d+)_replica(\d+)_(no_rep|rep)\.out$")
+LAT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9.eE+-]+)")
+LAT_COUNT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.load_issue_to_complete_count\s*=\s*([0-9.eE+-]+)")
+HIST_BIN_RE = re.compile(r"stat\.node\.(\d+)\.llc\.miss_lat_hist_bin_ns = (\d+)")
+HIST_RE = re.compile(r"stat\.node\.(\d+)\.llc\.miss_lat_hist = (\[.*\])")
+
 
 def truncated_blue_cmap(plt_module):
     from matplotlib.colors import LinearSegmentedColormap
@@ -26,13 +32,6 @@ def color_for_replica(cmap, norm, replica: int, min_replica: int):
         color[1] = color[1] * (1.0 - blend) + blend
         color[2] = color[2] * (1.0 - blend) + blend
     return tuple(color)
-
-
-OUT_FILE_RE = re.compile(r"run_replica(\d+)_(no_rep|rep)\.out$")
-LAT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9.eE+-]+)")
-LAT_COUNT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.load_issue_to_complete_count\s*=\s*([0-9.eE+-]+)")
-HIST_BIN_RE = re.compile(r"stat\.node\.(\d+)\.llc\.miss_lat_hist_bin_ns = (\d+)")
-HIST_RE = re.compile(r"stat\.node\.(\d+)\.llc\.miss_lat_hist = (\[.*\])")
 
 
 def parse_run_metrics(path: Path) -> dict[str, float] | None:
@@ -78,27 +77,28 @@ def parse_histogram(path: Path) -> tuple[int, list[int]]:
     return bin_ns, agg
 
 
-def collect_runs(log_dir: Path) -> tuple[list[dict[str, float]], list[tuple[str, int, Path]]]:
+def collect_runs(log_dir: Path) -> tuple[list[dict[str, float]], list[tuple[str, int, int, Path]]]:
     rows: list[dict[str, float]] = []
-    artifacts: list[tuple[str, int, Path]] = []
-    for out_path in sorted(log_dir.glob("run_replica*_*.out")):
+    artifacts: list[tuple[str, int, int, Path]] = []
+    for out_path in sorted(log_dir.glob("run_nodes*_replica*_*.out")):
         match = OUT_FILE_RE.search(out_path.name)
         if not match:
             continue
-        replicas = int(match.group(1))
-        config = match.group(2)
+        num_nodes = int(match.group(1))
+        replicas = int(match.group(2))
+        config = match.group(3)
         metrics = parse_run_metrics(out_path)
         if metrics is None:
             continue
-        row = {"config": config, "replicas": replicas}
+        row = {"config": config, "num_nodes": num_nodes, "replicas": replicas}
         row.update(metrics)
         rows.append(row)
-        artifacts.append((config, replicas, out_path))
+        artifacts.append((config, num_nodes, replicas, out_path))
     return rows, artifacts
 
 
 def write_summary(rows: list[dict[str, float]], out_csv: Path) -> None:
-    rows_sorted = sorted(rows, key=lambda row: (row["config"], int(row["replicas"])))
+    rows_sorted = sorted(rows, key=lambda row: (int(row["num_nodes"]), row["config"], int(row["replicas"])))
     with out_csv.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows_sorted[0].keys()))
         writer.writeheader()
@@ -108,82 +108,69 @@ def write_summary(rows: list[dict[str, float]], out_csv: Path) -> None:
 
 def plot_latency_vs_count(rows: list[dict[str, float]], out_png: Path) -> None:
     import matplotlib.pyplot as plt
-    from matplotlib import colors
 
-    rep_points = sorted(
-        [
-            (int(row["replicas"]), float(row["weighted_avg_load_lat_cycles"]))
-            for row in rows
-            if str(row["config"]) == "rep"
-        ],
-        key=lambda item: item[0],
-    )
-    if not rep_points:
-        raise RuntimeError("No replication (rep) runs found for latency-vs-count plot.")
+    node_counts = sorted({int(row["num_nodes"]) for row in rows})
+    if not node_counts:
+        raise RuntimeError("No rows found for replica-count plot.")
 
-    baseline_points = [
-        float(row["weighted_avg_load_lat_cycles"])
-        for row in rows
-        if str(row["config"]) == "no_rep"
-    ]
-
-    x = [point[0] for point in rep_points]
-    y = [point[1] for point in rep_points]
-    min_replica = min(x)
-    norm = colors.Normalize(vmin=min(x), vmax=max(x))
-    cmap = truncated_blue_cmap(plt)
-    point_colors = [color_for_replica(cmap, norm, replica, min_replica) for replica in x]
-
-    fig, ax = plt.subplots(figsize=(7.0, 4.5))
-    ax.plot(x, y, linewidth=1.2, color="0.4", alpha=0.8)
-    ax.scatter(x, y, c=point_colors, s=90, zorder=3, edgecolors="black", linewidths=0.6)
-    if baseline_points:
-        baseline = baseline_points[0]
-        ax.axhline(
-            baseline,
-            linestyle="--",
-            linewidth=2.0,
-            color="black",
-            label=f"No replication baseline = {baseline:.1f} cycles",
-            zorder=2,
+    fig, ax = plt.subplots(figsize=(7.4, 4.8))
+    for num_nodes in node_counts:
+        series = sorted(
+            [
+                (
+                    int(row["replicas"]),
+                    float(row["weighted_avg_load_lat_cycles"]),
+                )
+                for row in rows
+                if int(row["num_nodes"]) == num_nodes
+            ],
+            key=lambda item: item[0],
         )
+        if not series:
+            continue
+        x = [point[0] for point in series]
+        y = [point[1] for point in series]
+        ax.plot(x, y, marker="o", linewidth=2.0, label=f"{num_nodes} nodes")
+
     ax.set_xlabel("Replica Count")
     ax.set_ylabel("Weighted Avg Memory Access Latency (cycles)")
-    ax.set_title("Pointer-Chase Latency vs Replica Count")
+    ax.set_title("Pointer-Chase Latency Across Node and Replica Counts")
     ax.grid(True, alpha=0.3)
-    if baseline_points:
-        ax.legend(loc="best")
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax)
-    cbar.set_label("Replica Count")
+    ax.legend(loc="best")
     fig.tight_layout()
     fig.savefig(out_png, dpi=220)
     plt.close(fig)
     print(f"[STATUS] Wrote plot: {out_png}")
 
 
-def plot_cdf_overlay(artifacts: list[tuple[str, int, Path]], out_png: Path) -> None:
+def plot_cdf_overlay(artifacts: list[tuple[str, int, int, Path]], out_png: Path) -> None:
     import matplotlib.pyplot as plt
     from matplotlib import colors
 
+    max_node_count = max(num_nodes for _, num_nodes, _, _ in artifacts)
     rep_artifacts = sorted(
-        [artifact for artifact in artifacts if artifact[0] == "rep"],
-        key=lambda item: item[1],
+        [
+            artifact for artifact in artifacts
+            if artifact[0] == "rep" and artifact[1] == max_node_count
+        ],
+        key=lambda item: item[2],
     )
     if not rep_artifacts:
-        raise RuntimeError("No replication (rep) runs found for CDF overlay plot.")
+        raise RuntimeError("No replication runs found for CDF overlay plot.")
 
-    baseline_artifacts = [artifact for artifact in artifacts if artifact[0] == "no_rep"]
+    baseline_artifacts = [
+        artifact for artifact in artifacts
+        if artifact[0] == "no_rep" and artifact[1] == max_node_count
+    ]
 
-    replica_values = [replicas for _, replicas, _ in rep_artifacts]
+    replica_values = [replicas for _, _, replicas, _ in rep_artifacts]
     min_replica = min(replica_values)
     norm = colors.Normalize(vmin=min(replica_values), vmax=max(replica_values))
     cmap = truncated_blue_cmap(plt)
 
     fig, ax = plt.subplots(figsize=(8.0, 5.0))
     if baseline_artifacts:
-        _, _, out_path = baseline_artifacts[0]
+        _, _, _, out_path = baseline_artifacts[0]
         bin_ns, hist = parse_histogram(out_path)
         total = sum(hist)
         if total > 0:
@@ -195,7 +182,7 @@ def plot_cdf_overlay(artifacts: list[tuple[str, int, Path]], out_png: Path) -> N
             x = [idx * bin_ns for idx in range(len(hist))]
             ax.plot(x, cumulative, linewidth=2.2, color="black", linestyle="--", label="no_rep")
 
-    for config, replicas, out_path in rep_artifacts:
+    for _, _, replicas, out_path in rep_artifacts:
         bin_ns, hist = parse_histogram(out_path)
         total = sum(hist)
         if total <= 0:
@@ -212,7 +199,7 @@ def plot_cdf_overlay(artifacts: list[tuple[str, int, Path]], out_png: Path) -> N
     ax.set_xlabel("LLC Miss Latency (ns)")
     ax.set_ylabel("CDF")
     ax.set_ylim(0.0, 1.0)
-    ax.set_title("Pointer-Chase Latency CDF vs Replica Count")
+    ax.set_title(f"Pointer-Chase Latency CDF vs Replica Count ({max_node_count} nodes)")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="lower right")
     fig.tight_layout()

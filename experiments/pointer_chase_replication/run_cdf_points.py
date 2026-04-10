@@ -27,7 +27,7 @@ CXL_BASE = 64 << 30
 CXL_WS_BYTES = 8 << 20
 MAX_GRAPH_BROADCAST_RETRIES = int(os.environ.get("MAX_GRAPH_BROADCAST_RETRIES", "2"))
 
-DEFAULT_CASES = "no_rep,80,1.50;no_rep,80,1.90;rep2,80,4.15;rep2,80,5.30"
+DEFAULT_CASES = "no_rep,80,1.90;rep2,80,4.15"
 CASE_SPEC = os.environ.get("CDF_CASES", DEFAULT_CASES)
 
 LAT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9eE+.\-]+)")

@@ -19,7 +19,7 @@ GEN_SRC = REPO_ROOT / "scripts" / "generate_pointer_chase_trace.cpp"
 SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
 
 MAX_CORE_BUDGET = 160
-NODE_COUNTS = [int(value) for value in os.environ.get("NODE_COUNTS", "1,2,4,8").split(",") if value.strip()]
+NODE_COUNTS = [int(value) for value in os.environ.get("NODE_COUNTS", "1,2,4,8,16").split(",") if value.strip()]
 CONFIGS = [value.strip() for value in os.environ.get("CONFIGS", "no_rep,rep2").split(",") if value.strip()]
 LOAD_PCT = int(os.environ.get("LOAD_PCT", "80"))
 INJECT_BANDWIDTH_GBPS = float(os.environ.get("INJECT_BANDWIDTH_GBPS", "1.50"))

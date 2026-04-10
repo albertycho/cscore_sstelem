@@ -19,13 +19,13 @@ GEN_BIN = REPO_ROOT / "scripts" / "gen_pointer_chase"
 GEN_SRC = REPO_ROOT / "scripts" / "generate_pointer_chase_trace.cpp"
 SIM_SCRIPT = REPO_ROOT / "experiments" / "pointer_chase_replication" / "pool_sweep.py"
 
-NUM_NODES = int(os.environ.get("NUM_NODES", "8"))
-MPI_RANKS = int(os.environ.get("MPI_RANKS", str(NUM_NODES)))
 POOL_NODE_ID_BASE = 100
-REPLICA_COUNTS = [int(value) for value in os.environ.get("REPLICA_COUNTS", "2,4,8").split(",") if value.strip()]
+NODE_COUNTS = [int(value) for value in os.environ.get("NODE_COUNTS", "1,2,4,8,16").split(",") if value.strip()]
+REPLICA_COUNTS = [int(value) for value in os.environ.get("REPLICA_COUNTS", "2,4,8,16").split(",") if value.strip()]
 
 MAX_CORE_BUDGET = 160
-DEFAULT_MAX_PARALLEL = min(20, max(1, MAX_CORE_BUDGET // max(MPI_RANKS, 1)))
+MAX_RANKS_PER_RUN = max(NODE_COUNTS) if NODE_COUNTS else 1
+DEFAULT_MAX_PARALLEL = min(20, max(1, MAX_CORE_BUDGET // max(MAX_RANKS_PER_RUN, 1)))
 MAX_PARALLEL = int(os.environ.get("MAX_PARALLEL", str(DEFAULT_MAX_PARALLEL)))
 
 LOAD_PCT = int(os.environ.get("LOAD_PCT", "80"))
@@ -78,11 +78,11 @@ def generate_trace(out_dir: Path) -> Path:
     return trace_path
 
 
-def write_cxl_config(path: Path) -> None:
+def write_cxl_config(path: Path, num_nodes: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         f.write("# node_id,start,size,type,target\n")
-        for node in range(NUM_NODES):
+        for node in range(num_nodes):
             f.write(f"{node},0x{CXL_BASE:x},0x{CXL_WS_BYTES:x},pool,{POOL_NODE_ID_BASE}\n")
 
 
@@ -98,16 +98,19 @@ def is_retryable_startup_failure(out_path: Path, err_path: Path) -> bool:
 def run_sst(
     trace_path: Path,
     cxl_config_path: Path,
+    num_nodes: int,
     replicate_writes: int,
     num_pools: int,
     out_path: Path,
     err_path: Path,
 ) -> int:
+    mpi_ranks = int(os.environ.get("MPI_RANKS", str(num_nodes)))
+
     env = os.environ.copy()
     env["TRACE_PATH"] = str(trace_path)
     env["CXL_CONFIG_PATH"] = str(cxl_config_path)
-    env["NUM_NODES"] = str(NUM_NODES)
-    env["MPI_RANKS"] = str(MPI_RANKS)
+    env["NUM_NODES"] = str(num_nodes)
+    env["MPI_RANKS"] = str(mpi_ranks)
     env["REPLICATE_WRITES"] = str(replicate_writes)
     env["NUM_POOLS"] = str(num_pools)
     env["INJECT_BANDWIDTH_GBPS"] = str(INJECT_BANDWIDTH_GBPS)
@@ -119,7 +122,7 @@ def run_sst(
 
     print(
         f"[STATUS] Launching {out_path.name} "
-        f"(replicate_writes={replicate_writes}, num_pools={num_pools}, "
+        f"(num_nodes={num_nodes}, replicate_writes={replicate_writes}, num_pools={num_pools}, "
         f"load_pct={LOAD_PCT}, inject_bw={INJECT_BANDWIDTH_GBPS})"
     )
 
@@ -132,7 +135,7 @@ def run_sst(
             )
         with out_path.open("w") as out_f, err_path.open("w") as err_f:
             proc = subprocess.run(
-                ["mpirun", "-n", str(MPI_RANKS), SST_BIN, str(SIM_SCRIPT)],
+                ["mpirun", "-n", str(mpi_ranks), SST_BIN, str(SIM_SCRIPT)],
                 cwd=str(SCRIPT_DIR),
                 env=env,
                 stdout=out_f,
@@ -149,7 +152,7 @@ def parse_scalars(pattern: re.Pattern[str], text: str) -> dict[int, float]:
     return {int(m.group(1)): float(m.group(2)) for m in pattern.finditer(text)}
 
 
-def parse_run_metrics(path: Path) -> dict[str, float] | None:
+def parse_run_metrics(path: Path, expected_nodes: int) -> dict[str, float] | None:
     text = path.read_text(errors="ignore")
     lat_by_node = parse_scalars(LAT_RE, text)
     lat_count_by_node = parse_scalars(LAT_COUNT_RE, text)
@@ -159,11 +162,11 @@ def parse_run_metrics(path: Path) -> dict[str, float] | None:
     sw_repl = [float(m.group(1)) for m in SW_REPL_RE.finditer(text)]
 
     if (
-        len(lat_by_node) != NUM_NODES
-        or len(lat_count_by_node) != NUM_NODES
-        or len(req_bw_by_node) != NUM_NODES
-        or len(resp_bw_by_node) != NUM_NODES
-        or len(agg_bw_by_node) != NUM_NODES
+        len(lat_by_node) != expected_nodes
+        or len(lat_count_by_node) != expected_nodes
+        or len(req_bw_by_node) != expected_nodes
+        or len(resp_bw_by_node) != expected_nodes
+        or len(agg_bw_by_node) != expected_nodes
     ):
         return None
 
@@ -187,7 +190,7 @@ def parse_run_metrics(path: Path) -> dict[str, float] | None:
 
 def write_summary(rows: list[dict[str, object]]) -> None:
     out_csv = OUTPUT_ROOT / "replica_count_summary.csv"
-    rows_sorted = sorted(rows, key=lambda row: (str(row["config"]), int(row["replicas"])))
+    rows_sorted = sorted(rows, key=lambda row: (int(row["num_nodes"]), str(row["config"]), int(row["replicas"])))
     with out_csv.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
@@ -213,62 +216,83 @@ def write_summary(rows: list[dict[str, object]]) -> None:
 def main() -> int:
     print("[STATUS] Starting pointer-chase replica-count experiment")
     print(
-        f"[STATUS] num_nodes={NUM_NODES} load_pct={LOAD_PCT} "
+        f"[STATUS] node_counts={NODE_COUNTS} load_pct={LOAD_PCT} "
         f"inject_bw={INJECT_BANDWIDTH_GBPS} replica_counts={REPLICA_COUNTS}"
     )
     build_generator()
     trace_path = generate_trace(TRACE_ROOT)
-    write_cxl_config(CONFIG_PATH)
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    config_paths: dict[int, Path] = {}
+    for num_nodes in NODE_COUNTS:
+        config_path = OUTPUT_ROOT / f"cxl_config_nodes{num_nodes:03d}.csv"
+        write_cxl_config(config_path, num_nodes)
+        config_paths[num_nodes] = config_path
 
-    tasks = [
-        ("no_rep", 1, 0, 1, OUTPUT_ROOT / "run_replica001_no_rep.out", OUTPUT_ROOT / "run_replica001_no_rep.err"),
-    ]
-    for replicas in REPLICA_COUNTS:
-        out_path = OUTPUT_ROOT / f"run_replica{replicas:03d}_rep.out"
-        err_path = OUTPUT_ROOT / f"run_replica{replicas:03d}_rep.err"
-        tasks.append(("rep", replicas, 1, replicas, out_path, err_path))
+    tasks = []
+    for num_nodes in NODE_COUNTS:
+        tasks.append((
+            "no_rep",
+            num_nodes,
+            1,
+            0,
+            1,
+            config_paths[num_nodes],
+            OUTPUT_ROOT / f"run_nodes{num_nodes:03d}_replica001_no_rep.out",
+            OUTPUT_ROOT / f"run_nodes{num_nodes:03d}_replica001_no_rep.err",
+        ))
+        for replicas in REPLICA_COUNTS:
+            tasks.append((
+                "rep",
+                num_nodes,
+                replicas,
+                1,
+                replicas,
+                config_paths[num_nodes],
+                OUTPUT_ROOT / f"run_nodes{num_nodes:03d}_replica{replicas:03d}_rep.out",
+                OUTPUT_ROOT / f"run_nodes{num_nodes:03d}_replica{replicas:03d}_rep.err",
+            ))
 
     failures = 0
     results: list[dict[str, object]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(tasks))) as executor:
         future_to_task = {}
-        for config, replicas, replicate_writes, num_pools, out_path, err_path in tasks:
+        for config, num_nodes, replicas, replicate_writes, num_pools, config_path, out_path, err_path in tasks:
             future = executor.submit(
                 run_sst,
                 trace_path,
-                CONFIG_PATH,
+                config_path,
+                num_nodes,
                 replicate_writes,
                 num_pools,
                 out_path,
                 err_path,
             )
-            future_to_task[future] = (config, replicas, out_path)
+            future_to_task[future] = (config, num_nodes, replicas, out_path)
 
         completed = 0
         for future in concurrent.futures.as_completed(future_to_task):
-            config, replicas, out_path = future_to_task[future]
+            config, num_nodes, replicas, out_path = future_to_task[future]
             try:
                 rc = future.result()
             except Exception as exc:
-                print(f"[FAIL] replicas={replicas} {config}: {exc}")
+                print(f"[FAIL] num_nodes={num_nodes} replicas={replicas} {config}: {exc}")
                 failures += 1
                 completed += 1
                 continue
 
             if rc != 0:
-                print(f"[FAIL] replicas={replicas} {config}: rc={rc}")
+                print(f"[FAIL] num_nodes={num_nodes} replicas={replicas} {config}: rc={rc}")
                 failures += 1
             else:
-                metrics = parse_run_metrics(out_path)
+                metrics = parse_run_metrics(out_path, num_nodes)
                 if metrics is None:
-                    print(f"[FAIL] replicas={replicas} {config}: missing complete stats")
+                    print(f"[FAIL] num_nodes={num_nodes} replicas={replicas} {config}: missing complete stats")
                     failures += 1
                 else:
                     row = {
                         "config": config,
                         "replicas": replicas,
-                        "num_nodes": NUM_NODES,
+                        "num_nodes": num_nodes,
                         "load_pct": LOAD_PCT,
                         "requested_request_gbps_per_node": INJECT_BANDWIDTH_GBPS,
                         "log_path": str(out_path),

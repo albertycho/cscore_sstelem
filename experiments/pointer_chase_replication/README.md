@@ -49,9 +49,9 @@ Additional experiment entry points:
 
 - `python3 experiments/pointer_chase_replication/run_cdf_points.py`
   Runs fixed operating points for CDF plots. Override cases with
-  `CDF_CASES="no_rep,80,1.50;rep2,80,4.15"`.
+  `CDF_CASES="no_rep,80,1.90;rep2,80,4.15"`.
 - `python3 experiments/pointer_chase_replication/plot_latency_cdf.py`
   Plots CDFs from `experiments/pointer_chase_replication/logs_cdf`.
 - `python3 experiments/pointer_chase_replication/run_node_scaling.py`
   Runs fixed-point node-count scaling. Override with
-  `NODE_COUNTS="1,2,4,8" CONFIGS="no_rep,rep2" LOAD_PCT=80 INJECT_BANDWIDTH_GBPS=1.50`.
+  `NODE_COUNTS="1,2,4,8,16" CONFIGS="no_rep,rep2" LOAD_PCT=80 INJECT_BANDWIDTH_GBPS=1.50`.
