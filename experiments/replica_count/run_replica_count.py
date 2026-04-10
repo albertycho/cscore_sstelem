@@ -17,7 +17,7 @@ CONFIG_PATH = OUTPUT_ROOT / "cxl_config.csv"
 SST_BIN = "sst"
 GEN_BIN = REPO_ROOT / "scripts" / "gen_pointer_chase"
 GEN_SRC = REPO_ROOT / "scripts" / "generate_pointer_chase_trace.cpp"
-SIM_SCRIPT = REPO_ROOT / "experiments" / "pointer_chase_replication" / "pool_sweep.py"
+SIM_SCRIPT = SCRIPT_DIR / "pool_sweep.py"
 
 NUM_NODES = int(os.environ.get("NUM_NODES", "8"))
 MPI_RANKS = int(os.environ.get("MPI_RANKS", str(NUM_NODES)))

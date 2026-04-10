@@ -6,6 +6,12 @@ the runner sweeps all configured load ratios and uses the same quarter-window
 search used by the main replication experiment to concentrate samples around
 the latency elbow.
 
+Files:
+
+- `run_replica_count.py`: sweep driver
+- `pool_sweep.py`: SST topology script used for each individual run
+- `plot_replica_count.py`: plot generation
+
 Run:
 
 ```bash
