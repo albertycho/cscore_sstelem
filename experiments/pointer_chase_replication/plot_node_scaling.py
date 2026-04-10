@@ -47,10 +47,14 @@ def main() -> int:
         ax.plot(x, y, marker="o", linewidth=2.0, label=title_map.get(config, config))
 
     load_pct = rows[0].get("load_pct", "?")
-    bw = rows[0].get("requested_request_gbps_per_node", "?")
+    requested_bws = {round(float(row["requested_request_gbps_per_node"]), 3) for row in rows}
     ax.set_xlabel("Node Count")
     ax.set_ylabel("Memory Access Latency (cycles)")
-    ax.set_title(f"Node-Count Scaling (load={load_pct}%, {bw} Gbps/node)")
+    if len(requested_bws) == 1:
+        bw = next(iter(requested_bws))
+        ax.set_title(f"Node-Count Scaling (load={load_pct}%, {bw:.2f} Gbps/node)")
+    else:
+        ax.set_title(f"Node-Count Scaling (load={load_pct}%, topology-scaled request rate)")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
     fig.tight_layout()

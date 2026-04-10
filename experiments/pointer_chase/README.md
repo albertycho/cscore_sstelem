@@ -30,7 +30,7 @@ Environment overrides:
 - `MAX_PARALLEL`: max concurrent SST runs
 - `LATENCY_THRESHOLD`: latency target for the quarter-window search, default `1000.0`
 - `SEARCH_LEFT_FRAC`: initial left bound as a fraction of the target bandwidth, default `0.50`
-- `SEARCH_RIGHT_FRAC`: initial right bound as a fraction of the target bandwidth, default `1.50`
+- `SEARCH_RIGHT_FRAC`: initial right bound as a fraction of the target bandwidth, default `2.00`
 - `SEARCH_SHRINK_FRAC`: fractional window shift after each sample, default `0.25`
 - `MAX_SEARCH_ITERS`: maximum binary-search refinement steps, default `15`
 - `MAX_GRAPH_BROADCAST_RETRIES`: retry count for transient SST graph-broadcast startup failures, default `2`
@@ -42,3 +42,5 @@ The injector bandwidth knob is request-direction bandwidth in Gbps. For each fix
 3. runs the quarter-window search around the latency threshold
 
 All `load_pct` lanes run in parallel, but bandwidth points within a lane run sequentially.
+
+Before launching a new sweep, the runner clears prior generated logs and plot artifacts in `experiments/pointer_chase/logs` so the next plot reflects only the current run.

@@ -32,7 +32,7 @@ CLOCK_GHZ = 2.4
 LINK_BW_CYCLES = 25
 LATENCY_THRESHOLD = float(os.environ.get("LATENCY_THRESHOLD", "1000.0"))
 SEARCH_LEFT_FRAC = float(os.environ.get("SEARCH_LEFT_FRAC", "0.50"))
-SEARCH_RIGHT_FRAC = float(os.environ.get("SEARCH_RIGHT_FRAC", "1.50"))
+SEARCH_RIGHT_FRAC = float(os.environ.get("SEARCH_RIGHT_FRAC", "2.00"))
 SEARCH_SHRINK_FRAC = float(os.environ.get("SEARCH_SHRINK_FRAC", "0.25"))
 MAX_SEARCH_ITERS = int(os.environ.get("MAX_SEARCH_ITERS", "15"))
 # MIN_WINDOW_GBPS = float(os.environ.get("MIN_WINDOW_GBPS", "0.05"))
@@ -158,6 +158,23 @@ def parse_aggregate_gbps(out_path: Path) -> float | None:
     return float(match.group(1))
 
 
+def clear_previous_outputs() -> None:
+    removed = 0
+    for pattern in ("run_load*.out", "run_load*.err"):
+        for path in OUTPUT_ROOT.glob(pattern):
+            path.unlink()
+            removed += 1
+    for path in (
+        OUTPUT_ROOT / "pointer_chase_bw_latency.csv",
+        OUTPUT_ROOT / "pointer_chase_bw_latency.png",
+    ):
+        if path.exists():
+            path.unlink()
+            removed += 1
+    if removed:
+        print(f"[STATUS] Cleared {removed} prior generated files from {OUTPUT_ROOT}")
+
+
 def run_load_sweep(trace_path: Path, cxl_config: Path, load_pct: int) -> int:
     left = ratio_target_request_gbps(load_pct) * SEARCH_LEFT_FRAC
     right = ratio_target_request_gbps(load_pct) * SEARCH_RIGHT_FRAC
@@ -248,6 +265,7 @@ def main() -> int:
     build_generator()
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    clear_previous_outputs()
     trace_path = generate_trace(TRACE_ROOT)
 
     total_lanes = len(LOAD_PCTS)

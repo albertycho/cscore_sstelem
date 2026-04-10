@@ -22,7 +22,8 @@ MAX_CORE_BUDGET = 160
 NODE_COUNTS = [int(value) for value in os.environ.get("NODE_COUNTS", "1,2,4,8,16").split(",") if value.strip()]
 CONFIGS = [value.strip() for value in os.environ.get("CONFIGS", "no_rep,rep2").split(",") if value.strip()]
 LOAD_PCT = int(os.environ.get("LOAD_PCT", "80"))
-INJECT_BANDWIDTH_GBPS = float(os.environ.get("INJECT_BANDWIDTH_GBPS", "1.50"))
+MANUAL_INJECT_BANDWIDTH_GBPS = os.environ.get("INJECT_BANDWIDTH_GBPS")
+OPERATING_POINT_FRAC = float(os.environ.get("OPERATING_POINT_FRAC", "0.85"))
 MAX_PARALLEL = int(os.environ.get("MAX_PARALLEL", str(min(8, len(NODE_COUNTS) * max(1, len(CONFIGS))))))
 
 NUM_INSTRS = 10_000
@@ -30,6 +31,7 @@ SEED = 0x12345678
 CXL_BASE = 64 << 30
 CXL_WS_BYTES = 8 << 20
 POOL_NODE_ID_BASE = 100
+FULL_CAPACITY_GBPS = float(os.environ.get("FULL_CAPACITY_GBPS", "49.152"))
 MAX_GRAPH_BROADCAST_RETRIES = int(os.environ.get("MAX_GRAPH_BROADCAST_RETRIES", "2"))
 
 LAT_RE = re.compile(r"stat\.node\.(\d+)\.cpu\.0\.avg_load_issue_to_complete_lat\s*=\s*([0-9eE+.\-]+)")
@@ -87,6 +89,44 @@ def parse_config_name(config_name: str) -> tuple[int, int]:
     if config_name.startswith("rep"):
         return 1, int(config_name[3:])
     raise ValueError(f"unsupported config name: {config_name}")
+
+
+def request_mix_fractions(load_pct: int) -> tuple[float, float, float]:
+    load_frac = load_pct / 100.0
+    avg_request_bytes = 64.0 - (56.0 * load_frac)
+    load_request_frac = 0.0 if avg_request_bytes <= 0.0 else (8.0 * load_frac) / avg_request_bytes
+    store_request_frac = 1.0 - load_request_frac
+    response_to_request_ratio = 0.0 if avg_request_bytes <= 0.0 else (64.0 * load_frac) / avg_request_bytes
+    return load_request_frac, store_request_frac, response_to_request_ratio
+
+
+def target_request_gbps(num_nodes: int, num_pools: int, replicate_writes: bool, load_pct: int) -> float:
+    load_request_frac, store_request_frac, response_ratio = request_mix_fractions(load_pct)
+    nodes_per_pool = num_nodes / num_pools
+
+    node_forward_factor = 1.0
+    node_reverse_factor = response_ratio
+    if replicate_writes:
+        pool_forward_factor = num_nodes * (store_request_frac + (load_request_frac / num_pools))
+    else:
+        pool_forward_factor = nodes_per_pool
+    pool_reverse_factor = nodes_per_pool * response_ratio
+
+    worst_factor = max(
+        node_forward_factor,
+        node_reverse_factor,
+        pool_forward_factor,
+        pool_reverse_factor,
+    )
+    return FULL_CAPACITY_GBPS / worst_factor
+
+
+def inject_bandwidth_gbps(num_nodes: int, config_name: str) -> float:
+    if MANUAL_INJECT_BANDWIDTH_GBPS is not None:
+        return float(MANUAL_INJECT_BANDWIDTH_GBPS)
+    replicate_writes, num_pools = parse_config_name(config_name)
+    target_bw = target_request_gbps(num_nodes, num_pools, bool(replicate_writes), LOAD_PCT)
+    return target_bw * OPERATING_POINT_FRAC
 
 
 def format_bw_token(inject_bw: float) -> str:
@@ -215,7 +255,16 @@ def write_summary(rows: list[dict[str, object]], out_csv: Path) -> None:
 
 def main() -> int:
     print("[STATUS] Starting pointer-chase node-count scaling experiment")
-    print(f"[STATUS] configs={CONFIGS} node_counts={NODE_COUNTS} load_pct={LOAD_PCT} inject_bw={INJECT_BANDWIDTH_GBPS}")
+    if MANUAL_INJECT_BANDWIDTH_GBPS is None:
+        print(
+            f"[STATUS] configs={CONFIGS} node_counts={NODE_COUNTS} load_pct={LOAD_PCT} "
+            f"operating_point_frac={OPERATING_POINT_FRAC}"
+        )
+    else:
+        print(
+            f"[STATUS] configs={CONFIGS} node_counts={NODE_COUNTS} load_pct={LOAD_PCT} "
+            f"inject_bw={float(MANUAL_INJECT_BANDWIDTH_GBPS)}"
+        )
     build_generator()
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -229,7 +278,8 @@ def main() -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(tasks))) as executor:
         future_to_task = {}
         for config_name, num_nodes in tasks:
-            bw_token = format_bw_token(INJECT_BANDWIDTH_GBPS)
+            inject_bw = round(inject_bandwidth_gbps(num_nodes, config_name), 6)
+            bw_token = format_bw_token(inject_bw)
             out_path = OUTPUT_ROOT / (
                 f"run_nodes{num_nodes:03d}_{config_name}_load{LOAD_PCT:03d}_bw{bw_token}.out"
             )
@@ -243,15 +293,15 @@ def main() -> int:
                 config_path,
                 num_nodes,
                 config_name,
-                INJECT_BANDWIDTH_GBPS,
+                inject_bw,
                 out_path,
                 err_path,
             )
-            future_to_task[future] = (config_name, num_nodes, out_path)
+            future_to_task[future] = (config_name, num_nodes, inject_bw, out_path)
 
         completed = 0
         for future in concurrent.futures.as_completed(future_to_task):
-            config_name, num_nodes, out_path = future_to_task[future]
+            config_name, num_nodes, inject_bw, out_path = future_to_task[future]
             try:
                 rc = future.result()
             except Exception as exc:
@@ -273,7 +323,7 @@ def main() -> int:
                         "config": config_name,
                         "num_nodes": num_nodes,
                         "load_pct": LOAD_PCT,
-                        "requested_request_gbps_per_node": INJECT_BANDWIDTH_GBPS,
+                        "requested_request_gbps_per_node": inject_bw,
                         "request_gbps": req_bw,
                         "response_gbps": resp_bw,
                         "aggregate_bw_gbps": agg_bw,
@@ -281,7 +331,8 @@ def main() -> int:
                         "log_path": str(out_path),
                     })
                     print(
-                        f"[STATUS] config={config_name} num_nodes={num_nodes} total_agg_bw={agg_bw:.3f} "
+                        f"[STATUS] config={config_name} num_nodes={num_nodes} inject_bw={inject_bw:.3f} "
+                        f"total_agg_bw={agg_bw:.3f} "
                         f"avg_load_issue_to_complete_lat={avg_latency:.3f}"
                     )
             completed += 1

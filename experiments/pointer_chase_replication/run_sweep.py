@@ -221,6 +221,23 @@ def parse_metrics(out_path: Path) -> tuple[float | None, float | None, float | N
     return avg_latency, total_request_gbps, total_response_gbps, total_aggregate_gbps
 
 
+def clear_previous_outputs() -> None:
+    removed = 0
+    for pattern in ("run_*.out", "run_*.err"):
+        for path in OUTPUT_ROOT.glob(pattern):
+            path.unlink()
+            removed += 1
+    for path in (
+        OUTPUT_ROOT / "pointer_chase_replication_bw_latency.csv",
+        OUTPUT_ROOT / "pointer_chase_replication_bw_latency.png",
+    ):
+        if path.exists():
+            path.unlink()
+            removed += 1
+    if removed:
+        print(f"[STATUS] Cleared {removed} prior generated files from {OUTPUT_ROOT}")
+
+
 def run_config_load_sweep(trace_path: Path, config_name: str, replicate_writes: int, load_pct: int) -> int:
     target_bw = ratio_target_request_gbps(load_pct, bool(replicate_writes))
     left = target_bw * SEARCH_LEFT_FRAC
@@ -309,6 +326,7 @@ def main() -> int:
     build_generator()
     TRACE_ROOT.mkdir(parents=True, exist_ok=True)
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    clear_previous_outputs()
     trace_path = generate_trace(TRACE_ROOT)
 
     lanes = [(config_name, replicate_writes, load_pct) for config_name, replicate_writes in CONFIGS for load_pct in LOAD_PCTS]
