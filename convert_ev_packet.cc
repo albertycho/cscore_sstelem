@@ -25,6 +25,7 @@ SST::csimCore::csEvent* convert_request_to_event(const sst_request &req) {
     nev->payload.push_back(req.is_translated ? 1 : 0);
     nev->payload.push_back(req.response_requested ? 1 : 0);
     nev->payload.push_back(req.msg_bytes);
+    nev->remote_timing = req.remote_timing;
     return nev;
 }
 
@@ -52,6 +53,7 @@ sst_request convert_event_to_request(const SST::csimCore::csEvent &event) {
     req.is_translated = (event.payload[15] != 0);
     req.response_requested = (event.payload[16] != 0);
     req.msg_bytes = static_cast<uint16_t>(event.payload[17]);
+    req.remote_timing = event.remote_timing;
     return req;
 }
 
@@ -60,7 +62,7 @@ SST::csimCore::csEvent* convert_response_to_event(const sst_response &resp) {
     auto src = (resp.src_node == std::numeric_limits<uint32_t>::max()) ? resp.sst_cpu : resp.src_node;
     auto dst = (resp.dst_node == std::numeric_limits<uint32_t>::max()) ? resp.cpu : resp.dst_node;
     auto nev = new SST::csimCore::csEvent();
-    nev->payload.reserve(11);
+    nev->payload.reserve(13);
     nev->payload.push_back(src);
     nev->payload.push_back(dst);
     nev->payload.push_back(resp.address);
@@ -72,6 +74,7 @@ SST::csimCore::csEvent* convert_response_to_event(const sst_response &resp) {
     nev->payload.push_back(resp.instr_id);
     nev->payload.push_back(resp.trace_tag);
     nev->payload.push_back(resp.msg_bytes);
+    nev->remote_timing = resp.remote_timing;
     return nev;
 }
 
@@ -88,5 +91,6 @@ sst_response convert_event_to_response(const SST::csimCore::csEvent &event) {
     if (event.payload.size() > 10) {
         resp.msg_bytes = static_cast<uint16_t>(event.payload[10]);
     }
+    resp.remote_timing = event.remote_timing;
     return resp;
 }

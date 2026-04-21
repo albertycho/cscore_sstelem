@@ -27,6 +27,7 @@ bool is_write_request(const csEvent& ev) {
 csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
     auto* out = new csEvent();
     out->payload = ev.payload;
+    out->remote_timing = ev.remote_timing;
     out->last = ev.last;
     if (out->payload.size() >= 2) {
         out->payload[1] = dst;

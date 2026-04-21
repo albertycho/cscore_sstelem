@@ -17,6 +17,7 @@
 #define _CSEVENT_H
 
 #include <sst/core/event.h>
+#include "remote_access_timing.h"
 
 /*
  * Fabric packet header (payload words):
@@ -49,14 +50,25 @@ public:
     // Example data members
     //std::vector<char> payload;
     std::vector<uint64_t> payload;
+    remote_access_timing remote_timing{};
 
     bool last;
+
+    // Transient queue bookkeeping for fabric components. These are local
+    // simulation helpers and are not part of the packet ABI.
+    uint64_t timing_mark_cycle = 0;
+    uint64_t ready_enqueue_cycle = 0;
+    uint64_t egress_enqueue_cycle = 0;
 
     // Events must provide a serialization function that serializes
     // all data members of the event
     void serialize_order(SST::Core::Serialization::serializer &ser)  override {
         Event::serialize_order(ser);
         ser & payload;
+        ser & remote_timing.roundtrip_cycles;
+        ser & remote_timing.interface_cycles;
+        ser & remote_timing.queue_cycles;
+        ser & remote_timing.access_service_cycles;
         ser & last;
     }
 

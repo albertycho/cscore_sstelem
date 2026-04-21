@@ -18,6 +18,10 @@ cache_stats operator-(cache_stats lhs, cache_stats rhs)
   result.pool_accesses = lhs.pool_accesses - rhs.pool_accesses;
   result.pool_completed = lhs.pool_completed - rhs.pool_completed;
   result.pool_latency_sum = lhs.pool_latency_sum - rhs.pool_latency_sum;
+  result.cxl_demand_roundtrip_sum = lhs.cxl_demand_roundtrip_sum - rhs.cxl_demand_roundtrip_sum;
+  result.cxl_queue_delay_sum = lhs.cxl_queue_delay_sum - rhs.cxl_queue_delay_sum;
+  result.cxl_access_service_time_sum = lhs.cxl_access_service_time_sum - rhs.cxl_access_service_time_sum;
+  result.cxl_interface_delay_sum = lhs.cxl_interface_delay_sum - rhs.cxl_interface_delay_sum;
   result.pool_demand_miss_count = lhs.pool_demand_miss_count - rhs.pool_demand_miss_count;
   result.pool_demand_miss_latency_sum = lhs.pool_demand_miss_latency_sum - rhs.pool_demand_miss_latency_sum;
   for (std::size_t idx = 0; idx < result.pool_latency_hist.size(); ++idx) {

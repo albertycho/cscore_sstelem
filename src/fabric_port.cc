@@ -150,6 +150,10 @@ bool FabricPort::send(csEvent* item) {
     if (!can_enqueue(bytes)) {
         return false;
     }
+    if (item != nullptr) {
+        item->egress_enqueue_cycle =
+            (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : (last_tick_cycle_ + 1);
+    }
     egress_queue_.push_back(item);
     egress_queue_bytes_ += static_cast<int64_t>(bytes);
     return true;
@@ -174,6 +178,9 @@ bool FabricPort::try_receive_ready(uint64_t cycle,
     if (!handle(item)) {
         return false;
     }
+    if (item != nullptr && cycle >= item->ready_enqueue_cycle) {
+        item->remote_timing.queue_cycles += (cycle - item->ready_enqueue_cycle);
+    }
     ready_.pop_front();
     last_deliver_cycle_ = cycle;
     send_credit(credit_dst, credit_len);
@@ -196,6 +203,8 @@ void FabricPort::handle_event(SST::Event* ev) {
 
     if (!ingress_) {
         rx_bytes_total_ += event_bytes(cevent);
+        cevent->ready_enqueue_cycle =
+            (last_tick_cycle_ == std::numeric_limits<uint64_t>::max()) ? 0 : last_tick_cycle_;
         ready_.push_back(cevent);
         return;
     }
@@ -268,6 +277,9 @@ void FabricPort::tick_ingress() {
     }
     auto ready = ingress_->on_tick();
     for (auto& item : ready) {
+        if (item != nullptr) {
+            item->ready_enqueue_cycle = last_tick_cycle_;
+        }
         ready_.push_back(item);
     }
 }
@@ -277,6 +289,9 @@ void FabricPort::drain_egress() {
         csEvent* ev = egress_queue_.front();
         if (!try_consume_credit(egress_credits_, credit_bytes(ev))) {
             break;
+        }
+        if (ev != nullptr && last_tick_cycle_ >= ev->egress_enqueue_cycle) {
+            ev->remote_timing.queue_cycles += (last_tick_cycle_ - ev->egress_enqueue_cycle);
         }
         const uint64_t send_bytes = event_bytes(ev);
         link_->send(ev);

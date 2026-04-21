@@ -81,6 +81,8 @@ class CACHE : public champsim::operable
     uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
     champsim::chrono::clock::time_point event_cycle = champsim::chrono::clock::time_point::max();
+    champsim::chrono::clock::time_point remote_queue_wait_start = champsim::chrono::clock::time_point::max();
+    remote_access_timing remote_timing{};
 
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
@@ -111,6 +113,7 @@ public:
     champsim::chrono::clock::time_point time_enqueued;
     champsim::chrono::clock::time_point remote_issue_time = champsim::chrono::clock::time_point::max();
     bool remote_is_pool = false;
+    remote_access_timing remote_timing{};
 
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
@@ -122,7 +125,7 @@ public:
 private:
   bool try_hit(const tag_lookup_type& handle_pkt);
   bool handle_fill(const mshr_type& fill_mshr);
-  bool handle_miss(const tag_lookup_type& handle_pkt);
+  bool handle_miss(tag_lookup_type& handle_pkt);
   bool handle_write(const tag_lookup_type& handle_pkt);
   void finish_packet(const response_type& packet);
   void finish_translation(const response_type& packet);

@@ -4,6 +4,7 @@
 #include <string>
 #include <limits>
 #include <iostream>
+#include "remote_access_timing.h"
 #include "access_type.h"
 // enum class access_type : unsigned {
 //   LOAD = 0,
@@ -39,6 +40,7 @@ struct sst_request {
     uint64_t trace_tag = 0;
     uint64_t ip = 0;
     uint16_t msg_bytes = 64;
+    remote_access_timing remote_timing{};
 
 };
 
@@ -55,6 +57,7 @@ struct sst_response {
     uint64_t instr_id = 0;
     uint64_t trace_tag = 0;
     uint16_t msg_bytes = 64;
+    remote_access_timing remote_timing{};
 
     sst_response(uint64_t addr, uint64_t v_addr, uint64_t data_, uint32_t pf_meta, uint32_t cpu_n, uint32_t sst_cpu_n,
                  uint64_t instr_id_n = 0, uint64_t trace_tag_n = 0)

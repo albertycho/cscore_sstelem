@@ -27,6 +27,7 @@
 #include "access_type.h"
 #include "address.h"
 #include "champsim.h"
+#include "remote_access_timing.h"
 
 namespace champsim
 {
@@ -65,6 +66,8 @@ class channel
     champsim::address data{};
     uint64_t instr_id = 0;
     champsim::address ip{};
+    uint64_t timing_mark_cycle = 0;
+    remote_access_timing remote_timing{};
 
     std::vector<uint64_t> instr_depend_on_me{};
   };

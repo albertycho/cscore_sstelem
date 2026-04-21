@@ -19,6 +19,7 @@ namespace csimCore {
 namespace {
 constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
 constexpr int64_t kDefaultMemQueueSizeReqs = 128;
+
 int64_t resolve_mem_bw(uint64_t mem_bw, uint64_t dev_bw, uint64_t bw_cycles) {
     if (bw_cycles != 0) {
         return static_cast<int64_t>(std::max<uint64_t>(bw_cycles, 1));
@@ -190,6 +191,7 @@ bool CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
     channel_req.data = champsim::address{request.data};
     channel_req.instr_id = request.instr_id;
     channel_req.ip = champsim::address{request.ip};
+    channel_req.remote_timing = request.remote_timing;
 
     const uint64_t tag = next_tag_;
     channel_req.instr_depend_on_me.push_back(tag);
@@ -308,6 +310,10 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::request_type& res
                      route.instr_id,
                      route.trace_tag);
     out.msg_bytes = 64;
+    out.remote_timing = response.remote_timing;
+    if (tick_count_ >= response.timing_mark_cycle) {
+        out.remote_timing.queue_cycles += (tick_count_ - response.timing_mark_cycle);
+    }
     out.src_node = pool_node_id_;
     out.dst_node = route.src_node == std::numeric_limits<uint32_t>::max()
                        ? route.sst_cpu

@@ -6,6 +6,59 @@
 #include "csEvent.h"
 #include "SST_CS_packets.h"
 
+namespace {
+template <typename T>
+void annotate_enqueue_cycle(T&, int64_t) {}
+
+template <typename T>
+void annotate_service_start_cycle(T&, int64_t) {}
+
+template <typename T>
+void annotate_completion_cycle(T&, int64_t) {}
+
+void annotate_enqueue_cycle(csEvent*& ev, int64_t cycle) {
+    if (ev == nullptr) {
+        return;
+    }
+    ev->timing_mark_cycle = static_cast<uint64_t>(std::max<int64_t>(cycle + 1, 0));
+}
+
+void annotate_service_start_cycle(csEvent*& ev, int64_t cycle) {
+    if (ev == nullptr) {
+        return;
+    }
+    const auto start_cycle = static_cast<uint64_t>(std::max<int64_t>(cycle, 0));
+    if (start_cycle >= ev->timing_mark_cycle) {
+        ev->remote_timing.queue_cycles += (start_cycle - ev->timing_mark_cycle);
+    }
+    ev->timing_mark_cycle = start_cycle;
+}
+
+void annotate_completion_cycle(csEvent*&, int64_t) {}
+
+// For pool memory requests, carry queueing and service time on the request
+// itself so the completed LLC miss can consume one coherent timing record.
+void annotate_enqueue_cycle(champsim::channel::request_type& req, int64_t cycle) {
+    req.timing_mark_cycle = static_cast<uint64_t>(std::max<int64_t>(cycle + 1, 0));
+}
+
+void annotate_service_start_cycle(champsim::channel::request_type& req, int64_t cycle) {
+    const auto start_cycle = static_cast<uint64_t>(std::max<int64_t>(cycle, 0));
+    if (start_cycle >= req.timing_mark_cycle) {
+        req.remote_timing.queue_cycles += (start_cycle - req.timing_mark_cycle);
+    }
+    req.timing_mark_cycle = start_cycle;
+}
+
+void annotate_completion_cycle(champsim::channel::request_type& req, int64_t cycle) {
+    const auto completion_cycle = static_cast<uint64_t>(std::max<int64_t>(cycle, 0));
+    if (completion_cycle >= req.timing_mark_cycle) {
+        req.remote_timing.access_service_cycles += (completion_cycle - req.timing_mark_cycle);
+    }
+    req.timing_mark_cycle = completion_cycle;
+}
+} // namespace
+
 template<typename T>
 lat_bw_queue<T>::lat_bw_queue(double peak_bw_per_cycle,
                               latency_function_type&& latency_function,
@@ -48,6 +101,7 @@ void lat_bw_queue<T>::tick() {
 
 template<typename T>
 bool lat_bw_queue<T>::add_packet(T packet) {
+    annotate_enqueue_cycle(packet, internal_clock);
     auto bytes = bw_cost_fn ? bw_cost_fn(packet) : 64.0;
     bytes = std::max<double>(bytes, 1.0);
     const auto packet_bytes = static_cast<int64_t>(std::ceil(bytes));
@@ -136,6 +190,7 @@ void lat_bw_queue<T>::move_completed_to_ready() {
     while (!active_queue.empty() && active_queue.top().completion_time <= internal_clock) {
         auto ready = std::move(const_cast<entry&>(active_queue.top()));
         active_queue.pop();
+        annotate_completion_cycle(ready.payload, ready.completion_time);
         ready_queue.push_back(std::move(ready));
     }
 }
@@ -157,6 +212,7 @@ void lat_bw_queue<T>::service_bandwidth() {
 
         if (front.remaining_bytes <= 0.0) {
             const int64_t completion_latency = std::max<int64_t>(latency_function(get_utilization()), 0);
+            annotate_service_start_cycle(front.payload, internal_clock);
             active_queue.push(entry{
                 std::move(front.payload),
                 internal_clock,

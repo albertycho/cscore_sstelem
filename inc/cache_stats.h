@@ -32,6 +32,10 @@ struct cache_stats {
   uint64_t pool_accesses = 0;
   uint64_t pool_completed = 0;
   uint64_t pool_latency_sum = 0;
+  uint64_t cxl_demand_roundtrip_sum = 0;
+  uint64_t cxl_queue_delay_sum = 0;
+  uint64_t cxl_access_service_time_sum = 0;
+  uint64_t cxl_interface_delay_sum = 0;
   uint64_t pool_demand_miss_count = 0;
   uint64_t pool_demand_miss_latency_sum = 0;
   std::array<uint64_t, POOL_LAT_HIST_BINS> pool_latency_hist{};
