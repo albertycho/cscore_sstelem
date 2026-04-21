@@ -55,6 +55,8 @@ Example (map one 4 KiB VA page to pool 100):
 - `pool_select_policy` (`fixed0` or `round_robin`)
 - `link_bw_cycles`, `link_latency_cycles`, `link_queue_size` (switch link model)
 
+Switch ingress arbitration is head-driven rather than "first fit." For both node-facing and pool-facing ingress directions, each cycle the switch scans from a rotating pointer, stops at the first ready head, and either routes that request or holds the turn if its downstream path is blocked. This avoids a later ingress bypassing an earlier blocked head just because its message is smaller or happens to fit first.
+
 `cscore.CXLMemoryPool`:
 - `pool_node_id` (must match AddressMap `target`)
 - `pool_bw_cycles_per_req` (cycles per 64B request; optional)

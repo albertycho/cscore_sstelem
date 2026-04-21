@@ -85,7 +85,6 @@ private:
     void poll_ports(uint64_t cycle);
     // Average utilization plus total occupancy for request ingress links.
     LinkStats request_link_stats() const;
-    void reset_stats();
     void for_each_port(const std::function<void(FabricPort&)>& fn);
     void for_each_port(const std::function<void(const FabricPort&)>& fn) const;
     FabricPort* select_egress_port(uint32_t sst_cpu);

@@ -98,6 +98,7 @@ def plot_bw_latency(rows: list[dict[str, object]], out_png: Path) -> None:
     ax.set_xlabel("Aggregate Bandwidth (Gbps)")
     ax.set_ylabel("Memory Access Latency (cycles)")
     ax.set_title("Single-Node Pointer-Chase Bandwidth-Latency Curves")
+    ax.set_ylim(0, 1500)
     ax.grid(True, alpha=0.3)
     cbar = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax)
     cbar.set_label("Load %")

@@ -44,17 +44,3 @@ Outputs:
 
 - `experiments/pointer_chase_replication/logs/pointer_chase_replication_bw_latency.csv`
 - `experiments/pointer_chase_replication/logs/pointer_chase_replication_bw_latency.png`
-
-Additional experiment entry points:
-
-- `python3 experiments/pointer_chase_replication/run_cdf_points.py`
-  Runs fixed operating points for CDF plots. Override cases with
-  `CDF_CASES="no_rep,80,1.90;rep2,80,4.15"`.
-- `python3 experiments/pointer_chase_replication/plot_latency_cdf.py`
-  Plots CDFs from `experiments/pointer_chase_replication/logs_cdf`.
-- `python3 experiments/pointer_chase_replication/run_node_scaling.py`
-  Runs node-count scaling at a topology-aware operating point. By default, each
-  topology uses `OPERATING_POINT_FRAC=0.85` of its theoretical per-node request
-  bandwidth target; override with
-  `NODE_COUNTS="1,2,4,8,16" CONFIGS="no_rep,rep2" LOAD_PCT=80 OPERATING_POINT_FRAC=0.85`
-  or force a manual value with `INJECT_BANDWIDTH_GBPS=...`.

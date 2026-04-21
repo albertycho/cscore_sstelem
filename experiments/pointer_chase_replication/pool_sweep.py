@@ -73,6 +73,7 @@ for i in range(NUM_NODES):
     sock = sst.Component(f"s{i}", "cscore.csimCore")
     sock.addParams({
         "node_id": i,
+        "num_nodes": NUM_NODES,
         "trace_name": TRACE_PATH,
         "address_map_config": CXL_CONFIG_PATH,
         "dram_size_bytes": DRAM_SIZE_BYTES,

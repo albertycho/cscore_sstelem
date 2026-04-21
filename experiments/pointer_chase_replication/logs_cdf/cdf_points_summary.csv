@@ -1,3 +1,0 @@
-config,num_nodes,load_pct,requested_request_gbps_per_node,aggregate_bw_gbps,latency_cycles,log_path
-no_rep,8,80,1.9,55.733610000000006,1143.5149999999999,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_cdf/run_cdf_no_rep_load080_bw01p90.out
-rep2,8,80,4.15,121.73150000000001,1008.96,/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem/experiments/pointer_chase_replication/logs_cdf/run_cdf_rep2_load080_bw04p15.out

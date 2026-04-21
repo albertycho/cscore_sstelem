@@ -46,3 +46,6 @@ Outputs:
 
 - `experiments/replica_count/logs/replica_sweep_bw_latency.csv`
 - `experiments/replica_count/logs/replica_sweep_bw_latency.png`
+- `experiments/replica_count/logs/replica_sweep_bw_latency_selected_loads.png`
+- `experiments/replica_count/logs/replica_sweep_elbow_summary.csv`
+- `experiments/replica_count/logs/replica_sweep_elbow_heatmap.png`

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <deque>
 #include <vector>
 #include <chrono>
 
@@ -18,7 +17,16 @@ namespace csimCore {
 
 /**
  * Switch is a multi-port router.
- * For now, all pool-bound traffic is forwarded to pool 0.
+ *
+ * Each cycle, the switch advances all ports and then arbitrates both ingress
+ * directions using the same rotating-pointer policy. The arbiter scans an
+ * ingress side until it finds the first ready head entry; if that request can
+ * be admitted downstream, it is routed and the pointer advances to the
+ * following ingress, otherwise the turn is held and retried next cycle. This
+ * preserves head-of-line ordering across ingresses instead of letting smaller
+ * later packets bypass an earlier blocked head. For replicated writes, all
+ * pool egress ports must be able to accept the write in the same arbitration
+ * step.
  */
 class Switch : public SST::Component {
 public:
@@ -66,12 +74,12 @@ private:
     void handle_event(SST::Event* ev);
     void finish() override;
     bool clock_tick(SST::Cycle_t cycle);
-    void reset_stats_and_broadcast();
+    bool service_next_input(std::vector<FabricPort>& ingress_ports,
+                            std::size_t& rr_ingress_idx,
+                            uint64_t cycle);
     bool try_route_event(csEvent* ev);
-    bool try_accept_node_event(csEvent* ev);
-    bool try_enqueue_request(csEvent* ev);
-    bool service_request_fifo();
-    std::size_t pick_pool_index(const csEvent* probe);
+    bool can_replicate_to_all_pools(const csEvent* ev) const;
+    bool try_send_to_any_pool(csEvent* ev);
 
     int num_nodes_ = 0;
     int num_pools_ = 0;
@@ -87,12 +95,9 @@ private:
     int64_t link_latency_cycles_ = 0;
     int64_t link_egress_buffer_size_ = 0;
     int64_t link_credit_window_size_ = 0;
-    int64_t request_fifo_max_bytes_ = 0;
-    int64_t request_fifo_bytes_ = 0;
     bool lightweight_output_ = false;
     std::vector<FabricPort> node_ports_;
     std::vector<FabricPort> pool_ports_;
-    std::deque<csEvent*> request_fifo_;
     uint64_t replicated_count_ = 0;
     uint64_t tick_count_ = 0;
     uint64_t last_cycle_ = 0;

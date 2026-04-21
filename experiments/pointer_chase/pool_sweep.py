@@ -46,6 +46,7 @@ pool.addParams({
 sock = sst.Component("s0", "cscore.csimCore")
 sock.addParams({
     "node_id": 0,
+    "num_nodes": 1,
     "trace_name": TRACE_PATH,
     "address_map_config": CXL_CONFIG_PATH,
     "dram_size_bytes": DRAM_SIZE_BYTES,

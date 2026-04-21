@@ -1,13 +1,13 @@
 #include "traffic_injector.h"
 
 #include <algorithm>
+#include <numeric>
 
 namespace SST {
 namespace csimCore {
 
 namespace {
 constexpr uint64_t kStartDelayStepCycles = 3;
-constexpr uint64_t kStartDelaySlots[] = {3, 0, 6, 1, 7, 4, 2, 5};
 
 double request_rate_per_cycle(double bytes_per_cycle, uint64_t load_pct)
 {
@@ -18,11 +18,28 @@ double request_rate_per_cycle(double bytes_per_cycle, uint64_t load_pct)
     }
     return bytes_per_cycle / avg_request_bytes;
 }
+
+uint64_t start_delay_slot(uint32_t node_id, uint32_t num_nodes)
+{
+    const uint64_t count = std::max<uint64_t>(num_nodes, 1);
+    if (count == 1) {
+        return 0;
+    }
+
+    // Use a simple multiplicative permutation so each node gets a unique slot
+    // across the configured node count instead of repeating every 8 nodes.
+    uint64_t stride = (count / 2) + 1;
+    while (std::gcd(stride, count) != 1) {
+        ++stride;
+    }
+    return (static_cast<uint64_t>(node_id) * stride) % count;
+}
 }
 
 void TrafficInjector::configure(double bytes_per_cycle,
                                 uint64_t load_pct,
                                 uint32_t node_id,
+                                uint32_t num_nodes,
                                 uint32_t dst_node,
                                 uint64_t addr_base,
                                 uint64_t addr_size)
@@ -39,9 +56,7 @@ void TrafficInjector::configure(double bytes_per_cycle,
     dst_node_ = dst_node;
     addr_base_ = addr_base;
     addr_size_ = addr_size;
-    start_delay_cycles_ =
-        kStartDelaySlots[static_cast<std::size_t>(node_id_) % std::size(kStartDelaySlots)] *
-        kStartDelayStepCycles;
+    start_delay_cycles_ = start_delay_slot(node_id_, num_nodes) * kStartDelayStepCycles;
     next_addr_ = addr_base_;
     reset_stats();
 }

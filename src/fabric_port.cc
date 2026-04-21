@@ -11,10 +11,17 @@ namespace csimCore {
 namespace {
 constexpr uint64_t kDefaultMsgBytes = 64;
 constexpr int64_t kInfiniteCredits = std::numeric_limits<int64_t>::max() / 4;
+constexpr uint64_t kControlBroadcast = std::numeric_limits<uint64_t>::max();
 constexpr uint64_t kControlCredit = 2;
 
-bool is_reset_control_event(const csEvent* ev) {
-    return ev && ev->payload.size() >= 3 && ev->payload[2] == kControlResetUtil;
+bool is_credit_event(const csEvent* ev, uint64_t* bytes_out = nullptr) {
+    if (!(ev && ev->payload.size() == 4 && ev->payload[2] == kControlCredit)) {
+        return false;
+    }
+    if (bytes_out) {
+        *bytes_out = ev->payload[3];
+    }
+    return true;
 }
 
 uint64_t msg_bytes(const csEvent& ev) {
@@ -38,7 +45,7 @@ uint64_t event_bytes(const csEvent* ev) {
 }
 
 uint64_t credit_bytes(const csEvent* ev) {
-    if (ev && ::SST::csimCore::is_control_event(*ev)) {
+    if (is_credit_event(ev)) {
         return 0;
     }
     return event_bytes(ev);
@@ -90,10 +97,6 @@ csEvent* make_credit_event(uint64_t src, uint64_t dst, uint64_t bytes) {
 }
 } // namespace
 
-csEvent* make_reset_util_event(uint64_t src, uint64_t dst) {
-    return ::SST::csimCore::make_control_event(src, dst, kControlResetUtil);
-}
-
 FabricPort::FabricPort()
     : egress_credits_(kInfiniteCredits),
       egress_credit_cap_(kInfiniteCredits) {}
@@ -143,22 +146,13 @@ void FabricPort::configure(SST::Link* link,
 }
 
 bool FabricPort::send(csEvent* item) {
-    if (is_reset_control_event(item)) {
-        // Reset control events must never be backpressured.
-        link_->send(item);
-        return true;
-    }
     const uint64_t bytes = event_bytes(item);
-    if (!can_send(bytes)) {
+    if (!can_enqueue(bytes)) {
         return false;
     }
     egress_queue_.push_back(item);
     egress_queue_bytes_ += static_cast<int64_t>(bytes);
     return true;
-}
-
-void FabricPort::tick(uint64_t cycle) {
-    advance(cycle);
 }
 
 void FabricPort::advance(uint64_t cycle) {
@@ -167,12 +161,6 @@ void FabricPort::advance(uint64_t cycle) {
         tick_ingress();
         drain_egress();
     }
-}
-
-bool FabricPort::try_receive(uint64_t cycle,
-                             const std::function<bool(csEvent*)>& handle) {
-    advance(cycle);
-    return try_receive_ready(cycle, handle);
 }
 
 bool FabricPort::try_receive_ready(uint64_t cycle,
@@ -199,20 +187,11 @@ void FabricPort::handle_event(SST::Event* ev) {
         return;
     }
 
-    if (cevent->payload.size() == 3 || cevent->payload.size() == 4) {
-        const uint64_t ctrl_code = cevent->payload[2];
-        if (ctrl_code == kControlCredit) {
-            const uint64_t ctrl_value = (cevent->payload.size() > 3) ? cevent->payload[3] : 0;
-            add_credit(egress_credits_, egress_credit_cap_, ctrl_value);
-            delete cevent;
-            return;
-        }
-        if (ctrl_code == kControlResetUtil) {
-            reset_ingress_utilization();
-            // Reset controls are out-of-band: do not let data backlog delay phase reset propagation.
-            ready_.push_front(cevent);
-            return;
-        }
+    uint64_t credit_value = 0;
+    if (is_credit_event(cevent, &credit_value)) {
+        add_credit(egress_credits_, egress_credit_cap_, credit_value);
+        delete cevent;
+        return;
     }
 
     if (!ingress_) {
@@ -227,17 +206,7 @@ void FabricPort::handle_event(SST::Event* ev) {
     }
 }
 
-void FabricPort::reset_ingress_utilization() {
-    if (ingress_) {
-        ingress_->reset_utilization();
-    }
-}
-
-bool FabricPort::can_send() const {
-    return can_send(kDefaultMsgBytes);
-}
-
-bool FabricPort::can_send(uint64_t bytes) const {
+bool FabricPort::can_enqueue(uint64_t bytes) const {
     const uint64_t bounded_bytes = std::max<uint64_t>(bytes, 1);
     if (egress_queue_max_bytes_ <= 0) {
         return true;
@@ -245,11 +214,11 @@ bool FabricPort::can_send(uint64_t bytes) const {
     return !egress_queue_full(bounded_bytes);
 }
 
-bool FabricPort::can_send(const csEvent* item) const {
+bool FabricPort::can_enqueue(const csEvent* item) const {
     if (!item) {
-        return can_send();
+        return can_enqueue(kDefaultMsgBytes);
     }
-    return can_send(event_bytes(item));
+    return can_enqueue(event_bytes(item));
 }
 
 double FabricPort::ingress_avg_utilization() const {

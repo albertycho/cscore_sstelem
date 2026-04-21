@@ -28,7 +28,6 @@
 #include "trace_instruction.h"
 #include "bimodal/bimodal.h"
 #include "prefetcher/no/no.h"
-#include "control_event.h"
 
 namespace {
 constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
@@ -130,7 +129,6 @@ namespace SST {
             }
             cache_heartbeat_period = params.find<uint64_t>("cache_heartbeat_period", 1000);
             cpu_heartbeat_period = params.find<uint64_t>("cpu_heartbeat_period", 0);
-            util_heartbeat_period = params.find<uint64_t>("util_heartbeat_period", 0);
             cxl_link_bw_cycles_ = params.find<int64_t>("cxl_link_bw_cycles", 0);
             cxl_link_latency_cycles_ = params.find<int64_t>("cxl_link_latency_cycles", 0);
             cxl_link_queue_size_ = params.find<int64_t>("cxl_link_queue_size", 0);
@@ -437,6 +435,7 @@ namespace SST {
 			}
             if (inject_enable) {
                 const double clock_ghz = parse_clock_ghz(clock_frequency_str);
+                const uint32_t num_nodes = std::max<uint32_t>(params.find<uint32_t>("num_nodes", 1), 1);
                 if (clock_ghz <= 0.0) {
                     throw std::runtime_error("csimCore: inject_enable requires a parseable clock frequency.");
                 }
@@ -450,6 +449,7 @@ namespace SST {
                 injector_.configure(inject_bandwidth_gbps / (8.0 * clock_ghz),
                                     inject_load_pct,
                                     static_cast<uint32_t>(node_id),
+                                    num_nodes,
                                     inject_entry->target,
                                     inject_entry->start,
                                     inject_entry->size);
@@ -494,8 +494,8 @@ namespace SST {
                 }
                 warmup_bypass_responses_.pop_front();
             }
-            remote_port_.tick(cycle_u);
-            remote_port_.try_receive(cycle_u, [this](csEvent* ev) {
+            remote_port_.advance(cycle_u);
+            remote_port_.try_receive_ready(cycle_u, [this](csEvent* ev) {
                 return handle_remote_event(ev);
             });
 			
@@ -769,11 +769,6 @@ namespace SST {
 
         bool csimCore::handle_remote_event(csEvent* ev)
         {
-            uint64_t ctrl_code = 0;
-            if (is_control_event(*ev, &ctrl_code)) {
-                delete ev;
-                return true;
-            }
             auto resp = convert_event_to_response(*ev);
             if (injector_.owns_response(resp)) {
                 injector_.note_response(resp);

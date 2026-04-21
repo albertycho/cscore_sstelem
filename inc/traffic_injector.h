@@ -16,6 +16,7 @@ public:
     void configure(double bytes_per_cycle,
                    uint64_t load_pct,
                    uint32_t node_id,
+                   uint32_t num_nodes,
                    uint32_t dst_node,
                    uint64_t addr_base,
                    uint64_t addr_size);

@@ -7,7 +7,6 @@
 #include <string>
 
 #include "access_type.h"
-#include "control_event.h"
 
 namespace SST {
 namespace csimCore {
@@ -23,20 +22,6 @@ bool is_write_request(const csEvent& ev) {
     }
     const auto type = static_cast<access_type>(ev.payload[10]);
     return type == access_type::WRITE;
-}
-
-bool is_reset_event(const csEvent& ev) {
-    return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == kControlResetUtil;
-}
-
-uint64_t event_bytes(const csEvent& ev) {
-    if (ev.payload.size() > 17) {
-        return std::max<uint64_t>(ev.payload[17], 1);
-    }
-    if (ev.payload.size() > 10) {
-        return std::max<uint64_t>(ev.payload[10], 1);
-    }
-    return 64;
 }
 
 csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
@@ -104,7 +89,6 @@ Switch::Switch(SST::ComponentId_t id, SST::Params& params)
     const int64_t legacy_link_queue_size = params.find<int64_t>("link_queue_size", 0);
     link_egress_buffer_size_ = params.find<int64_t>("link_egress_buffer_size", legacy_link_queue_size);
     link_credit_window_size_ = params.find<int64_t>("link_credit_window_size", legacy_link_queue_size);
-    request_fifo_max_bytes_ = link_credit_window_size_;
     lightweight_output_ = params.find<int>("lightweight_output", 0) != 0;
 
     if (num_nodes_ <= 0) {
@@ -160,9 +144,9 @@ void Switch::setup() {
     active_calls_ = 0;
     tick_count_ = 0;
     last_cycle_ = 0;
+    rr_pool_idx_ = 0;
     rr_node_input_idx_ = 0;
     rr_pool_input_idx_ = 0;
-    request_fifo_bytes_ = 0;
 }
 
 bool Switch::clock_tick(SST::Cycle_t cycle)
@@ -177,26 +161,41 @@ bool Switch::clock_tick(SST::Cycle_t cycle)
     for (auto& port : pool_ports_) {
         port.advance(cycle_u);
     }
-    for (std::size_t offset = 0; offset < node_ports_.size(); ++offset) {
-        const std::size_t idx = (rr_node_input_idx_ + offset) % node_ports_.size();
-        node_ports_[idx].try_receive_ready(cycle_u, [this](csEvent* ev) {
-            return try_accept_node_event(ev);
+    service_next_input(node_ports_, rr_node_input_idx_, cycle_u);
+    service_next_input(pool_ports_, rr_pool_input_idx_, cycle_u);
+    return false;
+}
+
+bool Switch::service_next_input(std::vector<FabricPort>& ingress_ports,
+                                std::size_t& rr_ingress_idx,
+                                uint64_t cycle)
+{
+    if (ingress_ports.empty()) {
+        return false;
+    }
+
+    const std::size_t total = ingress_ports.size();
+    for (std::size_t offset = 0; offset < total; ++offset) {
+        const std::size_t idx = (rr_ingress_idx + offset) % total;
+        bool saw_ready = false;
+        bool granted = false;
+        ingress_ports[idx].try_receive_ready(cycle, [this, idx, total, &rr_ingress_idx, &saw_ready, &granted](csEvent* ev) {
+            saw_ready = true;
+            // Arbitration is on the first ready head, not the first admissible
+            // head. If that ingress is blocked downstream, hold the turn and
+            // retry from the same ingress next cycle.
+            if (!try_route_event(ev)) {
+                return false;
+            }
+            rr_ingress_idx = (idx + 1) % total;
+            granted = true;
+            return true;
         });
+        if (saw_ready) {
+            return granted;
+        }
     }
-    if (!node_ports_.empty()) {
-        rr_node_input_idx_ = (rr_node_input_idx_ + 1) % node_ports_.size();
-    }
-    for (std::size_t offset = 0; offset < pool_ports_.size(); ++offset) {
-        const std::size_t idx = (rr_pool_input_idx_ + offset) % pool_ports_.size();
-        pool_ports_[idx].try_receive_ready(cycle_u, [this](csEvent* ev) {
-            return try_route_event(ev);
-        });
-    }
-    if (!pool_ports_.empty()) {
-        rr_pool_input_idx_ = (rr_pool_input_idx_ + 1) % pool_ports_.size();
-    }
-    while (service_request_fifo()) {
-    }
+
     return false;
 }
 
@@ -241,28 +240,33 @@ bool Switch::try_route_event(csEvent* ev)
     if (ev->payload.size() < 2) {
         throw std::runtime_error("Switch: received malformed csEvent (payload size < 2).");
     }
-    if (is_reset_event(*ev)) {
-        reset_stats_and_broadcast();
-        delete ev;
-        return true;
-    }
     const uint64_t dst = ev->payload[1];
     if (dst < static_cast<uint64_t>(num_nodes_)) {
         const auto idx = static_cast<size_t>(dst);
         if (idx >= node_ports_.size()) {
             throw std::runtime_error("Switch: dst node id out of range for configured ports.");
         }
-        if (!node_ports_[idx].can_send(ev)) {
-            return false;
-        }
-        if (!node_ports_[idx].send(ev)) {
-            delete ev;
-        }
-        return true;
+        return node_ports_[idx].send(ev);
     }
 
     if (dst >= pool_node_id_base_) {
-        return try_enqueue_request(ev);
+        if (replicate_writes_ && is_write_request(*ev)) {
+            if (!can_replicate_to_all_pools(ev)) {
+                return false;
+            }
+            for (int p = 0; p < num_pools_; ++p) {
+                const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
+                auto* clone = clone_event_with_dst(*ev, pool_dst);
+                replicated_count_++;
+                if (!pool_ports_[static_cast<size_t>(p)].send(clone)) {
+                    delete clone;
+                    throw std::runtime_error("Switch: replicated write preflight passed but send failed.");
+                }
+            }
+            delete ev;
+            return true;
+        }
+        return try_send_to_any_pool(ev);
     }
 
     const std::string msg =
@@ -274,131 +278,45 @@ bool Switch::try_route_event(csEvent* ev)
     throw std::runtime_error(msg);
 }
 
-bool Switch::try_accept_node_event(csEvent* ev)
+bool Switch::can_replicate_to_all_pools(const csEvent* ev) const
 {
-    if (!ev) {
-        throw std::runtime_error("Switch: null event in try_accept_node_event.");
+    for (const auto& pool : pool_ports_) {
+        if (!pool.can_enqueue(ev)) {
+            return false;
+        }
     }
-    if (ev->payload.size() < 2) {
-        throw std::runtime_error("Switch: received malformed csEvent (payload size < 2).");
-    }
-    if (is_reset_event(*ev)) {
-        return try_route_event(ev);
-    }
-    const uint64_t dst = ev->payload[1];
-    if (dst >= pool_node_id_base_) {
-        return try_enqueue_request(ev);
-    }
-    return try_route_event(ev);
-}
-
-bool Switch::try_enqueue_request(csEvent* ev)
-{
-    if (!ev) {
-        throw std::runtime_error("Switch: null event in try_enqueue_request.");
-    }
-    const uint64_t bytes = event_bytes(*ev);
-    if (request_fifo_max_bytes_ > 0 &&
-        request_fifo_bytes_ + static_cast<int64_t>(bytes) > request_fifo_max_bytes_) {
-        return false;
-    }
-    request_fifo_.push_back(ev);
-    request_fifo_bytes_ += static_cast<int64_t>(bytes);
     return true;
 }
 
-bool Switch::service_request_fifo()
+bool Switch::try_send_to_any_pool(csEvent* ev)
 {
-    if (request_fifo_.empty()) {
+    if (pool_ports_.empty()) {
         return false;
     }
 
-    csEvent* ev = request_fifo_.front();
-    if (!ev) {
-        throw std::runtime_error("Switch: null request FIFO entry.");
-    }
-    if (ev->payload.size() < 2) {
-        throw std::runtime_error("Switch: malformed request FIFO entry.");
-    }
-
-    const uint64_t dst = ev->payload[1];
-    const uint64_t bytes = event_bytes(*ev);
-    if (dst < pool_node_id_base_) {
-        throw std::runtime_error("Switch: non-pool event entered request FIFO.");
-    }
-
-    if (replicate_writes_ && is_write_request(*ev)) {
-        for (const auto& pool : pool_ports_) {
-            if (!pool.can_send(ev)) {
-                return false;
-            }
+    const uint64_t original_dst = ev->payload[1];
+    if (pool_select_policy_ == PoolSelectPolicy::Fixed0) {
+        ev->payload[1] = pool_node_id_base_;
+        if (!pool_ports_[0].send(ev)) {
+            ev->payload[1] = original_dst;
+            return false;
         }
-        for (int p = 0; p < num_pools_; ++p) {
-            const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
-            auto* clone = clone_event_with_dst(*ev, pool_dst);
-            replicated_count_++;
-            if (!pool_ports_[static_cast<size_t>(p)].send(clone)) {
-                delete clone;
-            }
-        }
-        request_fifo_.pop_front();
-        request_fifo_bytes_ = std::max<int64_t>(request_fifo_bytes_ - static_cast<int64_t>(bytes), 0);
-        delete ev;
         return true;
     }
 
-    std::size_t pick = pick_pool_index(ev);
-    if (pick >= pool_ports_.size()) {
-        return false;
-    }
-    if (!pool_ports_[pick].can_send(ev)) {
-        return false;
-    }
-    ev->payload[1] = pool_node_id_base_ + pick;
-    if (!pool_ports_[pick].send(ev)) {
-        delete ev;
-    }
-    request_fifo_.pop_front();
-    request_fifo_bytes_ = std::max<int64_t>(request_fifo_bytes_ - static_cast<int64_t>(bytes), 0);
-    return true;
-}
-
-std::size_t Switch::pick_pool_index(const csEvent* probe)
-{
-    if (pool_ports_.empty()) {
-        return pool_ports_.size();
-    }
-    if (pool_select_policy_ == PoolSelectPolicy::Fixed0) {
-        return 0;
-    }
     const std::size_t total = pool_ports_.size();
     for (std::size_t offset = 0; offset < total; ++offset) {
         const std::size_t idx = (rr_pool_idx_ + offset) % total;
-        const auto& port = pool_ports_[idx];
-        if (!port.can_send(probe)) {
+        ev->payload[1] = pool_node_id_base_ + idx;
+        if (!pool_ports_[idx].send(ev)) {
             continue;
         }
         rr_pool_idx_ = (idx + 1) % total;
-        return idx;
+        return true;
     }
-    return total;
-}
 
-void Switch::reset_stats_and_broadcast()
-{
-    for (auto& port : node_ports_) {
-        port.reset_ingress_utilization();
-    }
-    for (auto& port : pool_ports_) {
-        port.reset_ingress_utilization();
-    }
-    for (int p = 0; p < num_pools_; ++p) {
-        const uint64_t pool_dst = pool_node_id_base_ + static_cast<uint64_t>(p);
-        auto* clone = make_reset_util_event(kControlBroadcast, pool_dst);
-        if (!pool_ports_[static_cast<std::size_t>(p)].send(clone)) {
-            delete clone;
-        }
-    }
+    ev->payload[1] = original_dst;
+    return false;
 }
 
 void Switch::finish()

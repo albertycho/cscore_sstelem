@@ -61,10 +61,8 @@ libcscore_la_SOURCES = \
     inc/champsim.h \
     inc/channel.h \
     inc/chrono.h \
-    inc/control_event.h \
     inc/core_builder.h \
     inc/core_stats.h \
-    inc/cxl_request_buffer.h \
     inc/deadlock.h \
     inc/defaults.hpp \
     inc/traffic_injector.h \
@@ -143,7 +141,6 @@ libcscore_la_SOURCES = \
     src/channel.cc \
     src/chrono.cc \
     src/core_stats.cc \
-    src/cxl_request_buffer.cc \
     src/traffic_injector.cc \
     src/dram_controller.cc \
     src/dram_stats.cc \

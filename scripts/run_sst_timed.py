@@ -7,8 +7,8 @@ import time
 # User configuration
 # -----------------------------
 # Example:
-# CMD = ["mpirun", "-n", "4", "sst", "experiments/replication/pool.py"]
-CMD = ["sst", "experiments/replication/pool.py"]
+# CMD = ["mpirun", "-n", "4", "sst", "experiments/replication/pool_with_replication_mpi.py"]
+CMD = ["sst", "experiments/replication/pool_with_replication_mpi.py"]
 WORKDIR = None  # e.g., "/nethome/kshan9/scratch/src/sst-elements/src/sst/elements/cscore_sstelem"
 
 

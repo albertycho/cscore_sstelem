@@ -70,10 +70,8 @@ namespace SST {
     
         SST_ELI_DOCUMENT_PARAMS(
             { "clock", "Clock frequency", "2.4GHz" },
-            { "clockcount", "Number of clock ticks to execute", "100000" },
             { "trace_name", "Path to input trace file", ""},
-            { "cxl_config", "Deprecated (unused): pool routing is controlled by address_map_config", "" },
-            { "cxl_outstanding_limit", "Deprecated (unused): pool backpressure is modeled by link queues", "32" },
+            { "num_nodes", "Number of simulated nodes; used for deterministic injector startup staggering", "1" },
             { "address_map_config", "Path to CSV mapping address ranges to socket/pool (node_id,start,size,type,target; node_id matches component node_id)", "" },
             { "dram_size_bytes", "Physical DRAM size for VA->PA mapping (must be > 1 MiB)", "1073741824" },
             { "dram_bw_cycles_per_req", "Local DRAM bandwidth in cycles per request (overrides dram_bandwidth_bytes_per_cycle if nonzero)", "0" },
@@ -83,7 +81,6 @@ namespace SST {
             { "pool_pa_base", "Base PA for pool mapping in VMEM (0 means use dram_size_bytes)", "0" },
             { "cache_heartbeat_period", "Cycles between cache stats prints (0 disables)", "1000" },
             { "cpu_heartbeat_period", "Cycles between CPU retired-instruction prints (0 disables)", "0" },
-            { "util_heartbeat_period", "Cycles between utilization logs (0 disables)", "0" },
             { "cxl_link_bw_cycles", "CXL ingress bandwidth in cycles per 64B (core-side FabricPort; 0 disables ingress bandwidth shaping)", "0" },
             { "cxl_link_latency_cycles", "CXL ingress base latency in cycles (core-side FabricPort; 0 disables ingress latency shaping; when both bw+lat are 0, ingress queue is bypassed)", "0" },
             { "cxl_link_queue_size", "CXL link queue capacity in bytes (0 = unbounded)", "0" },
@@ -167,7 +164,6 @@ namespace SST {
         uint64_t heartbeat_count=0;
         uint64_t cache_heartbeat_period=1000;
         uint64_t cpu_heartbeat_period=0;
-        uint64_t util_heartbeat_period=0;
         uint64_t pool_pa_base=0;
         uint64_t warmup_insts=0;
         uint64_t sim_insts=0;

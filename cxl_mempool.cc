@@ -11,7 +11,6 @@
 
 #include "chrono.h"
 #include "champsim.h"
-#include "control_event.h"
 #include "convert_ev_packet.h"
 
 namespace SST {
@@ -20,9 +19,6 @@ namespace csimCore {
 namespace {
 constexpr uint64_t kClockPeriodPs = 417; // ~2.4 GHz
 constexpr int64_t kDefaultMemQueueSizeReqs = 128;
-bool is_reset_event(const csEvent& ev) {
-    return (ev.payload.size() == 3 || ev.payload.size() == 4) && ev.payload[2] == kControlResetUtil;
-}
 int64_t resolve_mem_bw(uint64_t mem_bw, uint64_t dev_bw, uint64_t bw_cycles) {
     if (bw_cycles != 0) {
         return static_cast<int64_t>(std::max<uint64_t>(bw_cycles, 1));
@@ -217,11 +213,6 @@ bool CXLMemoryPool::enqueue_mem_request(const sst_request& request) {
 
 void CXLMemoryPool::poll_ports(uint64_t cycle) {
     auto handle_event = [this](csEvent* ev) {
-        if (is_reset_event(*ev)) {
-            reset_stats();
-            delete ev;
-            return true;
-        }
         sst_request req = convert_event_to_request(*ev);
         if (!enqueue_mem_request(req)) {
             return false;
@@ -260,11 +251,6 @@ CXLMemoryPool::LinkStats CXLMemoryPool::request_link_stats() const {
         stats.avg_util = avg_sum / static_cast<double>(count);
     }
     return stats;
-}
-
-void CXLMemoryPool::reset_stats() {
-    mem_ctrl_.reset_utilization();
-    for_each_port([](FabricPort& port) { port.reset_ingress_utilization(); });
 }
 
 void CXLMemoryPool::for_each_port(const std::function<void(FabricPort&)>& fn) {
@@ -311,9 +297,6 @@ bool CXLMemoryPool::try_send_response(const champsim::channel::request_type& res
     if (!target_port) {
         pending_.erase(pending_it);
         return true;
-    }
-    if (!target_port->can_send(64)) {
-        return false;
     }
 
     sst_response out(response.address.to<uint64_t>(),
