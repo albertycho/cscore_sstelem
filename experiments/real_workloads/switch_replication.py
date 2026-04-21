@@ -27,8 +27,8 @@ CXL_CONFIG_PATH = os.environ.get("CXL_CONFIG_PATH", str(THIS_DIR / "all_to_pool_
 
 LIGHTWEIGHT_OUTPUT = int(os.environ.get("LIGHTWEIGHT_OUTPUT", "1"))
 PRINT_LAT_HIST = int(os.environ.get("PRINT_LAT_HIST", "0"))
-WARMUP_INSTS = int(os.environ.get("WARMUP_INSTS", "5000000"))
-SIM_INSTS = int(os.environ.get("SIM_INSTS", "20000000"))
+WARMUP_INSTS = int(os.environ.get("WARMUP_INSTS", "500000"))
+SIM_INSTS = int(os.environ.get("SIM_INSTS", "2000000"))
 
 switch = sst.Component("switch0", "cscore.Switch")
 switch.addParams({
@@ -70,7 +70,7 @@ sock.addParams({
     "dram_latency_model": "utilization-based",
     "pool_pa_base": POOL_PA_BASE,
     "cache_heartbeat_period": 0,
-    "cpu_heartbeat_period": 100_000,
+    "cpu_heartbeat_period": 1_000_000,
     "clock": "2.4GHz",
     "warmup_insts": WARMUP_INSTS,
     "warm_cache_insts": 0,
