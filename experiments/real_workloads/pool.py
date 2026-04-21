@@ -50,7 +50,7 @@ sock.addParams({
     "dram_latency_model": "utilization-based",
     "pool_pa_base": POOL_PA_BASE,
     "cache_heartbeat_period": 0,
-    "cpu_heartbeat_period": 100_000,
+    "cpu_heartbeat_period": 1_000_000,
     "clock": "2.4GHz",
     "warmup_insts": WARMUP_INSTS,
     "warm_cache_insts": 0,
