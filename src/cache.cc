@@ -338,8 +338,6 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
       // Consume the per-request remote timing at fill so the breakdown matches
       // the same completed remote-demand population as the LLC CXL miss stats.
       sim_stats.cxl_demand_roundtrip_sum += fill_mshr.remote_timing.roundtrip_cycles;
-      sim_stats.cxl_onchip_delay_sum +=
-          saturating_sub_u64(static_cast<uint64_t>(miss_lat_cycles), fill_mshr.remote_timing.roundtrip_cycles);
       sim_stats.cxl_queue_delay_sum += fill_mshr.remote_timing.queue_cycles;
       sim_stats.cxl_access_service_time_sum += fill_mshr.remote_timing.access_service_cycles;
       sim_stats.cxl_interface_delay_sum += fill_mshr.remote_timing.interface_cycles;
@@ -1088,7 +1086,6 @@ void CACHE::end_phase(unsigned /*finished_cpu*/)
   roi_stats.pool_completed = sim_stats.pool_completed;
   roi_stats.pool_latency_sum = sim_stats.pool_latency_sum;
   roi_stats.cxl_demand_roundtrip_sum = sim_stats.cxl_demand_roundtrip_sum;
-  roi_stats.cxl_onchip_delay_sum = sim_stats.cxl_onchip_delay_sum;
   roi_stats.cxl_queue_delay_sum = sim_stats.cxl_queue_delay_sum;
   roi_stats.cxl_access_service_time_sum = sim_stats.cxl_access_service_time_sum;
   roi_stats.cxl_interface_delay_sum = sim_stats.cxl_interface_delay_sum;

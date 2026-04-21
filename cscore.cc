@@ -774,9 +774,6 @@ namespace SST {
                 const double avg_pool_roundtrip_lat = (cxl_demand_miss > 0)
                     ? static_cast<double>(st.cxl_demand_roundtrip_sum) / static_cast<double>(cxl_demand_miss)
                     : 0.0;
-                const double avg_pool_onchip_delay = (cxl_demand_miss > 0)
-                    ? static_cast<double>(st.cxl_onchip_delay_sum) / static_cast<double>(cxl_demand_miss)
-                    : 0.0;
                 const double avg_pool_queue_delay = (cxl_demand_miss > 0)
                     ? static_cast<double>(st.cxl_queue_delay_sum) / static_cast<double>(cxl_demand_miss)
                     : 0.0;
@@ -798,7 +795,6 @@ namespace SST {
                     std::cout << "stat.node." << node_id << ".amat.llc_avg_local_miss_lat = " << avg_local_lat << '\n';
                     std::cout << "stat.node." << node_id << ".amat.llc_avg_cxl_miss_lat = " << avg_cxl_lat << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_roundtrip_lat = " << avg_pool_roundtrip_lat << '\n';
-                    std::cout << "stat.node." << node_id << ".amat.cxl_avg_onchip_delay = " << avg_pool_onchip_delay << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_queue_delay = " << avg_pool_queue_delay << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_access_service_time = " << avg_pool_access_service_time << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_interface_delay = " << avg_pool_interface_delay << '\n';
