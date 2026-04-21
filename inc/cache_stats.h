@@ -33,6 +33,7 @@ struct cache_stats {
   uint64_t pool_completed = 0;
   uint64_t pool_latency_sum = 0;
   uint64_t cxl_demand_roundtrip_sum = 0;
+  uint64_t cxl_onchip_delay_sum = 0;
   uint64_t cxl_queue_delay_sum = 0;
   uint64_t cxl_access_service_time_sum = 0;
   uint64_t cxl_interface_delay_sum = 0;

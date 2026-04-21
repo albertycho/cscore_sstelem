@@ -35,6 +35,11 @@
 
 namespace
 {
+uint64_t saturating_sub_u64(uint64_t lhs, uint64_t rhs)
+{
+  return lhs >= rhs ? (lhs - rhs) : 0;
+}
+
 std::size_t pool_latency_bin(uint64_t cycles)
 {
   if (cycles == 0) {
@@ -333,6 +338,8 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
       // Consume the per-request remote timing at fill so the breakdown matches
       // the same completed remote-demand population as the LLC CXL miss stats.
       sim_stats.cxl_demand_roundtrip_sum += fill_mshr.remote_timing.roundtrip_cycles;
+      sim_stats.cxl_onchip_delay_sum +=
+          saturating_sub_u64(static_cast<uint64_t>(miss_lat_cycles), fill_mshr.remote_timing.roundtrip_cycles);
       sim_stats.cxl_queue_delay_sum += fill_mshr.remote_timing.queue_cycles;
       sim_stats.cxl_access_service_time_sum += fill_mshr.remote_timing.access_service_cycles;
       sim_stats.cxl_interface_delay_sum += fill_mshr.remote_timing.interface_cycles;
@@ -1081,6 +1088,7 @@ void CACHE::end_phase(unsigned /*finished_cpu*/)
   roi_stats.pool_completed = sim_stats.pool_completed;
   roi_stats.pool_latency_sum = sim_stats.pool_latency_sum;
   roi_stats.cxl_demand_roundtrip_sum = sim_stats.cxl_demand_roundtrip_sum;
+  roi_stats.cxl_onchip_delay_sum = sim_stats.cxl_onchip_delay_sum;
   roi_stats.cxl_queue_delay_sum = sim_stats.cxl_queue_delay_sum;
   roi_stats.cxl_access_service_time_sum = sim_stats.cxl_access_service_time_sum;
   roi_stats.cxl_interface_delay_sum = sim_stats.cxl_interface_delay_sum;
@@ -1111,9 +1119,6 @@ void CACHE::end_phase(unsigned /*finished_cpu*/)
 bool CACHE::handle_remote_response(const sst_response& resp)
 {
   constexpr auto max_time = champsim::chrono::clock::time_point::max();
-  const auto saturating_sub = [](uint64_t lhs, uint64_t rhs) {
-    return lhs >= rhs ? (lhs - rhs) : 0;
-  };
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(champsim::address{resp.address}));
   assert(mshr_entry != MSHR.end() && "MSHR entry not found for returned remote address");
   if (mshr_entry->remote_is_pool && mshr_entry->remote_issue_time != max_time) {
@@ -1124,8 +1129,8 @@ bool CACHE::handle_remote_response(const sst_response& resp)
     mshr_entry->remote_timing = resp.remote_timing;
     mshr_entry->remote_timing.roundtrip_cycles = latency_cycles;
     mshr_entry->remote_timing.interface_cycles =
-        saturating_sub(latency_cycles,
-                       mshr_entry->remote_timing.queue_cycles + mshr_entry->remote_timing.access_service_cycles);
+        saturating_sub_u64(latency_cycles,
+                           mshr_entry->remote_timing.queue_cycles + mshr_entry->remote_timing.access_service_cycles);
   }
   mshr_type::returned_value finished_value{champsim::address{resp.data}, resp.pf_metadata};
   mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
