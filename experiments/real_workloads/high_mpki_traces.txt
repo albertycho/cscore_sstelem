@@ -1,0 +1,8 @@
+# Highest-MPKI CoaXiaL workloads of interest.
+# Resolve these basenames under TRACE_ROOT, or replace them with absolute paths.
+470.lbm-1274B.champsimtrace.gz
+ligra_BC.com-lj.ungraph.gcc_6.3.0_O3.drop_5000M.length_250M.champsimtrace.gz
+ligra_Components-Shortcut.com-lj.ungraph.gcc_6.3.0_O3.drop_5000M.length_250M.champsimtrace.gz
+ligra_Components.com-lj.ungraph.gcc_6.3.0_O3.drop_5000M.length_250M.champsimtrace.gz
+ligra_PageRank.com-lj.ungraph.gcc_6.3.0_O3.drop_5000M.length_250M.champsimtrace.gz
+ligra_Radii.com-lj.ungraph.gcc_6.3.0_O3.drop_5000M.length_250M.champsimtrace.gz

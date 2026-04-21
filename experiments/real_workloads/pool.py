@@ -22,9 +22,9 @@ THIS_DIR = Path(__file__).resolve().parent
 CXL_CONFIG_PATH = os.environ.get("CXL_CONFIG_PATH", str(THIS_DIR / "all_to_pool_node0.csv"))
 
 LIGHTWEIGHT_OUTPUT = int(os.environ.get("LIGHTWEIGHT_OUTPUT", "1"))
-PRINT_LAT_HIST = int(os.environ.get("PRINT_LAT_HIST", "1"))
-WARMUP_INSTS = int(os.environ.get("WARMUP_INSTS", "50000000"))
-SIM_INSTS = int(os.environ.get("SIM_INSTS", "0"))
+PRINT_LAT_HIST = int(os.environ.get("PRINT_LAT_HIST", "0"))
+WARMUP_INSTS = int(os.environ.get("WARMUP_INSTS", "5000000"))
+SIM_INSTS = int(os.environ.get("SIM_INSTS", "20000000"))
 
 pool = sst.Component("cxl_pool0", "cscore.CXLMemoryPool")
 pool.addParams({

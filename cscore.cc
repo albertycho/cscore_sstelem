@@ -72,6 +72,20 @@ double parse_clock_ghz(std::string clock_str) {
     return 0.0;
 }
 
+double cycles_to_us(uint64_t cycles, double clock_ghz) {
+    if (clock_ghz <= 0.0) {
+        return 0.0;
+    }
+    return static_cast<double>(cycles) / (clock_ghz * 1000.0);
+}
+
+double bytes_to_gbps(uint64_t bytes, uint64_t cycles, double clock_ghz) {
+    if (clock_ghz <= 0.0 || cycles == 0) {
+        return 0.0;
+    }
+    return (static_cast<double>(bytes) * 8.0 * clock_ghz) / static_cast<double>(cycles);
+}
+
 MY_MEMORY_CONTROLLER::latency_function_type select_latency_fn(SST::Params& params, const char* model_key, const char* fixed_key,
                                                                int64_t default_fixed_cycles) {
     auto model = params.find<std::string>(model_key, "fixed");
@@ -575,6 +589,7 @@ namespace SST {
                         cpu.begin_phase();
                     }
                     injector_.reset_stats();
+                    remote_port_.reset_counters();
                     stats_phase_start_cycle_ = heartbeat_count;
                     warmup_done = true;
                 }
@@ -638,40 +653,79 @@ namespace SST {
             }
 
             if (lightweight_output_) {
+                const double clock_ghz = parse_clock_ghz(clock_frequency_str);
+                const uint64_t phase_cycles = (heartbeat_count >= stats_phase_start_cycle_)
+                    ? (heartbeat_count - stats_phase_start_cycle_)
+                    : 0;
+                const auto exec_prefix = std::string("stat.node.") + std::to_string(node_id) + ".exec.";
+                std::cout << exec_prefix << "total_cycles = " << heartbeat_count << '\n';
+                std::cout << exec_prefix << "total_time_us = " << cycles_to_us(heartbeat_count, clock_ghz) << '\n';
+                std::cout << exec_prefix << "phase_cycles = " << phase_cycles << '\n';
+                std::cout << exec_prefix << "phase_time_us = " << cycles_to_us(phase_cycles, clock_ghz) << '\n';
+
+                uint64_t total_load_issue_to_complete_sum = 0;
+                uint64_t total_load_issue_to_complete_count = 0;
+                uint64_t total_retired_load_ops = 0;
+                uint64_t total_retired_store_ops = 0;
                 for (std::size_t cpu_idx = 0; cpu_idx < cores.size(); ++cpu_idx) {
                     const auto& st = warmup_done ? cores[cpu_idx].roi_stats : cores[cpu_idx].sim_stats;
                     const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".cpu." + std::to_string(cpu_idx) + ".";
                     const double avg_load_issue_to_complete_lat = (st.load_issue_to_complete_count > 0)
                         ? static_cast<double>(st.load_issue_to_complete_sum_cycles) / static_cast<double>(st.load_issue_to_complete_count)
                         : 0.0;
+                    const double load_store_ratio = (st.retired_store_ops > 0)
+                        ? static_cast<double>(st.retired_load_ops) / static_cast<double>(st.retired_store_ops)
+                        : (st.retired_load_ops > 0 ? std::numeric_limits<double>::infinity() : 0.0);
                     std::cout << prefix << "load_issue_to_complete_count = " << st.load_issue_to_complete_count << '\n';
                     std::cout << prefix << "avg_load_issue_to_complete_lat = " << avg_load_issue_to_complete_lat << '\n';
+                    std::cout << prefix << "retired_load_ops = " << st.retired_load_ops << '\n';
+                    std::cout << prefix << "retired_store_ops = " << st.retired_store_ops << '\n';
+                    std::cout << prefix << "load_store_ratio = " << load_store_ratio << '\n';
+                    total_load_issue_to_complete_sum += st.load_issue_to_complete_sum_cycles;
+                    total_load_issue_to_complete_count += st.load_issue_to_complete_count;
+                    total_retired_load_ops += st.retired_load_ops;
+                    total_retired_store_ops += st.retired_store_ops;
                 }
-                const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".injector.";
-                const uint64_t phase_cycles = (heartbeat_count >= stats_phase_start_cycle_)
-                    ? (heartbeat_count - stats_phase_start_cycle_)
-                    : 0;
-                const uint64_t request_bytes = injector_.request_bytes_sent();
-                const uint64_t response_bytes = injector_.response_bytes_received();
-                const uint64_t aggregate_bytes = request_bytes + response_bytes;
-                const double phase_cycles_d = static_cast<double>(phase_cycles);
-                const double clock_ghz = parse_clock_ghz(clock_frequency_str);
-                const double request_gbps = (phase_cycles_d > 0.0)
-                    ? (static_cast<double>(request_bytes) * 8.0 * clock_ghz) / phase_cycles_d
+
+                const double avg_node_load_issue_to_complete_lat = (total_load_issue_to_complete_count > 0)
+                    ? static_cast<double>(total_load_issue_to_complete_sum) / static_cast<double>(total_load_issue_to_complete_count)
                     : 0.0;
-                const double response_gbps = (phase_cycles_d > 0.0)
-                    ? (static_cast<double>(response_bytes) * 8.0 * clock_ghz) / phase_cycles_d
-                    : 0.0;
-                const double aggregate_gbps = (phase_cycles_d > 0.0)
-                    ? (static_cast<double>(aggregate_bytes) * 8.0 * clock_ghz) / phase_cycles_d
-                    : 0.0;
-                std::cout << prefix << "phase_cycles = " << phase_cycles << '\n';
-                std::cout << prefix << "request_bytes = " << request_bytes << '\n';
-                std::cout << prefix << "response_bytes = " << response_bytes << '\n';
-                std::cout << prefix << "aggregate_bytes = " << aggregate_bytes << '\n';
-                std::cout << prefix << "request_gbps = " << request_gbps << '\n';
-                std::cout << prefix << "response_gbps = " << response_gbps << '\n';
-                std::cout << prefix << "aggregate_gbps = " << aggregate_gbps << '\n';
+                const double node_load_store_ratio = (total_retired_store_ops > 0)
+                    ? static_cast<double>(total_retired_load_ops) / static_cast<double>(total_retired_store_ops)
+                    : (total_retired_load_ops > 0 ? std::numeric_limits<double>::infinity() : 0.0);
+                const auto amat_prefix = std::string("stat.node.") + std::to_string(node_id) + ".amat.";
+                std::cout << amat_prefix << "avg_load_issue_to_complete_lat = " << avg_node_load_issue_to_complete_lat << '\n';
+                std::cout << amat_prefix << "retired_load_ops = " << total_retired_load_ops << '\n';
+                std::cout << amat_prefix << "retired_store_ops = " << total_retired_store_ops << '\n';
+                std::cout << amat_prefix << "load_store_ratio = " << node_load_store_ratio << '\n';
+
+                {
+                    const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".injector.";
+                    const uint64_t request_bytes = injector_.request_bytes_sent();
+                    const uint64_t response_bytes = injector_.response_bytes_received();
+                    const uint64_t aggregate_bytes = request_bytes + response_bytes;
+                    std::cout << prefix << "phase_cycles = " << phase_cycles << '\n';
+                    std::cout << prefix << "request_bytes = " << request_bytes << '\n';
+                    std::cout << prefix << "response_bytes = " << response_bytes << '\n';
+                    std::cout << prefix << "aggregate_bytes = " << aggregate_bytes << '\n';
+                    std::cout << prefix << "request_gbps = " << bytes_to_gbps(request_bytes, phase_cycles, clock_ghz) << '\n';
+                    std::cout << prefix << "response_gbps = " << bytes_to_gbps(response_bytes, phase_cycles, clock_ghz) << '\n';
+                    std::cout << prefix << "aggregate_gbps = " << bytes_to_gbps(aggregate_bytes, phase_cycles, clock_ghz) << '\n';
+                }
+
+                {
+                    const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".cxl.";
+                    const uint64_t request_bytes = remote_port_.tx_bytes_total();
+                    const uint64_t response_bytes = remote_port_.rx_bytes_total();
+                    const uint64_t aggregate_bytes = request_bytes + response_bytes;
+                    std::cout << prefix << "phase_cycles = " << phase_cycles << '\n';
+                    std::cout << prefix << "request_bytes = " << request_bytes << '\n';
+                    std::cout << prefix << "response_bytes = " << response_bytes << '\n';
+                    std::cout << prefix << "aggregate_bytes = " << aggregate_bytes << '\n';
+                    std::cout << prefix << "request_gbps = " << bytes_to_gbps(request_bytes, phase_cycles, clock_ghz) << '\n';
+                    std::cout << prefix << "response_gbps = " << bytes_to_gbps(response_bytes, phase_cycles, clock_ghz) << '\n';
+                    std::cout << prefix << "aggregate_gbps = " << bytes_to_gbps(aggregate_bytes, phase_cycles, clock_ghz) << '\n';
+                }
             }
 
             // StarNUMA-style LLC demand-miss summary (LOAD+RFO only), post-merge (MSHR return).
@@ -685,24 +739,49 @@ namespace SST {
                 return total;
             };
             for (const auto& cache : caches) {
-                if (cache.NAME != "LLC") {
-                    continue;
-                }
                 const auto& st = warmup_done ? cache.roi_stats : cache.sim_stats;
                 const uint64_t total_demand_miss = demand_return_count(st);
-                const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
                 const double avg_miss_lat = (total_demand_miss > 0)
                     ? static_cast<double>(st.total_miss_latency_cycles) / static_cast<double>(total_demand_miss)
                     : 0.0;
+
+                if (lightweight_output_ && cache.NAME == "cpu0_L2C") {
+                    const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".l2c.";
+                    std::cout << prefix << "total_miss = " << total_demand_miss << '\n';
+                    std::cout << prefix << "avg_miss_lat = " << avg_miss_lat << '\n';
+                    std::cout << "stat.node." << node_id << ".amat.l2c_avg_miss_lat = " << avg_miss_lat << '\n';
+                }
+
+                if (cache.NAME != "LLC") {
+                    continue;
+                }
+                const uint64_t cxl_demand_miss = st.pool_demand_miss_count;
+                const uint64_t local_demand_miss = (total_demand_miss >= cxl_demand_miss)
+                    ? (total_demand_miss - cxl_demand_miss)
+                    : 0;
+                const uint64_t total_demand_miss_latency_sum = (st.total_miss_latency_cycles > 0)
+                    ? static_cast<uint64_t>(st.total_miss_latency_cycles)
+                    : 0;
+                const uint64_t local_demand_miss_latency_sum = (total_demand_miss_latency_sum >= st.pool_demand_miss_latency_sum)
+                    ? total_demand_miss_latency_sum - st.pool_demand_miss_latency_sum
+                    : 0;
                 const double avg_cxl_lat = (cxl_demand_miss > 0)
                     ? static_cast<double>(st.pool_demand_miss_latency_sum) / static_cast<double>(cxl_demand_miss)
+                    : 0.0;
+                const double avg_local_lat = (local_demand_miss > 0)
+                    ? static_cast<double>(local_demand_miss_latency_sum) / static_cast<double>(local_demand_miss)
                     : 0.0;
                 if (lightweight_output_) {
                     const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".llc.";
                     std::cout << prefix << "cxl_miss = " << cxl_demand_miss << '\n';
+                    std::cout << prefix << "local_miss = " << local_demand_miss << '\n';
                     std::cout << prefix << "total_miss = " << total_demand_miss << '\n';
                     std::cout << prefix << "avg_miss_lat = " << avg_miss_lat << '\n';
+                    std::cout << prefix << "avg_local_lat = " << avg_local_lat << '\n';
                     std::cout << prefix << "avg_cxl_lat = " << avg_cxl_lat << '\n';
+                    std::cout << "stat.node." << node_id << ".amat.llc_avg_miss_lat = " << avg_miss_lat << '\n';
+                    std::cout << "stat.node." << node_id << ".amat.llc_avg_local_miss_lat = " << avg_local_lat << '\n';
+                    std::cout << "stat.node." << node_id << ".amat.llc_avg_cxl_miss_lat = " << avg_cxl_lat << '\n';
                     if (print_latency_hist_) {
                         std::cout << prefix << "miss_lat_hist_bin_ns = 10\n";
                         std::cout << prefix << "miss_lat_hist = [";

@@ -250,6 +250,11 @@ uint64_t FabricPort::rx_bytes_total() const {
     return rx_bytes_total_;
 }
 
+void FabricPort::reset_counters() {
+    tx_bytes_total_ = 0;
+    rx_bytes_total_ = 0;
+}
+
 bool FabricPort::has_ready_to_receive(uint64_t cycle) const {
     if (last_deliver_cycle_ == cycle) {
         return false;

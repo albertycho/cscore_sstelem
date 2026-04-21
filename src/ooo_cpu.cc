@@ -812,6 +812,8 @@ long O3_CPU::retire_rob()
   // commit register writes to backend RAT
   // and recycle the old physical registers
   for (auto rob_it = retire_begin; rob_it != retire_end; ++rob_it) {
+    sim_stats.retired_load_ops += static_cast<uint64_t>(rob_it->source_memory.size());
+    sim_stats.retired_store_ops += static_cast<uint64_t>(rob_it->destination_memory.size());
     for (auto dreg : rob_it->destination_registers) {
       reg_allocator.retire_dest_register(dreg);
     }

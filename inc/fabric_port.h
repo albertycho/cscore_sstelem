@@ -72,6 +72,7 @@ public:
     std::size_t ingress_occupancy() const;
     uint64_t tx_bytes_total() const;
     uint64_t rx_bytes_total() const;
+    void reset_counters();
 
 private:
     friend class Switch;
