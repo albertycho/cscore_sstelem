@@ -357,9 +357,9 @@ void Switch::finish()
     if (clock_ghz <= 0.0) {
         clock_ghz = 2.4; // fallback to default switch clock
     }
-    const double host_to_switch_gbps = host_to_switch_bpc * clock_ghz;
-    const double switch_to_host_gbps = switch_to_host_bpc * clock_ghz;
-    const double host_link_total_gbps = host_link_total_bpc * clock_ghz;
+    const double host_to_switch_gbps = host_to_switch_bpc * clock_ghz * 8.0;
+    const double switch_to_host_gbps = switch_to_host_bpc * clock_ghz * 8.0;
+    const double host_link_total_gbps = host_link_total_bpc * clock_ghz * 8.0;
     if (lightweight_output_) {
         std::cout << "stat.switch.replicated_messages = " << replicated_count_ << '\n';
         std::cout << "stat.switch.util.node_ingress_avg = " << avg_util(node_ports_) << '\n';
@@ -376,9 +376,9 @@ void Switch::finish()
         std::cout << "Switch replicated messages: " << replicated_count_ << std::endl;
         std::cout << "Switch avg util node ingress: " << avg_util(node_ports_) << std::endl;
         std::cout << "Switch avg util pool ingress: " << avg_util(pool_ports_) << std::endl;
-        std::cout << "Switch host->switch BW (GB/s): " << host_to_switch_gbps << std::endl;
-        std::cout << "Switch switch->host BW (GB/s): " << switch_to_host_gbps << std::endl;
-        std::cout << "Switch host-link total BW (GB/s): " << host_link_total_gbps << std::endl;
+        std::cout << "Switch host->switch BW (Gbps): " << host_to_switch_gbps << std::endl;
+        std::cout << "Switch switch->host BW (Gbps): " << switch_to_host_gbps << std::endl;
+        std::cout << "Switch host-link total BW (Gbps): " << host_link_total_gbps << std::endl;
         std::cout << "Switch wall time (s): " << sec << std::endl;
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();
