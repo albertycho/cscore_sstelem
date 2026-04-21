@@ -16,14 +16,14 @@ void annotate_service_start_cycle(T&, int64_t) {}
 template <typename T>
 void annotate_completion_cycle(T&, int64_t) {}
 
-void annotate_enqueue_cycle(csEvent*& ev, int64_t cycle) {
+void annotate_enqueue_cycle(SST::csimCore::csEvent*& ev, int64_t cycle) {
     if (ev == nullptr) {
         return;
     }
     ev->timing_mark_cycle = static_cast<uint64_t>(std::max<int64_t>(cycle + 1, 0));
 }
 
-void annotate_service_start_cycle(csEvent*& ev, int64_t cycle) {
+void annotate_service_start_cycle(SST::csimCore::csEvent*& ev, int64_t cycle) {
     if (ev == nullptr) {
         return;
     }
@@ -34,7 +34,7 @@ void annotate_service_start_cycle(csEvent*& ev, int64_t cycle) {
     ev->timing_mark_cycle = start_cycle;
 }
 
-void annotate_completion_cycle(csEvent*&, int64_t) {}
+void annotate_completion_cycle(SST::csimCore::csEvent*&, int64_t) {}
 
 // For pool memory requests, carry queueing and service time on the request
 // itself so the completed LLC miss can consume one coherent timing record.
