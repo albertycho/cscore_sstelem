@@ -30,7 +30,15 @@
 #include "instruction.h"
 #include "util/span.h"
 
-std::chrono::seconds elapsed_time();
+namespace {
+const auto kProcessStartTime = std::chrono::steady_clock::now();
+
+std::chrono::seconds elapsed_wall_time()
+{
+  return std::chrono::duration_cast<std::chrono::seconds>(
+      std::chrono::steady_clock::now() - kProcessStartTime);
+}
+} // namespace
 
 constexpr long long STAT_PRINTING_PERIOD = 10000000;
 // constexpr long long STAT_PRINTING_PERIOD = 1000;
@@ -63,11 +71,11 @@ long O3_CPU::operate()
     auto phase_cycle{double_duration{current_time - begin_phase_time} / clock_period};
 
     fmt::print("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4g} cumulative IPC: {:.4g} (Simulation time: {:%H hr %M min %S sec})\n", cpu,
-               num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle, elapsed_time());
+               num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle, elapsed_wall_time());
     if (heartbeat_file->is_open()) 
     {
       fmt::print(*heartbeat_file, "Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4g} cumulative IPC: {:.4g} (Simulation time: {:%H hr %M min %S sec})\n",
-           cpu, num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle, elapsed_time());
+           cpu, num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle, elapsed_wall_time());
     }          
 
     // auto sim_time = elapsed_time();
