@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -12,6 +13,8 @@ namespace SST {
 namespace csimCore {
 
 namespace {
+constexpr uint64_t kControlCredit = 2;
+
 bool is_write_request(const csEvent& ev) {
     if (ev.payload.size() > 11) {
         const auto type = static_cast<access_type>(ev.payload[11]);
@@ -22,6 +25,10 @@ bool is_write_request(const csEvent& ev) {
     }
     const auto type = static_cast<access_type>(ev.payload[10]);
     return type == access_type::WRITE;
+}
+
+bool is_credit_event(const csEvent& ev) {
+    return ev.payload.size() == 4 && ev.payload[2] == kControlCredit;
 }
 
 csEvent* clone_event_with_dst(const csEvent& ev, uint64_t dst) {
@@ -251,6 +258,13 @@ bool Switch::try_route_event(csEvent* ev)
     }
 
     if (dst >= pool_node_id_base_) {
+        if (is_credit_event(*ev)) {
+            const auto idx = static_cast<size_t>(dst - pool_node_id_base_);
+            if (idx >= pool_ports_.size()) {
+                throw std::runtime_error("Switch: credit dst pool id out of range for configured ports.");
+            }
+            return pool_ports_[idx].send(ev);
+        }
         if (replicate_writes_ && is_write_request(*ev)) {
             if (!can_replicate_to_all_pools(ev)) {
                 return false;
