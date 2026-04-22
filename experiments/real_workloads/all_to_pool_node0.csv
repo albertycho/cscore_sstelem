@@ -1,4 +1,19 @@
 # node_id,start,size,type,target
-# Map the full lower canonical user VA range to pool 100 for node 0.
+# Map the full lower canonical user VA range to pool 100 for nodes 0-15.
 # This is a coarse CoaXiaL-style approximation: all traced pages are treated as pooled.
 0,0x0,0x800000000000,pool,100
+1,0x0,0x800000000000,pool,100
+2,0x0,0x800000000000,pool,100
+3,0x0,0x800000000000,pool,100
+4,0x0,0x800000000000,pool,100
+5,0x0,0x800000000000,pool,100
+6,0x0,0x800000000000,pool,100
+7,0x0,0x800000000000,pool,100
+8,0x0,0x800000000000,pool,100
+9,0x0,0x800000000000,pool,100
+10,0x0,0x800000000000,pool,100
+11,0x0,0x800000000000,pool,100
+12,0x0,0x800000000000,pool,100
+13,0x0,0x800000000000,pool,100
+14,0x0,0x800000000000,pool,100
+15,0x0,0x800000000000,pool,100

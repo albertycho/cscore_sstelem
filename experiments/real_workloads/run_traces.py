@@ -14,7 +14,7 @@ DEFAULT_LOG_DIR = THIS_DIR / "logs"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the 1-node pooled-memory real-workload experiment across a trace list.")
+    parser = argparse.ArgumentParser(description="Run the pooled-memory real-workload experiment across a trace list.")
     parser.add_argument(
         "--trace-root",
         default=os.environ.get("TRACE_ROOT", ""),
