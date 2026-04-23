@@ -113,6 +113,7 @@ private:
     uint64_t tick_count_ = 0;
     uint64_t total_enqueued_ = 0;
     uint64_t total_completed_ = 0;
+    uint64_t mem_enqueue_failed_ = 0;
     uint64_t heartbeat_period_ = 1000;
     bool lightweight_output_ = false;
     std::chrono::steady_clock::time_point wall_start_{};

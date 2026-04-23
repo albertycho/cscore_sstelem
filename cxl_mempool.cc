@@ -163,6 +163,7 @@ bool CXLMemoryPool::clock_tick(SST::Cycle_t /*current*/) {
         std::cout << prefix << "cycle = " << tick_count_ << '\n';
         std::cout << prefix << "total_enqueued = " << total_enqueued_ << '\n';
         std::cout << prefix << "total_completed = " << total_completed_ << '\n';
+        std::cout << prefix << "mem_enqueue_failed = " << mem_enqueue_failed_ << '\n';
         std::cout << prefix << "pending_responses = " << pending_.size() << '\n';
         std::cout << prefix << "mem_queue_occ = " << mem_ctrl_.queue_occupancy(0) << '\n';
         std::cout << prefix << "mem_queue_util = " << mem_ctrl_.queue_utilization(0) << '\n';
@@ -217,6 +218,7 @@ void CXLMemoryPool::poll_ports(uint64_t cycle) {
     auto handle_event = [this](csEvent* ev) {
         sst_request req = convert_event_to_request(*ev);
         if (!enqueue_mem_request(req)) {
+            mem_enqueue_failed_++;
             return false;
         }
         delete ev;
@@ -339,6 +341,7 @@ void CXLMemoryPool::finish() {
         if (stats.avg_util > 0.0) {
             std::cout << prefix << "util.req_link_avg = " << stats.avg_util << '\n';
         }
+        std::cout << prefix << "mem_enqueue_failed = " << mem_enqueue_failed_ << '\n';
         std::cout << prefix << "walltime_s = " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();
@@ -350,6 +353,7 @@ void CXLMemoryPool::finish() {
         if (stats.avg_util > 0.0) {
             std::cout << "  req link avg util: " << stats.avg_util << '\n';
         }
+        std::cout << "  mem enqueue failed attempts: " << mem_enqueue_failed_ << '\n';
         std::cout << "  wall time (s): " << sec << '\n';
         if (active_calls_ > 0) {
             const auto active_sec = std::chrono::duration<double>(active_time_).count();

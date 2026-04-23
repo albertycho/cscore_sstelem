@@ -168,6 +168,12 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   lines.push_back(fmt::format("{} POOL ACCESS: {:10} COMPLETED: {:10} AVG_LAT: {} cycles P95: {} P99: {}", stats.name, stats.pool_accesses,
                               stats.pool_completed, pool_avg, pool_p95, pool_p99));
   lines.push_back(fmt::format("{} POOL MISS LATENCY (LOAD/RFO): {} cycles (count {})", stats.name, pool_demand_avg, stats.pool_demand_miss_count));
+  lines.push_back(fmt::format("{} MSHR DEBUG load_into_write: {} write_into_load: {} demand_into_prefetch: {} dirty_lost: {} final_type_changed: {} merged_demand: {}",
+                              stats.name, stats.mshr_merge_load_into_write, stats.mshr_merge_write_into_load,
+                              stats.mshr_merge_demand_into_prefetch, stats.mshr_dirty_lost_on_merge,
+                              stats.mshr_final_type_changed, stats.mshr_merged_demand_count));
+  lines.push_back(fmt::format("{} REMOTE DEBUG retry_cycles: {} dirty_writebacks: {}", stats.name, stats.remote_send_retry_cycles,
+                              stats.remote_dirty_writebacks_generated));
 
   return lines;
 }

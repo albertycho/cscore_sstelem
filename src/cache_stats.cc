@@ -13,6 +13,8 @@ cache_stats operator-(cache_stats lhs, cache_stats rhs)
 
   result.hits = lhs.hits - rhs.hits;
   result.misses = lhs.misses - rhs.misses;
+  result.mshr_merge = lhs.mshr_merge - rhs.mshr_merge;
+  result.mshr_return = lhs.mshr_return - rhs.mshr_return;
 
   result.total_miss_latency_cycles = lhs.total_miss_latency_cycles - rhs.total_miss_latency_cycles;
   result.pool_accesses = lhs.pool_accesses - rhs.pool_accesses;
@@ -24,6 +26,14 @@ cache_stats operator-(cache_stats lhs, cache_stats rhs)
   result.cxl_interface_delay_sum = lhs.cxl_interface_delay_sum - rhs.cxl_interface_delay_sum;
   result.pool_demand_miss_count = lhs.pool_demand_miss_count - rhs.pool_demand_miss_count;
   result.pool_demand_miss_latency_sum = lhs.pool_demand_miss_latency_sum - rhs.pool_demand_miss_latency_sum;
+  result.mshr_merge_load_into_write = lhs.mshr_merge_load_into_write - rhs.mshr_merge_load_into_write;
+  result.mshr_merge_write_into_load = lhs.mshr_merge_write_into_load - rhs.mshr_merge_write_into_load;
+  result.mshr_merge_demand_into_prefetch = lhs.mshr_merge_demand_into_prefetch - rhs.mshr_merge_demand_into_prefetch;
+  result.mshr_dirty_lost_on_merge = lhs.mshr_dirty_lost_on_merge - rhs.mshr_dirty_lost_on_merge;
+  result.mshr_final_type_changed = lhs.mshr_final_type_changed - rhs.mshr_final_type_changed;
+  result.mshr_merged_demand_count = lhs.mshr_merged_demand_count - rhs.mshr_merged_demand_count;
+  result.remote_send_retry_cycles = lhs.remote_send_retry_cycles - rhs.remote_send_retry_cycles;
+  result.remote_dirty_writebacks_generated = lhs.remote_dirty_writebacks_generated - rhs.remote_dirty_writebacks_generated;
   for (std::size_t idx = 0; idx < result.pool_latency_hist.size(); ++idx) {
     result.pool_latency_hist[idx] = lhs.pool_latency_hist[idx] - rhs.pool_latency_hist[idx];
   }

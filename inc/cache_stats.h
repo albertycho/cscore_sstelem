@@ -38,6 +38,14 @@ struct cache_stats {
   uint64_t cxl_interface_delay_sum = 0;
   uint64_t pool_demand_miss_count = 0;
   uint64_t pool_demand_miss_latency_sum = 0;
+  uint64_t mshr_merge_load_into_write = 0;
+  uint64_t mshr_merge_write_into_load = 0;
+  uint64_t mshr_merge_demand_into_prefetch = 0;
+  uint64_t mshr_dirty_lost_on_merge = 0;
+  uint64_t mshr_final_type_changed = 0;
+  uint64_t mshr_merged_demand_count = 0;
+  uint64_t remote_send_retry_cycles = 0;
+  uint64_t remote_dirty_writebacks_generated = 0;
   std::array<uint64_t, POOL_LAT_HIST_BINS> pool_latency_hist{};
   std::vector<uint64_t> miss_latency_hist{};
 };

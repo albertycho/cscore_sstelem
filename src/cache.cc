@@ -40,6 +40,16 @@ uint64_t saturating_sub_u64(uint64_t lhs, uint64_t rhs)
   return lhs >= rhs ? (lhs - rhs) : 0;
 }
 
+bool is_load_or_rfo(access_type type)
+{
+  return type == access_type::LOAD || type == access_type::RFO;
+}
+
+bool is_demand_type(access_type type)
+{
+  return is_load_or_rfo(type) || type == access_type::WRITE;
+}
+
 std::size_t pool_latency_bin(uint64_t cycles)
 {
   if (cycles == 0) {
@@ -275,6 +285,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
         if (!send_remote(sreq)) {
           return false;
         }
+        sim_stats.remote_dirty_writebacks_generated++;
         writeback_sent = true;
       }
     }
@@ -447,6 +458,8 @@ bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
 
   if (mshr_entry != MSHR.end()) // miss already inflight
   {
+    const auto predecessor_type = mshr_entry->type;
+    const auto successor_type = to_allocate.type;
     if (mshr_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
       // Mark the prefetch as useful
       if (mshr_entry->prefetch_from_this) {
@@ -456,8 +469,27 @@ bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
 
     // COLLECT STATS
     sim_stats.mshr_merge.increment(std::pair{to_allocate.type, to_allocate.cpu});
+    if (is_load_or_rfo(successor_type) && predecessor_type == access_type::WRITE) {
+      sim_stats.mshr_merge_load_into_write++;
+    }
+    if (successor_type == access_type::WRITE && is_load_or_rfo(predecessor_type)) {
+      sim_stats.mshr_merge_write_into_load++;
+    }
+    if (is_demand_type(successor_type) && predecessor_type == access_type::PREFETCH) {
+      sim_stats.mshr_merge_demand_into_prefetch++;
+    }
+    if (is_demand_type(successor_type)) {
+      sim_stats.mshr_merged_demand_count++;
+    }
 
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
+    if (mshr_entry->type != predecessor_type) {
+      sim_stats.mshr_final_type_changed++;
+    }
+    if ((predecessor_type == access_type::WRITE || successor_type == access_type::WRITE) &&
+        mshr_entry->type != access_type::WRITE) {
+      sim_stats.mshr_dirty_lost_on_merge++;
+    }
   } else {
     if (mshr_full) { // not enough MSHR resource
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
@@ -486,13 +518,16 @@ bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
         sreq.asid[1] = mshr_pkt.second.asid[1];
         sreq.msg_bytes = (sreq.type == access_type::WRITE) ? 64 : 8;
         sreq.remote_timing = mshr_pkt.second.remote_timing;
+        uint64_t remote_retry_cycles = 0;
         if (handle_pkt.remote_queue_wait_start != champsim::chrono::clock::time_point::max()) {
-          const auto wait_cycles = static_cast<uint64_t>((current_time - handle_pkt.remote_queue_wait_start) / clock_period);
+          remote_retry_cycles = static_cast<uint64_t>((current_time - handle_pkt.remote_queue_wait_start) / clock_period);
+          const auto wait_cycles = remote_retry_cycles;
           sreq.remote_timing.queue_cycles += wait_cycles;
         }
 
         bool accepted = send_remote(sreq); // pool is treated as remote memory
         if (accepted) {
+          sim_stats.remote_send_retry_cycles += remote_retry_cycles;
           mshr_pkt.first.remote_timing = sreq.remote_timing;
           if (mshr_pkt.second.response_requested) {
             // Start the remote-path clock at the beginning of any CXL-side
@@ -1091,6 +1126,14 @@ void CACHE::end_phase(unsigned /*finished_cpu*/)
   roi_stats.cxl_interface_delay_sum = sim_stats.cxl_interface_delay_sum;
   roi_stats.pool_demand_miss_count = sim_stats.pool_demand_miss_count;
   roi_stats.pool_demand_miss_latency_sum = sim_stats.pool_demand_miss_latency_sum;
+  roi_stats.mshr_merge_load_into_write = sim_stats.mshr_merge_load_into_write;
+  roi_stats.mshr_merge_write_into_load = sim_stats.mshr_merge_write_into_load;
+  roi_stats.mshr_merge_demand_into_prefetch = sim_stats.mshr_merge_demand_into_prefetch;
+  roi_stats.mshr_dirty_lost_on_merge = sim_stats.mshr_dirty_lost_on_merge;
+  roi_stats.mshr_final_type_changed = sim_stats.mshr_final_type_changed;
+  roi_stats.mshr_merged_demand_count = sim_stats.mshr_merged_demand_count;
+  roi_stats.remote_send_retry_cycles = sim_stats.remote_send_retry_cycles;
+  roi_stats.remote_dirty_writebacks_generated = sim_stats.remote_dirty_writebacks_generated;
   roi_stats.pool_latency_hist = sim_stats.pool_latency_hist;
   roi_stats.miss_latency_hist = sim_stats.miss_latency_hist;
 

@@ -798,6 +798,14 @@ namespace SST {
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_queue_delay = " << avg_pool_queue_delay << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_access_service_time = " << avg_pool_access_service_time << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_interface_delay = " << avg_pool_interface_delay << '\n';
+                    std::cout << prefix << "mshr_merge_load_into_write = " << st.mshr_merge_load_into_write << '\n';
+                    std::cout << prefix << "mshr_merge_write_into_load = " << st.mshr_merge_write_into_load << '\n';
+                    std::cout << prefix << "mshr_merge_demand_into_prefetch = " << st.mshr_merge_demand_into_prefetch << '\n';
+                    std::cout << prefix << "mshr_dirty_lost_on_merge = " << st.mshr_dirty_lost_on_merge << '\n';
+                    std::cout << prefix << "mshr_final_type_changed = " << st.mshr_final_type_changed << '\n';
+                    std::cout << prefix << "mshr_merged_demand_count = " << st.mshr_merged_demand_count << '\n';
+                    std::cout << prefix << "remote_send_retry_cycles = " << st.remote_send_retry_cycles << '\n';
+                    std::cout << prefix << "remote_dirty_writebacks_generated = " << st.remote_dirty_writebacks_generated << '\n';
                     if (print_latency_hist_) {
                         std::cout << prefix << "miss_lat_hist_bin_ns = 10\n";
                         std::cout << prefix << "miss_lat_hist = [";
