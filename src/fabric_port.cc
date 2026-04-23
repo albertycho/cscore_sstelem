@@ -175,11 +175,23 @@ bool FabricPort::try_receive_ready(uint64_t cycle,
     csEvent* item = ready_.front();
     const uint64_t credit_dst = event_credit_dst(item);
     const uint64_t credit_len = credit_bytes(item);
-    if (!handle(item)) {
-        return false;
+    const uint64_t ready_queue_delay =
+        (item != nullptr && cycle >= item->ready_enqueue_cycle)
+            ? (cycle - item->ready_enqueue_cycle)
+            : 0;
+
+    // A successful handler invocation may consume or delete the event, so any
+    // per-message accounting that lives on the event must be applied before
+    // handoff. If the handler rejects the event, the head remains in place and
+    // the speculative accounting is rolled back.
+    if (item != nullptr && ready_queue_delay > 0) {
+        item->remote_timing.queue_cycles += ready_queue_delay;
     }
-    if (item != nullptr && cycle >= item->ready_enqueue_cycle) {
-        item->remote_timing.queue_cycles += (cycle - item->ready_enqueue_cycle);
+    if (!handle(item)) {
+        if (item != nullptr && ready_queue_delay > 0) {
+            item->remote_timing.queue_cycles -= ready_queue_delay;
+        }
+        return false;
     }
     ready_.pop_front();
     last_deliver_cycle_ = cycle;

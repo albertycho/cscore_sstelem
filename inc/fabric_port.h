@@ -60,8 +60,9 @@ public:
 
     void advance(uint64_t cycle);
     // Present the current ready head to the callback. A true return consumes
-    // the message and returns credits upstream; a false return leaves the head
-    // in place so the caller can retry later.
+    // the message and returns credits upstream; the callback may take
+    // ownership of or delete the event on success. A false return leaves the
+    // head in place so the caller can retry later.
     bool try_receive_ready(uint64_t cycle,
                            const std::function<bool(csEvent*)>& handle);
 
