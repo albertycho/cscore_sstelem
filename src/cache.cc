@@ -1118,6 +1118,8 @@ bool CACHE::handle_remote_response(const sst_response& resp)
   constexpr auto max_time = champsim::chrono::clock::time_point::max();
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(champsim::address{resp.address}));
   assert(mshr_entry != MSHR.end() && "MSHR entry not found for returned remote address");
+  auto first_unreturned = std::find_if(MSHR.begin(), MSHR.end(), [](const auto& x) { return x.data_promise.has_unknown_readiness(); });
+  assert(first_unreturned != MSHR.end() && "No unreturned MSHR entry found for returned remote response");
   if (mshr_entry->remote_is_pool && mshr_entry->remote_issue_time != max_time) {
     const auto latency_cycles = static_cast<uint64_t>((current_time - mshr_entry->remote_issue_time) / clock_period);
     sim_stats.pool_completed++;
@@ -1131,8 +1133,8 @@ bool CACHE::handle_remote_response(const sst_response& resp)
   }
   mshr_type::returned_value finished_value{champsim::address{resp.data}, resp.pf_metadata};
   mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
-  // Move the ready entry to the front so it is considered on the next fill pass
-  std::rotate(MSHR.begin(), mshr_entry, std::next(mshr_entry));
+  // Preserve the returned-prefix invariant used by finish_packet().
+  std::iter_swap(mshr_entry, first_unreturned);
   return true;
 }
 
