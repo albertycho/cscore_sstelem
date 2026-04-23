@@ -6,16 +6,18 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-POOL_LOG_DIR = SCRIPT_DIR / "logs_switch_pool"
-REPLICATION_LOG_DIR = SCRIPT_DIR / "logs_switch_replication"
-OUT_CSV = SCRIPT_DIR / "real_workload_latency_breakdown.csv"
-OUT_PNG = SCRIPT_DIR / "real_workload_latency_breakdown.png"
-OUT_PDF = SCRIPT_DIR / "real_workload_latency_breakdown.pdf"
+POOL_LOG_DIR = Path(os.environ.get("POOL_LOG_DIR", str(SCRIPT_DIR / "logs_switch_pool")))
+REPLICATION_LOG_DIR = Path(os.environ.get("REPLICATION_LOG_DIR", str(SCRIPT_DIR / "logs_switch_replication")))
+OUT_PREFIX = Path(os.environ.get("OUT_PREFIX", str(SCRIPT_DIR / "real_workload_latency_breakdown")))
+OUT_CSV = OUT_PREFIX.with_suffix(".csv")
+OUT_PNG = OUT_PREFIX.with_suffix(".png")
+OUT_PDF = OUT_PREFIX.with_suffix(".pdf")
 FIXED_ONCHIP_CYCLES = float(os.environ.get("FIXED_ONCHIP_CYCLES", "25.0"))
 
 STAT_RE = re.compile(r"^(stat\.[^=]+?)\s*=\s*([0-9.eE+-]+)\s*$", re.MULTILINE)
 TRACE_RE = re.compile(r"^# TRACE_PATH:\s*(.+)\s*$", re.MULTILINE)
 WORKLOAD_RE = re.compile(r"^(?P<id>\d+)\.(?P<name>[A-Za-z0-9]+)")
+NODE_ID_RE = re.compile(r"^stat\.node\.(\d+)\.", re.MULTILINE)
 
 
 def sanitize_trace_name(path: Path) -> str:
@@ -37,11 +39,38 @@ def workload_label(stem: str) -> str:
     match = WORKLOAD_RE.match(stem)
     if match is None:
         return stem
-    return f"{match.group('id')}.{match.group('name')}"
+    return match.group("name")
 
 
 def parse_stats(text: str) -> dict[str, float]:
     return {match.group(1): float(match.group(2)) for match in STAT_RE.finditer(text)}
+
+
+def collect_node_ids(stats: dict[str, float]) -> list[int]:
+    node_ids = set()
+    for key in stats:
+        match = re.match(r"stat\.node\.(\d+)\.", key)
+        if match is not None:
+            node_ids.add(int(match.group(1)))
+    return sorted(node_ids)
+
+
+def require_node_values(stats: dict[str, float], node_ids: list[int], suffix: str) -> list[float] | None:
+    values: list[float] = []
+    for node_id in node_ids:
+        key = f"stat.node.{node_id}.{suffix}"
+        value = stats.get(key)
+        if value is None:
+            return None
+        values.append(value)
+    return values
+
+
+def weighted_average(values: list[float], weights: list[float]) -> float:
+    denom = sum(weights)
+    if denom <= 0.0:
+        return 0.0
+    return sum(value * weight for value, weight in zip(values, weights)) / denom
 
 
 def parse_run(path: Path, topology_label: str) -> dict[str, object] | None:
@@ -51,41 +80,79 @@ def parse_run(path: Path, topology_label: str) -> dict[str, object] | None:
     trace_path = Path(trace_match.group(1).strip()) if trace_match else path
     stem = sanitize_trace_name(trace_path)
 
-    required = [
-        "stat.node.0.exec.phase_cycles",
-        "stat.node.0.exec.phase_time_us",
-        "stat.node.0.amat.avg_load_issue_to_complete_lat",
-        "stat.node.0.amat.load_store_ratio",
-        "stat.node.0.amat.llc_avg_cxl_miss_lat",
-        "stat.node.0.amat.cxl_avg_roundtrip_lat",
-        "stat.node.0.amat.cxl_avg_queue_delay",
-        "stat.node.0.amat.cxl_avg_access_service_time",
-        "stat.node.0.amat.cxl_avg_interface_delay",
-        "stat.node.0.cxl.aggregate_gbps",
-    ]
-    if any(key not in stats for key in required):
+    node_ids = collect_node_ids(stats)
+    if not node_ids:
         return None
 
-    queue_delay = stats["stat.node.0.amat.cxl_avg_queue_delay"]
-    access_service = stats["stat.node.0.amat.cxl_avg_access_service_time"]
-    interface_delay = stats["stat.node.0.amat.cxl_avg_interface_delay"]
-    roundtrip = stats["stat.node.0.amat.cxl_avg_roundtrip_lat"]
+    miss_weights = require_node_values(stats, node_ids, "llc.cxl_miss")
+    phase_cycles = require_node_values(stats, node_ids, "exec.phase_cycles")
+    phase_time_us = require_node_values(stats, node_ids, "exec.phase_time_us")
+    llc_avg_cxl_miss_lat = require_node_values(stats, node_ids, "amat.llc_avg_cxl_miss_lat")
+    roundtrip_values = require_node_values(stats, node_ids, "amat.cxl_avg_roundtrip_lat")
+    queue_values = require_node_values(stats, node_ids, "amat.cxl_avg_queue_delay")
+    access_service_values = require_node_values(stats, node_ids, "amat.cxl_avg_access_service_time")
+    interface_values = require_node_values(stats, node_ids, "amat.cxl_avg_interface_delay")
+    aggregate_bw_values = require_node_values(stats, node_ids, "cxl.aggregate_gbps")
+    load_lat_values = require_node_values(stats, node_ids, "amat.avg_load_issue_to_complete_lat")
+    load_lat_counts = require_node_values(stats, node_ids, "cpu.0.load_issue_to_complete_count")
+    retired_load_ops = require_node_values(stats, node_ids, "amat.retired_load_ops")
+    retired_store_ops = require_node_values(stats, node_ids, "amat.retired_store_ops")
+
+    required_groups = [
+        miss_weights,
+        phase_cycles,
+        phase_time_us,
+        llc_avg_cxl_miss_lat,
+        roundtrip_values,
+        queue_values,
+        access_service_values,
+        interface_values,
+        aggregate_bw_values,
+        load_lat_values,
+        load_lat_counts,
+        retired_load_ops,
+        retired_store_ops,
+    ]
+    if any(group is None for group in required_groups):
+        return None
+
+    assert miss_weights is not None
+    assert phase_cycles is not None
+    assert phase_time_us is not None
+    assert llc_avg_cxl_miss_lat is not None
+    assert roundtrip_values is not None
+    assert queue_values is not None
+    assert access_service_values is not None
+    assert interface_values is not None
+    assert aggregate_bw_values is not None
+    assert load_lat_values is not None
+    assert load_lat_counts is not None
+    assert retired_load_ops is not None
+    assert retired_store_ops is not None
+
+    queue_delay = weighted_average(queue_values, miss_weights)
+    access_service = weighted_average(access_service_values, miss_weights)
+    interface_delay = weighted_average(interface_values, miss_weights)
+    roundtrip = weighted_average(roundtrip_values, miss_weights)
     plotted_total = FIXED_ONCHIP_CYCLES + queue_delay + access_service + interface_delay
+    total_loads = sum(retired_load_ops)
+    total_stores = sum(retired_store_ops)
 
     return {
         "workload": stem,
         "workload_label": workload_label(stem),
         "topology": topology_label,
-        "phase_cycles": stats["stat.node.0.exec.phase_cycles"],
-        "phase_time_us": stats["stat.node.0.exec.phase_time_us"],
-        "avg_load_issue_to_complete_lat": stats["stat.node.0.amat.avg_load_issue_to_complete_lat"],
-        "load_store_ratio": stats["stat.node.0.amat.load_store_ratio"],
-        "llc_avg_cxl_miss_lat": stats["stat.node.0.amat.llc_avg_cxl_miss_lat"],
+        "node_count": len(node_ids),
+        "phase_cycles": max(phase_cycles),
+        "phase_time_us": max(phase_time_us),
+        "avg_load_issue_to_complete_lat": weighted_average(load_lat_values, load_lat_counts),
+        "load_store_ratio": (total_loads / total_stores) if total_stores > 0 else 0.0,
+        "llc_avg_cxl_miss_lat": weighted_average(llc_avg_cxl_miss_lat, miss_weights),
         "cxl_avg_roundtrip_lat": roundtrip,
         "cxl_avg_queue_delay": queue_delay,
         "cxl_avg_access_service_time": access_service,
         "cxl_avg_interface_delay": interface_delay,
-        "cxl_aggregate_gbps": stats["stat.node.0.cxl.aggregate_gbps"],
+        "cxl_aggregate_gbps": sum(aggregate_bw_values),
         "fixed_onchip_cycles": FIXED_ONCHIP_CYCLES,
         "plotted_total_cycles": plotted_total,
         "roundtrip_minus_sum_cycles": roundtrip - (queue_delay + access_service + interface_delay),
@@ -108,6 +175,7 @@ def write_summary(rows: list[dict[str, object]], out_csv: Path) -> None:
         "workload",
         "workload_label",
         "topology",
+        "node_count",
         "phase_cycles",
         "phase_time_us",
         "avg_load_issue_to_complete_lat",
@@ -154,7 +222,7 @@ def plot(rows: list[dict[str, object]], out_png: Path, out_pdf: Path) -> None:
         ("Queue Delay", "cxl_avg_queue_delay"),
     ]
 
-    fig, ax = plt.subplots(figsize=(12.0, 5.8), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(13.6, 5.8), constrained_layout=True)
     x_positions = list(range(len(workloads)))
     width = 0.34
     offsets = {
@@ -200,7 +268,8 @@ def plot(rows: list[dict[str, object]], out_png: Path, out_pdf: Path) -> None:
     ax.set_xticks(x_positions)
     ax.set_xticklabels([by_key[(workload, topology_order[0])]["workload_label"] for workload in workloads], rotation=0)
     ax.set_ylabel("Latency (cycles)")
-    ax.set_title(f"Real-Workload Remote-Miss Latency Breakdown (Fixed On-Chip = {FIXED_ONCHIP_CYCLES:.0f} cycles)")
+    node_count = int(rows[0]["node_count"]) if rows else 0
+    ax.set_title(f"Real-Workload Remote-Miss Latency Breakdown ({node_count} nodes)")
     ax.grid(True, axis="y", alpha=0.3)
 
     component_handles = [
@@ -211,9 +280,21 @@ def plot(rows: list[dict[str, object]], out_png: Path, out_pdf: Path) -> None:
         Patch(facecolor="white", edgecolor="black", hatch=hatch_by_topology[name], label=name)
         for name in topology_order
     ]
-    component_legend = ax.legend(handles=component_handles, loc="upper left", frameon=True)
+    component_legend = ax.legend(
+        handles=component_handles,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        borderaxespad=0.0,
+        frameon=True,
+    )
     ax.add_artist(component_legend)
-    ax.legend(handles=topology_handles, loc="upper right", frameon=True)
+    ax.legend(
+        handles=topology_handles,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 0.55),
+        borderaxespad=0.0,
+        frameon=True,
+    )
 
     fig.savefig(out_png, dpi=220)
     fig.savefig(out_pdf)
