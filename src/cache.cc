@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <functional>
 #include <iomanip>
 #include <numeric>
 #include <stdexcept>
@@ -48,6 +49,15 @@ bool is_load_or_rfo(access_type type)
 bool is_demand_type(access_type type)
 {
   return is_load_or_rfo(type) || type == access_type::WRITE;
+}
+
+template <typename T>
+std::vector<T> append_sort_unique(std::vector<T> lhs, const std::vector<T>& rhs)
+{
+  lhs.insert(lhs.end(), rhs.begin(), rhs.end());
+  std::sort(lhs.begin(), lhs.end(), std::less<T>{});
+  lhs.erase(std::unique(lhs.begin(), lhs.end()), lhs.end());
+  return lhs;
 }
 
 std::size_t pool_latency_bin(uint64_t cycles)
@@ -164,13 +174,8 @@ CACHE::mshr_type CACHE::mshr_type::merge(mshr_type predecessor, mshr_type succes
     return timing.roundtrip_cycles != 0 || timing.interface_cycles != 0 ||
            timing.queue_cycles != 0 || timing.access_service_cycles != 0;
   };
-  std::vector<uint64_t> merged_instr{};
-  std::vector<std::deque<response_type>*> merged_return{};
-
-  std::set_union(std::begin(predecessor.instr_depend_on_me), std::end(predecessor.instr_depend_on_me), std::begin(successor.instr_depend_on_me),
-                 std::end(successor.instr_depend_on_me), std::back_inserter(merged_instr));
-  std::set_union(std::begin(predecessor.to_return), std::end(predecessor.to_return), std::begin(successor.to_return), std::end(successor.to_return),
-                 std::back_inserter(merged_return));
+  auto merged_instr = append_sort_unique(predecessor.instr_depend_on_me, successor.instr_depend_on_me);
+  auto merged_return = append_sort_unique(predecessor.to_return, successor.to_return);
 
   mshr_type retval{(successor.type == access_type::PREFETCH) ? predecessor : successor};
 

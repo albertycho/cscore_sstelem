@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cfenv>
 #include <cmath>
+#include <functional>
 #include <fmt/core.h>
 
 #include "deadlock.h"
@@ -26,6 +27,18 @@
 #include "util/bits.h" // for lg2, bitmask
 #include "util/span.h"
 #include "util/units.h"
+
+namespace
+{
+template <typename T>
+std::vector<T> append_sort_unique(std::vector<T> lhs, const std::vector<T>& rhs)
+{
+  lhs.insert(lhs.end(), rhs.begin(), rhs.end());
+  std::sort(lhs.begin(), lhs.end(), std::less<T>{});
+  lhs.erase(std::unique(lhs.begin(), lhs.end()), lhs.end());
+  return lhs;
+}
+} // namespace
 
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd,
                                      std::size_t t_cas, std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::vector<channel_type*>&& ul,
@@ -471,26 +484,16 @@ void DRAM_CHANNEL::check_read_collision()
       }
       // backwards check
       else if (auto found = std::find_if(std::begin(RQ), rq_it, checker); found != rq_it) {
-        auto instr_copy = std::move(found->value().instr_depend_on_me);
-        auto ret_copy = std::move(found->value().to_return);
-
-        std::set_union(std::begin(instr_copy), std::end(instr_copy), std::begin(rq_it->value().instr_depend_on_me), std::end(rq_it->value().instr_depend_on_me),
-                       std::back_inserter(found->value().instr_depend_on_me));
-        std::set_union(std::begin(ret_copy), std::end(ret_copy), std::begin(rq_it->value().to_return), std::end(rq_it->value().to_return),
-                       std::back_inserter(found->value().to_return));
+        found->value().instr_depend_on_me = append_sort_unique(found->value().instr_depend_on_me, rq_it->value().instr_depend_on_me);
+        found->value().to_return = append_sort_unique(found->value().to_return, rq_it->value().to_return);
 
         rq_it->reset();
 
       }
       // forwards check
       else if (found = std::find_if(std::next(rq_it), std::end(RQ), checker); found != std::end(RQ)) {
-        auto instr_copy = std::move(found->value().instr_depend_on_me);
-        auto ret_copy = std::move(found->value().to_return);
-
-        std::set_union(std::begin(instr_copy), std::end(instr_copy), std::begin(rq_it->value().instr_depend_on_me), std::end(rq_it->value().instr_depend_on_me),
-                       std::back_inserter(found->value().instr_depend_on_me));
-        std::set_union(std::begin(ret_copy), std::end(ret_copy), std::begin(rq_it->value().to_return), std::end(rq_it->value().to_return),
-                       std::back_inserter(found->value().to_return));
+        found->value().instr_depend_on_me = append_sort_unique(found->value().instr_depend_on_me, rq_it->value().instr_depend_on_me);
+        found->value().to_return = append_sort_unique(found->value().to_return, rq_it->value().to_return);
 
         rq_it->reset();
       } else {

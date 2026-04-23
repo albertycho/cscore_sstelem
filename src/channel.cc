@@ -16,7 +16,9 @@
 
 #include "channel.h"
 
+#include <algorithm>
 #include <cassert>
+#include <functional>
 #include <fmt/core.h>
 
 //#include "cache.h"
@@ -28,6 +30,18 @@ champsim::channel::channel(std::size_t rq_size, std::size_t pq_size, std::size_t
     : RQ_SIZE(rq_size), PQ_SIZE(pq_size), WQ_SIZE(wq_size), OFFSET_BITS(offset_bits), match_offset_bits(match_offset)
 {
 }
+
+namespace
+{
+template <typename T>
+std::vector<T> append_sort_unique(std::vector<T> lhs, const std::vector<T>& rhs)
+{
+  lhs.insert(lhs.end(), rhs.begin(), rhs.end());
+  std::sort(lhs.begin(), lhs.end(), std::less<T>{});
+  lhs.erase(std::unique(lhs.begin(), lhs.end()), lhs.end());
+  return lhs;
+}
+} // namespace
 
 template <typename Iter, typename F>
 bool do_collision_for(Iter begin, Iter end, champsim::channel::request_type& packet, champsim::data::bits shamt, F&& func)
@@ -51,10 +65,7 @@ bool do_collision_for_merge(Iter begin, Iter end, champsim::channel::request_typ
 {
   return do_collision_for(begin, end, packet, shamt, [](champsim::channel::request_type& source, champsim::channel::request_type& destination) {
     destination.response_requested |= source.response_requested;
-    auto instr_copy = std::move(destination.instr_depend_on_me);
-
-    std::set_union(std::begin(instr_copy), std::end(instr_copy), std::begin(source.instr_depend_on_me), std::end(source.instr_depend_on_me),
-                   std::back_inserter(destination.instr_depend_on_me));
+    destination.instr_depend_on_me = append_sort_unique(destination.instr_depend_on_me, source.instr_depend_on_me);
   });
 }
 
