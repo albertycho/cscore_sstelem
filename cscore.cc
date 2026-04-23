@@ -86,6 +86,31 @@ double bytes_to_gbps(uint64_t bytes, uint64_t cycles, double clock_ghz) {
     return (static_cast<double>(bytes) * 8.0 * clock_ghz) / static_cast<double>(cycles);
 }
 
+std::optional<std::string> lightweight_cache_label(const std::string& name) {
+    if (name == "cpu0_L1D") {
+        return std::string("l1d");
+    }
+    if (name == "cpu0_L2C") {
+        return std::string("l2c");
+    }
+    if (name == "LLC") {
+        return std::string("llc");
+    }
+    return std::nullopt;
+}
+
+void print_cache_debug_counters(uint32_t node_id, const std::string& label, const CACHE::stats_type& st) {
+    const auto prefix = std::string("stat.node.") + std::to_string(node_id) + "." + label + ".";
+    std::cout << prefix << "mshr_merge_load_into_write = " << st.mshr_merge_load_into_write << '\n';
+    std::cout << prefix << "mshr_merge_write_into_load = " << st.mshr_merge_write_into_load << '\n';
+    std::cout << prefix << "mshr_merge_demand_into_prefetch = " << st.mshr_merge_demand_into_prefetch << '\n';
+    std::cout << prefix << "mshr_dirty_lost_on_merge = " << st.mshr_dirty_lost_on_merge << '\n';
+    std::cout << prefix << "mshr_final_type_changed = " << st.mshr_final_type_changed << '\n';
+    std::cout << prefix << "mshr_merged_demand_count = " << st.mshr_merged_demand_count << '\n';
+    std::cout << prefix << "remote_send_retry_cycles = " << st.remote_send_retry_cycles << '\n';
+    std::cout << prefix << "remote_dirty_writebacks_generated = " << st.remote_dirty_writebacks_generated << '\n';
+}
+
 MY_MEMORY_CONTROLLER::latency_function_type select_latency_fn(SST::Params& params, const char* model_key, const char* fixed_key,
                                                                int64_t default_fixed_cycles) {
     auto model = params.find<std::string>(model_key, "fixed");
@@ -745,6 +770,12 @@ namespace SST {
                     ? static_cast<double>(st.total_miss_latency_cycles) / static_cast<double>(total_demand_miss)
                     : 0.0;
 
+                if (lightweight_output_) {
+                    if (const auto label = lightweight_cache_label(cache.NAME)) {
+                        print_cache_debug_counters(node_id, *label, st);
+                    }
+                }
+
                 if (lightweight_output_ && cache.NAME == "cpu0_L2C") {
                     const auto prefix = std::string("stat.node.") + std::to_string(node_id) + ".l2c.";
                     std::cout << prefix << "total_miss = " << total_demand_miss << '\n';
@@ -798,14 +829,6 @@ namespace SST {
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_queue_delay = " << avg_pool_queue_delay << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_access_service_time = " << avg_pool_access_service_time << '\n';
                     std::cout << "stat.node." << node_id << ".amat.cxl_avg_interface_delay = " << avg_pool_interface_delay << '\n';
-                    std::cout << prefix << "mshr_merge_load_into_write = " << st.mshr_merge_load_into_write << '\n';
-                    std::cout << prefix << "mshr_merge_write_into_load = " << st.mshr_merge_write_into_load << '\n';
-                    std::cout << prefix << "mshr_merge_demand_into_prefetch = " << st.mshr_merge_demand_into_prefetch << '\n';
-                    std::cout << prefix << "mshr_dirty_lost_on_merge = " << st.mshr_dirty_lost_on_merge << '\n';
-                    std::cout << prefix << "mshr_final_type_changed = " << st.mshr_final_type_changed << '\n';
-                    std::cout << prefix << "mshr_merged_demand_count = " << st.mshr_merged_demand_count << '\n';
-                    std::cout << prefix << "remote_send_retry_cycles = " << st.remote_send_retry_cycles << '\n';
-                    std::cout << prefix << "remote_dirty_writebacks_generated = " << st.remote_dirty_writebacks_generated << '\n';
                     if (print_latency_hist_) {
                         std::cout << prefix << "miss_lat_hist_bin_ns = 10\n";
                         std::cout << prefix << "miss_lat_hist = [";
